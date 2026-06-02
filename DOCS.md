@@ -241,6 +241,7 @@ All messages use `parse_mode: HTML`.
 | `/drill` | Sends a "Generating…" ack, calls `serveContent(kind=drill, level, allowGenerate=true)` (pool-first, inline-gen on miss), returns the result. |
 | `/word` | Sends a "Finding a fresh word…" ack, calls `serveContent(kind=word, level, allowGenerate=true)`, returns the vocabulary card. |
 | `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query` and are handled by `handleCallback`. (v1.4.0) |
+| `/stats` | Sends a read-only progress summary: drills practised, words learned, active days, current & longest daily streak, level (`UserStats` / `formatStats`). (v1.5.0) |
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
@@ -850,15 +851,23 @@ Lets users tune content difficulty instead of the hard-coded "intermediate".
 
 ---
 
-## Change G — `/stats`
+## Change G — `/stats` — IMPLEMENTED in v1.5.0
 
 Engagement driver: show the user their progress.
 
-- Reads existing tables: `sent_words`, `sent_vocab`, `quiz_results`, `review_schedule`.
-- Reports: total verbs practised, total words learned, current **streak** (consecutive
-  active days), quiz accuracy, words "mastered" (reps ≥ N in spaced repetition).
-- Streak needs a per-day activity signal — derive from `sent_at` dates, or add a tiny
-  `activity(chat_id, day)` table updated on any interaction.
+- Reads existing tables only: `sent_words`, `sent_vocab`, `subscribers`. Quiz
+  accuracy and "mastered" counts are deferred until Changes D/E land those tables.
+- Reports: total verbs practised, total words learned, distinct active days,
+  current **streak** and longest streak (consecutive active days), level, and
+  member-since date.
+- The streak signal is derived from `sent_at` dates (no extra `activity` table):
+  `activityDays` unions `sent_words`/`sent_vocab`, converts each `sent_at` to the
+  app timezone, and `computeStreaks` walks the date set. The current streak anchors
+  on today, or yesterday if there's no activity yet today (so it isn't lost until a
+  full day is missed).
+
+**Implementation:** `stats.go` (`UserStats` struct, `Store.UserStats`,
+`activityDays`, `computeStreaks`, `formatStats`); `/stats` handler in `main.go`.
 
 | Command | Behaviour |
 |---|---|
@@ -941,11 +950,45 @@ A Sunday-evening recap, natural extension of the daily review.
 
 ---
 
+## Change L — `/interval` (per-user send frequency)
+
+Let each learner choose how often scheduled drills/words arrive, instead of the
+fixed 30-minute cadence.
+
+- A new `interval_minutes` column on `user_prefs` (default `30`), added via the
+  same additive `migrate()` pattern used for `content_pool.level`.
+- Constrain choices to an aligned menu — `30, 60, 120, 180, 240, 360, 480, 720`
+  minutes — so the alignment math stays exact and dividers of the day.
+- The broadcast scheduler keeps ticking at the **30-minute base granularity**, but
+  delivery becomes per-user inside the sweep:
+  - A user is **due** this slot when `minutesSinceMidnight % interval == 0`
+    (wall-clock alignment, so restarts/quiet-hours never desync — same principle
+    as `slotKind`). Intervals must be multiples of the 30-min base tick.
+  - The drill/word **alternation is per-user**, derived from that user's own slot
+    index `minutesSinceMidnight / interval` parity, so every user keeps
+    alternating regardless of their chosen interval.
+- This changes `broadcastContent` from "one global kind to everyone" to iterating
+  subscribers and computing each user's due-ness + kind from their prefs. Quiet
+  hours and the `paused` flag still apply per user.
+- `/interval` shows the current value + an inline keyboard (reusing the
+  `callback_query` infra from v1.4.0); `/interval <minutes>` sets it directly.
+
+**Planned implementation:** `interval_minutes` on `user_prefs` + migration in
+`prefs.go`/`main.go`; due-check + per-user kind in `schedule.go`; `/interval`
+handler, keyboard and callback branch in `main.go`.
+
+| Command | Behaviour |
+|---|---|
+| `/interval` | Show current send interval + inline buttons to change it. |
+| `/interval <minutes>` | Set the interval directly (must be one of the allowed values). |
+
+---
+
 ## Consolidated new tables (v3+)
 
 | Table | Purpose | Introduced by |
 |---|---|---|
-| `user_prefs` | level, paused flag, (future per-user settings) | F, H |
+| `user_prefs` | level, paused flag, interval_minutes, (future per-user settings) | F, H, L |
 | `review_schedule` | spaced-repetition state per word | D |
 | `quiz_results` | quiz answer history | E |
 | `audio_cache` | word → Telegram voice `file_id` | I |
@@ -965,9 +1008,12 @@ A Sunday-evening recap, natural extension of the daily review.
 
 1. ~~**Change F (`/level`)** & **Change H (`/pause`/`/resume`)**~~ — ✅ **DONE in v1.4.0**
    (both built on the new `user_prefs` table; `callback_query` handling landed here too).
-2. **Change G (`/stats`)** — read-only over existing data; immediate engagement value.
-3. **Change D (Spaced Repetition)** — the core learning upgrade; reuses existing history.
-4. **Change E (Quiz / Active Recall)** — adds `callback_query` handling; pairs with D to
+2. ~~**Change G (`/stats`)**~~ — ✅ **DONE in v1.5.0** (read-only over `sent_words`/
+   `sent_vocab`/`subscribers`; streak derived from `sent_at` dates).
+3. **Change L (`/interval`)** — per-user send frequency; small `user_prefs` column +
+   per-user due-check in the broadcast sweep; reuses `callback_query` infra.
+4. **Change D (Spaced Repetition)** — the core learning upgrade; reuses existing history.
+5. **Change E (Quiz / Active Recall)** — adds `callback_query` handling; pairs with D to
    feed difficulty signals.
-5. **Change J (Admin metrics)** — operational visibility once the above add moving parts.
-6. **Change I (Audio)** & **Change K (Weekly digest)** — polish features, ship last.
+6. **Change J (Admin metrics)** — operational visibility once the above add moving parts.
+7. **Change I (Audio)** & **Change K (Weekly digest)** — polish features, ship last.

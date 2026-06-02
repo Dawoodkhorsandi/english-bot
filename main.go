@@ -71,6 +71,12 @@ var Changelogs = []ChangelogEntry{
 			"• 🎚️ <b>Choose your difficulty!</b> Use /level to pick beginner, intermediate or advanced — drills and words adapt to you\n" +
 			"• ⏸️ <b>/pause</b> and ▶️ <b>/resume</b> let you stop and restart scheduled sends without losing your history (on-demand /drill and /word still work while paused)",
 	},
+	{
+		Version: "1.5.0",
+		Text: "📣 <b>What's New in v1.5.0</b>\n\n" +
+			"• 📊 <b>/stats</b> shows your progress: grammar drills practised, words learned, active days, and your current & longest <b>daily streak</b> 🔥\n" +
+			"• Keep your streak alive by practising a little every day!",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -289,6 +295,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
 			"/level — Choose your difficulty (beginner/intermediate/advanced)\n" +
+			"/stats — See your progress and streak\n" +
 			"/pause — Pause scheduled sends\n" +
 			"/resume — Resume scheduled sends\n" +
 			"/reset — Clear your practiced history\n" +
@@ -305,6 +312,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"/drill — generate a grammar drill on demand\n" +
 			"/word — generate a vocabulary word on demand\n" +
 			"/level — set difficulty: beginner, intermediate or advanced\n" +
+			"/stats — see your progress, streak and totals\n" +
 			"/pause — stop scheduled sends (on-demand still works)\n" +
 			"/resume — re-enable scheduled sends\n" +
 			"/reset — clear history and see old verbs & words again"
@@ -340,6 +348,16 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 
 	case "/level":
 		handleLevel(store, chatID, args)
+
+	case "/stats":
+		log.Printf("📊 [STATS] requested by ChatID %d.", chatID)
+		stats, err := store.UserStats(chatID)
+		if err != nil {
+			log.Printf("❌ [STATS_ERR] Could not build stats for ChatID %d: %v", chatID, err)
+			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't pull your stats right now. Please try again.")
+			return
+		}
+		_ = sendToTelegram(chatID, formatStats(stats))
 
 	case "/pause":
 		if err := store.SetPaused(chatID, true); err != nil {
@@ -381,7 +399,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 
 	default:
 		log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
-		_ = sendToTelegram(chatID, "🤖 I only understand commands. Try /drill, /word, /level or /help!")
+		_ = sendToTelegram(chatID, "🤖 I only understand commands. Try /drill, /word, /stats or /help!")
 	}
 }
 
