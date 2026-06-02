@@ -1,0 +1,21 @@
+# Build artifacts
+/english-bot
+english-bot
+
+# Git & local tooling
+.git
+.gitignore
+.idea/
+.claude/
+.DS_Store
+
+# Local data & secrets — never bake these into the image
+*.db
+*.db-shm
+*.db-wal
+subscribers.json
+subscribers.json.migrated
+.env
+
+# Docs are not needed at runtime
+DOCS.md

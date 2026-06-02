@@ -1,0 +1,17 @@
+services:
+  english-bot:
+    build: .
+    image: english-bot:latest
+    container_name: english-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persist the SQLite database (created at /data/subscribers.db) across
+      # container restarts and image rebuilds.
+      - bot-data:/data
+    # The bot makes only outbound HTTPS calls (Telegram long-poll + AI
+    # providers); no inbound ports are exposed.
+
+volumes:
+  bot-data:

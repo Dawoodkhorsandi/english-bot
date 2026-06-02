@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embed the IANA tz database so Asia/Tehran resolves without OS tzdata
 
 	_ "modernc.org/sqlite"
 )
