@@ -1,0 +1,17 @@
+# Compiled binary
+/english-bot
+
+# SQLite database & legacy data files
+*.db
+*.db-shm
+*.db-wal
+subscribers.json
+subscribers.json.migrated
+
+# Env / secrets
+.env
+
+# OS / editor cruft
+.DS_Store
+.idea/
+
