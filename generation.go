@@ -102,34 +102,49 @@ Rules:
 - Keep example sentences short (max 14 words) and natural.
 - Output the card only — no preamble, no explanation.`
 
-func buildDrillPrompt(exclude []string) string {
+func buildDrillPrompt(level string, exclude []string) string {
+	prompt := drillPromptBase + "\n\n" + levelInstruction(level)
 	if len(exclude) == 0 {
-		return drillPromptBase
+		return prompt
 	}
-	return drillPromptBase + fmt.Sprintf(
+	return prompt + fmt.Sprintf(
 		"\n\nIMPORTANT: Do NOT use any of these verbs (already practiced): %s.\nChoose a completely different everyday verb not in that list.",
 		strings.Join(exclude, ", "),
 	)
 }
 
-func buildWordPrompt(exclude []string) string {
+func buildWordPrompt(level string, exclude []string) string {
+	prompt := wordPromptBase + "\n\n" + levelInstruction(level)
 	if len(exclude) == 0 {
-		return wordPromptBase
+		return prompt
 	}
-	return wordPromptBase + fmt.Sprintf(
+	return prompt + fmt.Sprintf(
 		"\n\nIMPORTANT: Do NOT use any of these words (already sent): %s.\nChoose a completely different word not in that list.",
 		strings.Join(exclude, ", "),
 	)
 }
 
-// generateContent builds the prompt for kind, runs the provider chain, and parses
-// the term (and meaning, for words). Returns (text, term, meaning, provider, err).
-func generateContent(ctx context.Context, chain *ProviderChain, kind string, exclude []string) (text, term, meaning, provider string, err error) {
+// levelInstruction returns a difficulty directive injected into the prompt so the
+// chosen verb/word and example sentences match the user's selected level.
+func levelInstruction(level string) string {
+	switch level {
+	case levelBeginner:
+		return "DIFFICULTY: Target CEFR A1–A2 (beginner) learners. Pick a very common, simple, high-frequency word and keep all example sentences short and easy."
+	case levelAdvanced:
+		return "DIFFICULTY: Target CEFR C1–C2 (advanced) learners. Pick a sophisticated, less common word and use richer, more nuanced example sentences."
+	default:
+		return "DIFFICULTY: Target CEFR B1–B2 (intermediate) learners. Pick a moderately common, useful word with natural example sentences."
+	}
+}
+
+// generateContent builds the prompt for kind+level, runs the provider chain, and
+// parses the term (and meaning, for words). Returns (text, term, meaning, provider, err).
+func generateContent(ctx context.Context, chain *ProviderChain, kind, level string, exclude []string) (text, term, meaning, provider string, err error) {
 	var prompt string
 	if kind == kindWord {
-		prompt = buildWordPrompt(exclude)
+		prompt = buildWordPrompt(level, exclude)
 	} else {
-		prompt = buildDrillPrompt(exclude)
+		prompt = buildDrillPrompt(level, exclude)
 	}
 
 	text, provider, err = chain.Generate(ctx, prompt)

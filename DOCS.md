@@ -132,12 +132,18 @@ Primary key is `(chat_id, version)` — each version is delivered at most once p
 | `term` | `TEXT` | Lowercased verb/word the item teaches |
 | `meaning` | `TEXT` | One-line meaning (words only; empty for drills) |
 | `text` | `TEXT` | Ready-to-send HTML message |
+| `level` | `TEXT` | Difficulty: `beginner` / `intermediate` / `advanced` (added v1.4.0, default `intermediate`) |
 | `created_at` | `DATETIME` | When the item was generated |
 
-Unique constraint on `(kind, term)` — the pool never holds duplicate terms per kind.
-Index: `idx_content_pool_kind` on `(kind, created_at)`. The `poolFiller` goroutine
-keeps each kind topped up to `POOL_TARGET`; `serveContent` reads from here first and
-falls back to inline generation (commands) or the oldest pooled item (broadcasts).
+Unique constraint on `(kind, term)` — the pool never holds duplicate terms per kind
+(global across levels). Index: `idx_content_pool_kind` on `(kind, level, created_at)`.
+The `poolFiller` goroutine keeps each `(kind, level)` for every *active* level topped
+up (`POOL_TARGET` for the default level, `POOL_MIN` for others); `serveContent` reads
+from here first, filtered by the user's level, and falls back to inline generation
+(commands) or the oldest pooled item at that level (broadcasts).
+
+> **Migration:** `Store.migrate` adds the `level` column via `ALTER TABLE` on older
+> databases that predate v1.4.0 (guarded by a `PRAGMA table_info` check).
 
 #### `daily_review_delivery` (v1.3.0)
 | Column | Type | Description |
@@ -148,6 +154,18 @@ falls back to inline generation (commands) or the oldest pooled item (broadcasts
 
 Primary key is `(chat_id, review_date)` — the midnight word review is sent at most
 once per user per day.
+
+#### `user_prefs` (v1.4.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER PRIMARY KEY` | FK → subscriber chat_id |
+| `level` | `TEXT` | Difficulty, default `intermediate` (Change F) |
+| `paused` | `INTEGER` | `1` = scheduled sends paused, default `0` (Change H) |
+| `updated_at` | `DATETIME` | Last change time |
+
+Rows are created lazily via upsert (`INSERT … ON CONFLICT`) the first time a user sets
+a level or pauses; `GetPrefs` returns defaults when no row exists. Managed by the
+methods in `prefs.go`.
 
 ### Legacy Migration
 
@@ -219,12 +237,20 @@ All messages use `parse_mode: HTML`.
 | Command | Behaviour |
 |---|---|
 | `/start` | Subscribes user (idempotent). If new: baselines all changelogs as seen, notifies maintainer, sends welcome. If returning: delivers any unseen changelogs first. Always sends welcome message. |
-| `/help` | Sends usage instructions covering both grammar drills (14 tenses) and vocabulary words. |
-| `/drill` | Sends a "Generating…" ack, calls `generatePersonalizedDrill`, returns the result. |
-| `/word` | Sends a "Finding a fresh word…" ack, calls `generatePersonalizedWord`, returns the vocabulary card. |
+| `/help` | Sends usage instructions covering grammar drills (14 tenses), vocabulary words, level and pause/resume. |
+| `/drill` | Sends a "Generating…" ack, calls `serveContent(kind=drill, level, allowGenerate=true)` (pool-first, inline-gen on miss), returns the result. |
+| `/word` | Sends a "Finding a fresh word…" ack, calls `serveContent(kind=word, level, allowGenerate=true)`, returns the vocabulary card. |
+| `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query` and are handled by `handleCallback`. (v1.4.0) |
+| `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
+| `/resume` | Clears the paused flag. (v1.4.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
-| *(anything else)* | Replies with a prompt to use /drill, /word or /help. |
+| *(anything else)* | Replies with a prompt to use /drill, /word, /level or /help. |
 | *(empty text)* | Silently ignored. |
+
+> **Note:** the "Components" subsections below describe the original v1 design.
+> Behaviour changed in v1.3.0 (provider chain, content pool, quiet hours, daily
+> review) and v1.4.0 (`/level`, `/pause`, `/resume`); see the **Roadmap** sections,
+> which are marked IMPLEMENTED, for the current architecture.
 
 ---
 
@@ -718,9 +744,11 @@ double-send. `review_date` is the Tehran calendar date being recapped.
 
 # Roadmap — Future Versions (v3+)
 
-> **Status: PLANNED, later than v2.** These build on top of the v2 pool + provider
-> infrastructure. Each Change is independent and can ship on its own; suggested order
-> is given at the end. Schema additions are all additive (`CREATE TABLE IF NOT EXISTS`).
+> **Status: partially implemented.** Changes **F (`/level`)** and **H (`/pause` /
+> `/resume`)** shipped in **v1.4.0** (see their sections, marked IMPLEMENTED). The
+> remaining changes below are still planned. Each Change is independent and can ship
+> on its own; suggested order is given at the end. Schema additions are all additive
+> (`CREATE TABLE IF NOT EXISTS`).
 
 ---
 
@@ -779,7 +807,9 @@ Turns passive reading into testing, which is what actually builds recall.
 ### Wiring
 
 - Telegram updates must now also handle **`callback_query`** (button taps), not just
-  `message`. `pollTelegramUpdates` gains a branch for `update.callback_query`.
+  `message`. *(Already implemented in v1.4.0 for `/level`: `pollTelegramUpdates` has a
+  `callback_query` branch routing to `handleCallback`, plus `sendToTelegramWithKeyboard`,
+  `editMessageText` and `answerCallbackQuery` helpers — Change E reuses these.)*
 - New table `quiz_results(chat_id, word, correct, answered_at)` feeds both stats
   (Change G) and the spaced-repetition ease/interval updates (Change D).
 - A correct answer promotes the word in `review_schedule`; a wrong answer resets it.
@@ -792,22 +822,31 @@ Turns passive reading into testing, which is what actually builds recall.
 
 ---
 
-## Change F — `/level` (per-user difficulty)
+## Change F — `/level` (per-user difficulty) — IMPLEMENTED in v1.4.0
 
 Lets users tune content difficulty instead of the hard-coded "intermediate".
 
 - Levels: `beginner`, `intermediate`, `advanced`.
-- Stored on a new `user_prefs` table (see below), defaulting to `intermediate`.
-- The chosen level is injected into the drill/word prompt (e.g. "Choose a
-  {level}-appropriate word…").
-- **Pool interaction:** because the pool is shared, level-specific content needs either
-  (a) a `level` column on `content_pool` and per-level pools, or (b) on-demand generation
-  for non-default levels. Plan: add `level` to `content_pool` and have the filler keep a
-  small pool per (kind, level). Default level reuses the main pool.
+- Stored on the `user_prefs` table (see below), defaulting to `intermediate`.
+- The chosen level is injected into the drill/word prompt via `levelInstruction`
+  (`generation.go`) as a CEFR-band directive (A1–A2 / B1–B2 / C1–C2).
+- **Pool interaction (as implemented):** `content_pool` gained a `level` column.
+  The `UNIQUE(kind, term)` constraint stays global (a term lives at one level), and
+  `PoolTerms` de-dupes across all levels so the same word isn't regenerated. The
+  filler (`runRefillCycle`) tops up each `(kind, level)` for every *active* level —
+  the default level plus any level a user has selected (`Store.ActiveLevels`).
+  `poolTargetFor` keeps the full `POOL_TARGET` for the default level and the smaller
+  `POOL_MIN` for non-default levels. `serveContent`, `PooledUnseen` and
+  `PooledOldest` all filter by level; a command miss generates inline at the user's
+  level.
+
+**Implementation:** `prefs.go` (level constants, validation, `user_prefs` methods),
+`handleLevel` + `levelKeyboard` + callback handling in `main.go`.
 
 | Command | Behaviour |
 |---|---|
 | `/level` | Show current level + inline buttons to change it. |
+| `/level <beginner\|intermediate\|advanced>` | Set the level directly by argument. |
 
 ---
 
@@ -827,14 +866,18 @@ Engagement driver: show the user their progress.
 
 ---
 
-## Change H — `/pause` & `/resume`
+## Change H — `/pause` & `/resume` — IMPLEMENTED in v1.4.0
 
 Soft opt-out of broadcasts without deleting history (you opted against full unsubscribe).
 
-- Add a `paused` boolean to `user_prefs` (or `subscribers`).
-- `broadcastDrill` / `broadcastWord` / daily review / spaced-repetition all skip paused users.
-- On-demand commands still work while paused (so `/drill` ignores the flag).
+- A `paused` boolean lives on `user_prefs`.
+- `broadcastContent` and the daily review skip paused users (`Store.IsPaused` /
+  `GetPrefs`); spaced-repetition (Change D, future) should do the same.
+- On-demand commands still work while paused (so `/drill` and `/word` ignore the flag).
 - `/resume` clears the flag and confirms.
+
+**Implementation:** `Store.SetPaused` / `IsPaused` in `prefs.go`; `/pause` and
+`/resume` handlers in `main.go`; skip checks in `schedule.go`.
 
 | Command | Behaviour |
 |---|---|
@@ -920,8 +963,8 @@ A Sunday-evening recap, natural extension of the daily review.
 
 ## Suggested implementation order (v3+)
 
-1. **Change F (`/level`)** & **Change H (`/pause`/`/resume`)** — both just need the
-   `user_prefs` table and small handler/branch changes; quick wins, high user control.
+1. ~~**Change F (`/level`)** & **Change H (`/pause`/`/resume`)**~~ — ✅ **DONE in v1.4.0**
+   (both built on the new `user_prefs` table; `callback_query` handling landed here too).
 2. **Change G (`/stats`)** — read-only over existing data; immediate engagement value.
 3. **Change D (Spaced Repetition)** — the core learning upgrade; reuses existing history.
 4. **Change E (Quiz / Active Recall)** — adds `callback_query` handling; pairs with D to

@@ -127,9 +127,18 @@ func broadcastContent(ctx context.Context, chain *ProviderChain, store *Store, k
 
 	log.Printf("📢 [BROADCAST] Distributing %s to %d subscriber(s).", kind, len(chats))
 	for i, chatID := range chats {
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [BROADCAST] Could not load prefs for chat %d: %v (using defaults)", chatID, err)
+		}
+		if prefs.Paused {
+			log.Printf("⏸️  [BROADCAST] Chat %d is paused; skipping %s.", chatID, kind)
+			continue
+		}
+
 		sendPendingChangelogs(store, chatID)
 
-		text, err := serveContent(ctx, chain, store, chatID, kind, false)
+		text, err := serveContent(ctx, chain, store, chatID, kind, prefs.Level, false)
 		if err != nil {
 			log.Printf("❌ [BROADCAST] [%d/%d] %s for chat %d failed: %v", i+1, len(chats), kind, chatID, err)
 			continue
@@ -185,6 +194,10 @@ func sendDailyReview(store *Store, now time.Time) {
 	log.Printf("🌙 [REVIEW] Building review for %s (%d subscribers).", reviewDate, len(chats))
 
 	for _, chatID := range chats {
+		if store.IsPaused(chatID) {
+			continue
+		}
+
 		delivered, err := store.ReviewDelivered(chatID, reviewDate)
 		if err != nil {
 			log.Printf("⚠️  [REVIEW] Delivery check failed for chat %d: %v", chatID, err)

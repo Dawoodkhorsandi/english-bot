@@ -65,6 +65,12 @@ var Changelogs = []ChangelogEntry{
 			"• ⚡ <b>More reliable:</b> drills and words now come from several AI providers, so practice keeps flowing even if one is down\n" +
 			"• 🚀 Faster delivery thanks to a pre-generated content pool",
 	},
+	{
+		Version: "1.4.0",
+		Text: "📣 <b>What's New in v1.4.0</b>\n\n" +
+			"• 🎚️ <b>Choose your difficulty!</b> Use /level to pick beginner, intermediate or advanced — drills and words adapt to you\n" +
+			"• ⏸️ <b>/pause</b> and ▶️ <b>/resume</b> let you stop and restart scheduled sends without losing your history (on-demand /drill and /word still work while paused)",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -74,8 +80,9 @@ type Store struct {
 }
 
 type TelegramUpdate struct {
-	UpdateID int64            `json:"update_id"`
-	Message  *TelegramMessage `json:"message"`
+	UpdateID      int64                  `json:"update_id"`
+	Message       *TelegramMessage       `json:"message"`
+	CallbackQuery *TelegramCallbackQuery `json:"callback_query"`
 }
 
 type TelegramMessage struct {
@@ -85,6 +92,14 @@ type TelegramMessage struct {
 	From      *TelegramUser `json:"from"`
 }
 
+// TelegramCallbackQuery represents a tap on an inline-keyboard button.
+type TelegramCallbackQuery struct {
+	ID      string           `json:"id"`
+	From    *TelegramUser    `json:"from"`
+	Message *TelegramMessage `json:"message"`
+	Data    string           `json:"data"`
+}
+
 type TelegramChat struct {
 	ID int64 `json:"id"`
 }
@@ -92,6 +107,12 @@ type TelegramChat struct {
 type TelegramUser struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
+}
+
+// inlineButton is one button in an inline keyboard.
+type inlineButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
 }
 
 func main() {
@@ -190,10 +211,14 @@ func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store
 
 			for _, update := range updateResp.Result {
 				offset = update.UpdateID + 1
-				if update.Message != nil {
+				switch {
+				case update.Message != nil:
 					log.Printf("📩 [MESSAGE_DISPATCH] Update %d | Chat %d | Text: %q", update.UpdateID, update.Message.Chat.ID, update.Message.Text)
 					handleMessage(ctx, chain, store, update.Message)
-				} else {
+				case update.CallbackQuery != nil:
+					log.Printf("🔘 [CALLBACK_DISPATCH] Update %d | Data: %q", update.UpdateID, update.CallbackQuery.Data)
+					handleCallback(store, update.CallbackQuery)
+				default:
 					log.Printf("📝 [POLLER_SKIP] Non-message update %d. Skipping.", update.UpdateID)
 				}
 			}
@@ -215,7 +240,11 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 
 	log.Printf("🎮 [COMMAND_MATCH] %q from @%s (ID: %d)", msg.Text, username, chatID)
 
-	switch msg.Text {
+	fields := strings.Fields(msg.Text)
+	command := fields[0]
+	args := fields[1:]
+
+	switch command {
 	case "/start":
 		isNew, err := store.AddSubscriber(chatID)
 		if err != nil {
@@ -259,6 +288,9 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"📚 <b>Commands:</b>\n" +
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
+			"/level — Choose your difficulty (beginner/intermediate/advanced)\n" +
+			"/pause — Pause scheduled sends\n" +
+			"/resume — Resume scheduled sends\n" +
 			"/reset — Clear your practiced history\n" +
 			"/help — How it works"
 		_ = sendToTelegram(chatID, welcome)
@@ -269,9 +301,12 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"🎯 <b>Grammar drills</b> take one everyday verb through <b>14 tenses</b>:\n" +
 			"Simple, Continuous, Perfect, Perfect Continuous — across past, present and future — plus the First Conditional.\n\n" +
 			"📘 <b>Vocabulary words</b> give you the meaning, pronunciation, synonyms, opposites and real examples for a useful new word.\n\n" +
-			"You get one of each per hour, about 30 minutes apart.\n\n" +
+			"You get one of each per hour, about 30 minutes apart (quiet overnight).\n\n" +
 			"/drill — generate a grammar drill on demand\n" +
 			"/word — generate a vocabulary word on demand\n" +
+			"/level — set difficulty: beginner, intermediate or advanced\n" +
+			"/pause — stop scheduled sends (on-demand still works)\n" +
+			"/resume — re-enable scheduled sends\n" +
 			"/reset — clear history and see old verbs & words again"
 		_ = sendToTelegram(chatID, helpText)
 
@@ -279,7 +314,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 		log.Printf("🤖 [AI_FLOW] /drill requested by ChatID %d.", chatID)
 		_ = sendToTelegram(chatID, "🔄 <b>Generating your drill...</b>")
 
-		drill, err := serveContent(ctx, chain, store, chatID, kindDrill, true)
+		drill, err := serveContent(ctx, chain, store, chatID, kindDrill, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Generation failed for ChatID %d: %v", chatID, err)
 			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -293,7 +328,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 		log.Printf("🤖 [AI_FLOW] /word requested by ChatID %d.", chatID)
 		_ = sendToTelegram(chatID, "🔄 <b>Finding a fresh word for you...</b>")
 
-		card, err := serveContent(ctx, chain, store, chatID, kindWord, true)
+		card, err := serveContent(ctx, chain, store, chatID, kindWord, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Word generation failed for ChatID %d: %v", chatID, err)
 			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -302,6 +337,27 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 
 		log.Printf("✅ [AI_SUCCESS] Word delivered to ChatID %d.", chatID)
 		_ = sendToTelegram(chatID, card)
+
+	case "/level":
+		handleLevel(store, chatID, args)
+
+	case "/pause":
+		if err := store.SetPaused(chatID, true); err != nil {
+			log.Printf("❌ [PAUSE_ERR] Could not pause ChatID %d: %v", chatID, err)
+			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't pause right now. Please try again.")
+			return
+		}
+		log.Printf("⏸️  [PAUSE] ChatID %d paused scheduled sends.", chatID)
+		_ = sendToTelegram(chatID, "⏸️ <b>Paused.</b>\n\nYou won't receive scheduled drills or words until you send /resume. You can still use /drill and /word anytime.")
+
+	case "/resume":
+		if err := store.SetPaused(chatID, false); err != nil {
+			log.Printf("❌ [RESUME_ERR] Could not resume ChatID %d: %v", chatID, err)
+			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't resume right now. Please try again.")
+			return
+		}
+		log.Printf("▶️  [RESUME] ChatID %d resumed scheduled sends.", chatID)
+		_ = sendToTelegram(chatID, "▶️ <b>Resumed!</b>\n\nScheduled practice is back on — see you every 30 minutes (quiet hours aside).")
 
 	case "/reset":
 		log.Printf("♻️  [RESET] ChatID %d requested history wipe.", chatID)
@@ -325,8 +381,85 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 
 	default:
 		log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
-		_ = sendToTelegram(chatID, "🤖 I only understand commands. Try /drill, /word or /help!")
+		_ = sendToTelegram(chatID, "🤖 I only understand commands. Try /drill, /word, /level or /help!")
 	}
+}
+
+// handleLevel handles the /level command. With a valid argument it sets the
+// level directly; otherwise it shows the current level with inline buttons.
+func handleLevel(store *Store, chatID int64, args []string) {
+	current := store.GetLevel(chatID)
+
+	if len(args) > 0 {
+		level, ok := normalizeLevel(args[0])
+		if !ok {
+			_ = sendToTelegram(chatID, "🤔 I don't know that level. Choose <b>beginner</b>, <b>intermediate</b> or <b>advanced</b>.")
+			return
+		}
+		if err := store.SetLevel(chatID, level); err != nil {
+			log.Printf("❌ [LEVEL_ERR] Could not set level for ChatID %d: %v", chatID, err)
+			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't change your level right now. Please try again.")
+			return
+		}
+		log.Printf("🎚️  [LEVEL] ChatID %d set level to %s.", chatID, level)
+		_ = sendToTelegram(chatID, fmt.Sprintf("✅ Difficulty set to <b>%s</b>. New drills and words will match it.", levelLabel(level)))
+		return
+	}
+
+	keyboard := levelKeyboard(current)
+	text := fmt.Sprintf(
+		"🎚️ <b>Difficulty level</b>\n\nYour current level is <b>%s</b>.\nTap a button to change it:",
+		levelLabel(current),
+	)
+	if err := sendToTelegramWithKeyboard(chatID, text, keyboard); err != nil {
+		log.Printf("❌ [LEVEL_ERR] Could not send level keyboard to ChatID %d: %v", chatID, err)
+	}
+}
+
+// levelKeyboard builds a one-row inline keyboard of the three levels, marking the
+// current one with a check.
+func levelKeyboard(current string) [][]inlineButton {
+	var row []inlineButton
+	for _, l := range allLevels {
+		label := levelLabel(l)
+		if l == current {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: "level:" + l})
+	}
+	return [][]inlineButton{row}
+}
+
+// handleCallback processes inline-keyboard taps (currently level selection).
+func handleCallback(store *Store, cb *TelegramCallbackQuery) {
+	if cb.Message == nil {
+		_ = answerCallbackQuery(cb.ID, "")
+		return
+	}
+	chatID := cb.Message.Chat.ID
+
+	if strings.HasPrefix(cb.Data, "level:") {
+		level, ok := normalizeLevel(strings.TrimPrefix(cb.Data, "level:"))
+		if !ok {
+			_ = answerCallbackQuery(cb.ID, "Unknown level")
+			return
+		}
+		if err := store.SetLevel(chatID, level); err != nil {
+			log.Printf("❌ [LEVEL_ERR] Could not set level for ChatID %d: %v", chatID, err)
+			_ = answerCallbackQuery(cb.ID, "Could not save, try again")
+			return
+		}
+		log.Printf("🎚️  [LEVEL] ChatID %d set level to %s (via button).", chatID, level)
+		_ = answerCallbackQuery(cb.ID, "Level set to "+levelLabel(level))
+		_ = editMessageText(chatID, cb.Message.MessageID,
+			fmt.Sprintf("🎚️ <b>Difficulty level</b>\n\nDifficulty set to <b>%s</b>. New drills and words will match it.", levelLabel(level)),
+			levelKeyboard(level),
+		)
+		return
+	}
+
+	log.Printf("ℹ️  [CALLBACK_UNHANDLED] Unknown callback data %q from ChatID %d.", cb.Data, chatID)
+	_ = answerCallbackQuery(cb.ID, "")
 }
 
 func sendToTelegram(chatID int64, text string) error {
@@ -352,6 +485,55 @@ func sendToTelegram(chatID int64, text string) error {
 	}
 
 	return nil
+}
+
+// telegramPost marshals payload and POSTs it to the given Bot API method.
+func telegramPost(method string, payload map[string]interface{}) error {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", TelegramBotToken, method)
+	jsonPayload, _ := json.Marshal(payload)
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("telegram %s returned status %d: %s", method, resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// sendToTelegramWithKeyboard sends an HTML message with an inline keyboard.
+func sendToTelegramWithKeyboard(chatID int64, text string, keyboard [][]inlineButton) error {
+	log.Printf("➔ [HTTP_POST] sendMessage(+keyboard) to ChatID %d", chatID)
+	return telegramPost("sendMessage", map[string]interface{}{
+		"chat_id":      chatID,
+		"text":         text,
+		"parse_mode":   "HTML",
+		"reply_markup": map[string]interface{}{"inline_keyboard": keyboard},
+	})
+}
+
+// editMessageText edits an existing message's text and inline keyboard in place.
+func editMessageText(chatID, messageID int64, text string, keyboard [][]inlineButton) error {
+	return telegramPost("editMessageText", map[string]interface{}{
+		"chat_id":      chatID,
+		"message_id":   messageID,
+		"text":         text,
+		"parse_mode":   "HTML",
+		"reply_markup": map[string]interface{}{"inline_keyboard": keyboard},
+	})
+}
+
+// answerCallbackQuery acknowledges a button tap, optionally showing a toast.
+func answerCallbackQuery(callbackID, text string) error {
+	payload := map[string]interface{}{"callback_query_id": callbackID}
+	if text != "" {
+		payload["text"] = text
+	}
+	return telegramPost("answerCallbackQuery", payload)
 }
 
 // sendPendingChangelogs delivers any changelog entries the user has not yet
@@ -420,15 +602,21 @@ func openStore(path string) (*Store, error) {
 		term       TEXT    NOT NULL,
 		meaning    TEXT    DEFAULT '',
 		text       TEXT    NOT NULL,
+		level      TEXT    NOT NULL DEFAULT 'intermediate',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE (kind, term)
 	);
-	CREATE INDEX IF NOT EXISTS idx_content_pool_kind ON content_pool(kind, created_at);
 	CREATE TABLE IF NOT EXISTS daily_review_delivery (
 		chat_id     INTEGER NOT NULL,
 		review_date TEXT    NOT NULL,
 		sent_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, review_date)
+	);
+	CREATE TABLE IF NOT EXISTS user_prefs (
+		chat_id    INTEGER PRIMARY KEY,
+		level      TEXT    NOT NULL DEFAULT 'intermediate',
+		paused     INTEGER NOT NULL DEFAULT 0,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`
 	if _, err := db.Exec(schema); err != nil {
@@ -436,14 +624,64 @@ func openStore(path string) (*Store, error) {
 	}
 
 	store := &Store{db: db}
+	if err := store.migrate(); err != nil {
+		return nil, err
+	}
 	store.migrateLegacyJSON()
 
-	log.Println("💾 [DB] SQLite store ready (subscribers + per-user sent-word history).")
+	log.Println("💾 [DB] SQLite store ready (subscribers, history, content pool, prefs).")
 	return store, nil
 }
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// migrate applies additive column migrations to pre-existing databases so older
+// deployments pick up new columns without losing data.
+func (s *Store) migrate() error {
+	// content_pool.level was added in v1.4.0; older DBs lack the column.
+	if !s.columnExists("content_pool", "level") {
+		log.Println("💾 [DB_MIGRATE] Adding content_pool.level column...")
+		if _, err := s.db.Exec(
+			"ALTER TABLE content_pool ADD COLUMN level TEXT NOT NULL DEFAULT 'intermediate'",
+		); err != nil {
+			return err
+		}
+	}
+	// The level-aware index is created here (after the column is guaranteed to
+	// exist) so it works on both fresh and pre-v1.4.0 databases.
+	if _, err := s.db.Exec(
+		"CREATE INDEX IF NOT EXISTS idx_content_pool_kind ON content_pool(kind, level, created_at)",
+	); err != nil {
+		return err
+	}
+	return nil
+}
+
+// columnExists reports whether a table has a column with the given name.
+func (s *Store) columnExists(table, column string) bool {
+	rows, err := s.db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			name, typ  string
+			notNull    int
+			dfltValue  any
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dfltValue, &primaryKey); err != nil {
+			return false
+		}
+		if name == column {
+			return true
+		}
+	}
+	return false
 }
 
 // migrateLegacyJSON imports subscribers from the old subscribers.json file (if
