@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"google.golang.org/genai"
 	_ "modernc.org/sqlite"
 )
 
@@ -31,6 +30,41 @@ const (
 	dbFile       = "subscribers.db"
 	legacyDBFile = "subscribers.json"
 )
+
+// ChangelogEntry holds the version tag and the HTML-formatted message that is
+// delivered once to each subscriber who hasn't seen it yet.
+type ChangelogEntry struct {
+	Version string
+	Text    string
+}
+
+// Changelogs is the append-only release history. Add a new entry on each
+// deployment; existing subscribers receive it on their next broadcast or /start.
+var Changelogs = []ChangelogEntry{
+	{
+		Version: "1.1.0",
+		Text: "📣 <b>What's New</b>\n\n" +
+			"• Drills now cover <b>14 tenses</b> — including Past Perfect Continuous, Future Perfect Continuous, and the First Conditional\n" +
+			"• Messages use richer formatting for easier reading\n" +
+			"• Your practiced-verb history keeps every drill fresh — use /reset to start over",
+	},
+	{
+		Version: "1.2.0",
+		Text: "📣 <b>What's New in v1.2.0</b>\n\n" +
+			"• 📘 <b>Vocabulary words!</b> Alongside grammar drills, you'll now get useful words with meaning, pronunciation, synonyms, opposites and examples\n" +
+			"• You now receive practice <b>every 30 minutes</b> — one grammar drill and one vocabulary word per hour\n" +
+			"• New /word command to get a vocabulary word on demand\n" +
+			"• /reset now clears both your verb and word history",
+	},
+	{
+		Version: "1.3.0",
+		Text: "📣 <b>What's New in v1.3.0</b>\n\n" +
+			"• 🌙 <b>Quiet nights:</b> no messages between midnight and 9 AM (Tehran time) — rest easy\n" +
+			"• 🛌 <b>Bedtime review:</b> at midnight you'll get a recap of the day's words with quick meanings\n" +
+			"• ⚡ <b>More reliable:</b> drills and words now come from several AI providers, so practice keeps flowing even if one is down\n" +
+			"• 🚀 Faster delivery thanks to a pre-generated content pool",
+	},
+}
 
 // Store wraps the SQLite connection used to persist subscribers and the
 // per-user history of verbs that have already been sent.
@@ -60,54 +94,39 @@ type TelegramUser struct {
 }
 
 func main() {
-	log.Println("⚙️  [INIT] Initializing Telegram Grammar Muscle Memory Bot...")
+	log.Println("⚙️  [INIT] Initializing Telegram English Muscle Memory Bot...")
 
-	// Mask and print tokens for debug safety validation
 	log.Printf("⚙️  [CONFIG] Telegram Token Loaded: %t (Length: %d)", TelegramBotToken != "YOUR_TELEGRAM_BOT_TOKEN" && TelegramBotToken != "", len(TelegramBotToken))
-	log.Printf("⚙️  [CONFIG] Gemini API Key Loaded: %t (Length: %d)", GeminiAPIKey != "YOUR_GEMINI_API_KEY" && GeminiAPIKey != "", len(GeminiAPIKey))
 	log.Printf("⚙️  [CONFIG] Maintainer Chat ID Target: %s", MaintainerChatID)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 1. Initialize Gemini Client with correct modern ClientConfig matching modern SDK syntax
-	log.Println("⚙️  [INIT] Establishing connection to Google GenAI platform...")
-	aiClient, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: GeminiAPIKey})
-	if err != nil {
-		log.Fatalf("❌ [CRITICAL] Failed to initialize Gemini client: %v", err)
-	}
-	log.Println("✅ [INIT] Google GenAI Client ready.")
+	loadLocation()
 
-	// 2. Open SQLite store (subscribers + per-user sent-word history)
+	log.Println("⚙️  [INIT] Building AI provider chain...")
+	chain := newProviderChain(ctx)
+	if !chain.HasAny() {
+		log.Println("⚠️  [INIT] No AI providers enabled. Set at least one provider API key (e.g. GEMINI_API_KEY).")
+	}
+
 	store, err := openStore(dbFile)
 	if err != nil {
 		log.Fatalf("❌ [CRITICAL] Failed to initialize SQLite store: %v", err)
 	}
 	defer store.Close()
 
-	// 3. Start Hourly Ticker for Broadcasts
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
+	// Background workers (v2):
+	//   1. poolFiller keeps the pre-generated content pool stocked.
+	//   2. broadcast scheduler fans pooled content out every 30 min (quiet-hour aware).
+	//   3. daily review scheduler sends a bedtime word recap at local midnight.
+	go poolFiller(ctx, chain, store)
+	go runBroadcastScheduler(ctx, chain, store)
+	go runDailyReviewScheduler(ctx, store)
 
-	go func() {
-		log.Println("⏰ [SYSTEM] Hourly background broadcast ticker routine started.")
-		for {
-			select {
-			case <-ticker.C:
-				log.Println("⏰ [TIMER] 1 Hour elapsed. Triggering automatic distribution cycle...")
-				broadcastDrill(ctx, aiClient, store)
-			case <-ctx.Done():
-				log.Println("⏰ [TIMER] Broadcast loop context cancelled. Exiting routine.")
-				return
-			}
-		}
-	}()
-
-	// 4. Start long polling for /commands
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
-	go pollTelegramUpdates(ctx, aiClient, store)
+	go pollTelegramUpdates(ctx, chain, store)
 
-	// Graceful shutdown listener
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
 
@@ -116,67 +135,9 @@ func main() {
 	log.Printf("🛑 [SYSTEM] Shutdown intercept caught OS Signal: %v. Cleaning tasks...", sig)
 }
 
-func broadcastDrill(ctx context.Context, aiClient *genai.Client, store *Store) {
-	chats, err := store.Subscribers()
-	if err != nil {
-		log.Printf("❌ [BROADCAST_ERR] Could not read subscriber pool from store: %v", err)
-		return
-	}
-
-	subscriberCount := len(chats)
-	log.Printf("📢 [BROADCAST] Active target pool size: %d subscriber nodes.", subscriberCount)
-	if subscriberCount == 0 {
-		log.Println("📢 [BROADCAST] Queue empty. Skipping execution pipeline.")
-		return
-	}
-
-	log.Printf("📢 [BROADCAST] Starting fan-out personalized distribution sequence across %d targets...", len(chats))
-	for index, chatID := range chats {
-		log.Printf("➔ [SENDING] Index [%d/%d] preparing unique drill for ChatID: %d", index+1, subscriberCount, chatID)
-
-		drillText, err := generatePersonalizedDrill(ctx, aiClient, store, chatID)
-		if err != nil {
-			log.Printf("❌ [BROADCAST_ERR] Could not generate drill for target %d: %v", chatID, err)
-			continue
-		}
-
-		if err := sendToTelegram(chatID, drillText); err != nil {
-			log.Printf("❌ [SEND_ERR] Failed transmission node packet target %d: %v", chatID, err)
-		}
-	}
-	log.Println("✅ [BROADCAST] Finished out broadcast stream sweep updates cycle.")
-}
-
-// generatePersonalizedDrill produces a drill for a single user that avoids any
-// verb already sent to that user, then records the newly used verb.
-func generatePersonalizedDrill(ctx context.Context, aiClient *genai.Client, store *Store, chatID int64) (string, error) {
-	sentWords, err := store.SentWords(chatID)
-	if err != nil {
-		log.Printf("⚠️  [HISTORY] Could not load sent-word history for %d: %v (continuing without exclusions)", chatID, err)
-	}
-	log.Printf("🧾 [HISTORY] ChatID %d has %d previously sent verbs to exclude.", chatID, len(sentWords))
-
-	drillText, verb, err := generateGeminiDrill(ctx, aiClient, sentWords)
-	if err != nil {
-		return "", err
-	}
-
-	if verb != "" {
-		if err := store.RecordSentWord(chatID, verb); err != nil {
-			log.Printf("⚠️  [HISTORY] Failed to record verb %q for chat %d: %v", verb, chatID, err)
-		} else {
-			log.Printf("🧾 [HISTORY] Recorded verb %q for ChatID %d.", verb, chatID)
-		}
-	} else {
-		log.Printf("⚠️  [HISTORY] Could not parse a verb from the generated drill for ChatID %d; nothing recorded.", chatID)
-	}
-
-	return drillText, nil
-}
-
-func pollTelegramUpdates(ctx context.Context, aiClient *genai.Client, store *Store) {
+func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store) {
 	var offset int64 = 0
-	client := &http.Client{Timeout: 35 * time.Second} // Long poll safety margin timeout
+	client := &http.Client{Timeout: 35 * time.Second}
 
 	log.Println("📡 [POLLER] Thread loop listening. Long-polling via Telegram Gateway started.")
 	for {
@@ -190,7 +151,7 @@ func pollTelegramUpdates(ctx context.Context, aiClient *genai.Client, store *Sto
 			log.Printf("📡 [POLLER_REQ] Requesting updates from endpoint gateway. Current Offset pointer: %d", offset)
 			resp, err := client.Get(url)
 			if err != nil {
-				log.Printf("❌ [POLLER_NET_ERR] Network socket error connecting to Telegram API: %v. Retrying connection loop in 5 seconds...", err)
+				log.Printf("❌ [POLLER_NET_ERR] Network socket error connecting to Telegram API: %v. Retrying in 5 seconds...", err)
 				time.Sleep(5 * time.Second)
 				continue
 			}
@@ -210,38 +171,38 @@ func pollTelegramUpdates(ctx context.Context, aiClient *genai.Client, store *Sto
 			}
 
 			if err := json.Unmarshal(body, &updateResp); err != nil {
-				log.Printf("❌ [POLLER_JSON_ERR] Unmarshal exception structure. Source raw: %s. Error message context: %v", string(body), err)
+				log.Printf("❌ [POLLER_JSON_ERR] Unmarshal exception. Source raw: %s. Error: %v", string(body), err)
 				time.Sleep(2 * time.Second)
 				continue
 			}
 
 			if !updateResp.Ok {
-				log.Printf("❌ [TELEGRAM_API_REJECT] Server false execution return status. Response Code payload reason: %s", updateResp.Description)
+				log.Printf("❌ [TELEGRAM_API_REJECT] Server returned ok=false. Reason: %s", updateResp.Description)
 				time.Sleep(5 * time.Second)
 				continue
 			}
 
 			updateCount := len(updateResp.Result)
 			if updateCount > 0 {
-				log.Printf("📥 [POLLER_INBOUND] Received packet batch stream container containing (%d) updates blocks.", updateCount)
+				log.Printf("📥 [POLLER_INBOUND] Received batch of %d update(s).", updateCount)
 			}
 
 			for _, update := range updateResp.Result {
 				offset = update.UpdateID + 1
 				if update.Message != nil {
-					log.Printf("📩 [MESSAGE_DISPATCH] Parsing message update index: %d | Chat ID: %d | Content: %q", update.UpdateID, update.Message.Chat.ID, update.Message.Text)
-					handleMessage(ctx, aiClient, store, update.Message)
+					log.Printf("📩 [MESSAGE_DISPATCH] Update %d | Chat %d | Text: %q", update.UpdateID, update.Message.Chat.ID, update.Message.Text)
+					handleMessage(ctx, chain, store, update.Message)
 				} else {
-					log.Printf("📝 [POLLER_SKIP] Received non-message telemetry block event update index: %d. Moving forward.", update.UpdateID)
+					log.Printf("📝 [POLLER_SKIP] Non-message update %d. Skipping.", update.UpdateID)
 				}
 			}
 		}
 	}
 }
 
-func handleMessage(ctx context.Context, aiClient *genai.Client, store *Store, msg *TelegramMessage) {
+func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg *TelegramMessage) {
 	if msg.Text == "" {
-		log.Printf("ℹ️  [ROUTER] Ignoring incoming request message tracking ID %d. Text block is empty.", msg.MessageID)
+		log.Printf("ℹ️  [ROUTER] Ignoring empty message ID %d.", msg.MessageID)
 		return
 	}
 
@@ -251,7 +212,7 @@ func handleMessage(ctx context.Context, aiClient *genai.Client, store *Store, ms
 		username = msg.From.Username
 	}
 
-	log.Printf("🎮 [COMMAND_MATCH] Routing text expression string: %q evaluated from User: @%s (ID: %d)", msg.Text, username, chatID)
+	log.Printf("🎮 [COMMAND_MATCH] %q from @%s (ID: %d)", msg.Text, username, chatID)
 
 	switch msg.Text {
 	case "/start":
@@ -260,147 +221,111 @@ func handleMessage(ctx context.Context, aiClient *genai.Client, store *Store, ms
 			log.Printf("❌ [REGISTRATION_ERR] Failed to persist subscriber %d: %v", chatID, err)
 		}
 
-		log.Printf("💾 [REGISTRATION] DB Subscriber Lookup Evaluation -> Existing User status matches: %t", !isNew)
+		log.Printf("💾 [REGISTRATION] isNew=%t for ChatID %d", isNew, chatID)
 
 		if isNew {
-			log.Printf("🎉 [NEW_USER] Stored system state modification commit. Triggering maintainer trace notifications...")
+			log.Printf("🎉 [NEW_USER] New subscriber %d. Notifying maintainer...", chatID)
+
+			// Mark every existing changelog as seen so new users only receive
+			// notes for versions released after they joined.
+			for _, entry := range Changelogs {
+				if err := store.MarkChangelogSeen(chatID, entry.Version); err != nil {
+					log.Printf("⚠️  [CHANGELOG] Could not baseline v%s for new user %d: %v", entry.Version, chatID, err)
+				}
+			}
 
 			fromID := chatID
 			if msg.From != nil {
 				fromID = msg.From.ID
 			}
-			maintainerMsg := fmt.Sprintf(`🎉 *New User Joined!*
-*ID:* %d
-*Username:* @%s`, fromID, username)
+			maintainerMsg := fmt.Sprintf("<b>🎉 New User Joined!</b>\n<b>ID:</b> %d\n<b>Username:</b> @%s", fromID, username)
 
 			mID, parseErr := strconv.ParseInt(MaintainerChatID, 10, 64)
 			if parseErr != nil {
-				log.Printf("❌ [PARSE_ERR] Config error value tracking MaintainerChatID '%s': %v", MaintainerChatID, parseErr)
+				log.Printf("❌ [PARSE_ERR] Invalid MaintainerChatID %q: %v", MaintainerChatID, parseErr)
 			} else {
-				log.Printf("➔ [NOTIFY_MAINTAINER] Routing new profile analytics metrics registration target ID: %d", mID)
 				_ = sendToTelegram(mID, maintainerMsg)
 			}
+		} else {
+			// Returning user — deliver any changelogs they haven't seen yet.
+			sendPendingChangelogs(store, chatID)
 		}
 
-		welcome := "👋 *Welcome to English Muscle Memory Bot!*\n\nI will send you a practical grammar verb drill every hour automatically.\n\n📚 *Available Commands:*\n/drill - Get a practice drill right now\n/reset - Clear your practiced-verb history\n/help - View explanation rules"
+		welcome := "👋 <b>Welcome to English Muscle Memory Bot!</b>\n\n" +
+			"Every 30 minutes I send you something to practice — alternating between:\n" +
+			"• 🎯 a <b>grammar drill</b> (one verb across 14 tenses)\n" +
+			"• 📘 a <b>vocabulary word</b> (meaning, pronunciation, synonyms, opposites & examples)\n\n" +
+			"📚 <b>Commands:</b>\n" +
+			"/drill — Get a grammar drill right now\n" +
+			"/word — Get a vocabulary word right now\n" +
+			"/reset — Clear your practiced history\n" +
+			"/help — How it works"
 		_ = sendToTelegram(chatID, welcome)
 
 	case "/help":
-		helpText := "💡 *How Muscle Memory Practice Works:*\n\nDon't just think about rules—say the sentences out loud! Every hour I will send a new verb timeline. Read each sentence clear and fast to build subconscious natural speaking instincts.\n\nUse /drill to generate a custom one on demand.\nUse /reset to clear your practiced-verb history and start fresh."
+		helpText := "💡 <b>How Muscle Memory Practice Works</b>\n\n" +
+			"Don't just read — <b>say everything out loud!</b> Repeating correct sentences and new words fast builds the subconscious instincts you need for natural speech.\n\n" +
+			"🎯 <b>Grammar drills</b> take one everyday verb through <b>14 tenses</b>:\n" +
+			"Simple, Continuous, Perfect, Perfect Continuous — across past, present and future — plus the First Conditional.\n\n" +
+			"📘 <b>Vocabulary words</b> give you the meaning, pronunciation, synonyms, opposites and real examples for a useful new word.\n\n" +
+			"You get one of each per hour, about 30 minutes apart.\n\n" +
+			"/drill — generate a grammar drill on demand\n" +
+			"/word — generate a vocabulary word on demand\n" +
+			"/reset — clear history and see old verbs & words again"
 		_ = sendToTelegram(chatID, helpText)
 
 	case "/drill":
-		log.Printf("🤖 [AI_FLOW] Direct interaction `/drill` requested manually by user node ID: %d. Calling model inference...", chatID)
-		_ = sendToTelegram(chatID, "🔄 *Generating your custom verb drill...*")
+		log.Printf("🤖 [AI_FLOW] /drill requested by ChatID %d.", chatID)
+		_ = sendToTelegram(chatID, "🔄 <b>Generating your drill...</b>")
 
-		drill, err := generatePersonalizedDrill(ctx, aiClient, store, chatID)
+		drill, err := serveContent(ctx, chain, store, chatID, kindDrill, true)
 		if err != nil {
-			log.Printf("❌ [AI_ERR] Dynamic runtime inference model query drop failure on chat node ID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reach Gemini right now. Please try again.")
+			log.Printf("❌ [AI_ERR] Generation failed for ChatID %d: %v", chatID, err)
+			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
 			return
 		}
 
-		log.Printf("✅ [AI_SUCCESS] Returning complete text execution packet to user node ID: %d", chatID)
+		log.Printf("✅ [AI_SUCCESS] Drill delivered to ChatID %d.", chatID)
 		_ = sendToTelegram(chatID, drill)
 
-	case "/reset":
-		log.Printf("♻️  [RESET] User node ID: %d requested a history wipe. Clearing sent-word records...", chatID)
-		cleared, err := store.ResetSentWords(chatID)
+	case "/word":
+		log.Printf("🤖 [AI_FLOW] /word requested by ChatID %d.", chatID)
+		_ = sendToTelegram(chatID, "🔄 <b>Finding a fresh word for you...</b>")
+
+		card, err := serveContent(ctx, chain, store, chatID, kindWord, true)
 		if err != nil {
-			log.Printf("❌ [RESET_ERR] Failed to clear history for chat node ID %d: %v", chatID, err)
+			log.Printf("❌ [AI_ERR] Word generation failed for ChatID %d: %v", chatID, err)
+			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
+			return
+		}
+
+		log.Printf("✅ [AI_SUCCESS] Word delivered to ChatID %d.", chatID)
+		_ = sendToTelegram(chatID, card)
+
+	case "/reset":
+		log.Printf("♻️  [RESET] ChatID %d requested history wipe.", chatID)
+		clearedVerbs, err := store.ResetSentWords(chatID)
+		if err != nil {
+			log.Printf("❌ [RESET_ERR] Failed to clear verb history for ChatID %d: %v", chatID, err)
+			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reset your history right now. Please try again.")
+			return
+		}
+		clearedWords, err := store.ResetSentVocab(chatID)
+		if err != nil {
+			log.Printf("❌ [RESET_ERR] Failed to clear vocab history for ChatID %d: %v", chatID, err)
 			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reset your history right now. Please try again.")
 			return
 		}
 
-		log.Printf("✅ [RESET] Cleared %d stored verbs for user node ID: %d", cleared, chatID)
-		_ = sendToTelegram(chatID, fmt.Sprintf("♻️ *History reset!*\n\nI cleared *%d* previously practiced verbs. You may now see them again in future drills.", cleared))
+		log.Printf("✅ [RESET] Cleared %d verbs and %d words for ChatID %d.", clearedVerbs, clearedWords, chatID)
+		_ = sendToTelegram(chatID, fmt.Sprintf(
+			"♻️ <b>History reset!</b>\n\nCleared <b>%d</b> practiced verbs and <b>%d</b> vocabulary words. You may see them again in future sends.", clearedVerbs, clearedWords,
+		))
 
 	default:
-		log.Printf("ℹ️  [ROUTER_UNHANDLED] Received unstructured expression sequence data block: %q. Dismissing pattern payload execution.", msg.Text)
-		_ = sendToTelegram(chatID, "🤖 I only understand commands right now. Try typing /drill or /help!")
+		log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
+		_ = sendToTelegram(chatID, "🤖 I only understand commands. Try /drill, /word or /help!")
 	}
-}
-
-// generateGeminiDrill queries Gemini 2.5 Flash with a robust Exponential Backoff Retry engine.
-// excludeVerbs is a list of verbs already sent to the target user; the model is
-// instructed to avoid them. It returns the drill text and the verb that was used.
-func generateGeminiDrill(ctx context.Context, client *genai.Client, excludeVerbs []string) (string, string, error) {
-	exclusionClause := ""
-	if len(excludeVerbs) > 0 {
-		exclusionClause = fmt.Sprintf("\n\nIMPORTANT: Do NOT use any of these verbs (they were already practiced): %s.\nPick a different, fresh everyday verb that is NOT in that list.", strings.Join(excludeVerbs, ", "))
-	}
-
-	prompt := `Select ONE random, useful everyday English verb. 
-Generate a "Grammar Muscle Memory Drill" exactly like this structure:
-
-**Verb of the Hour:** [Verb]
-* **Routine (Simple Present):** [Example sentence]
-* **Right Now (Present Continuous):** [Example sentence]
-* **The Finished Past (Simple Past):** [Example sentence]
-* **Past Progress (Past Continuous):** [Example sentence]
-* **The Future Plan (Be going to):** [Example sentence]
-* **Life Experience / Duration (Present Perfect):** [Example sentence]
-
-Keep the sentences natural, short, and practical for daily conversations.` + exclusionClause
-
-	maxRetries := 3
-	backoff := 2 * time.Second
-
-	for i := 0; i < maxRetries; i++ {
-		log.Printf("🧠 [GEMINI_API_CALL] Dispatching context options to gemini-2.5-flash (Attempt %d/%d, exclusions: %d)...", i+1, maxRetries, len(excludeVerbs))
-
-		resp, err := client.Models.GenerateContent(ctx, "gemini-2.5-flash", genai.Text(prompt), nil)
-		if err == nil {
-			if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil && len(resp.Candidates[0].Content.Parts) > 0 {
-				text := resp.Candidates[0].Content.Parts[0].Text
-				if strings.TrimSpace(text) != "" {
-					verb := parseVerb(text)
-					log.Printf("🧠 [GEMINI_API_RESPONSE] Content response chunk returned successfully. Parsed verb: %q", verb)
-					return text, verb, nil
-				}
-			}
-		}
-
-		log.Printf("⚠️  [GEMINI_RETRY] Attempt %d failed or returned empty: %v. Retrying in %v...", i+1, err, backoff)
-
-		select {
-		case <-time.After(backoff):
-			backoff *= 2 // Double the sleep penalty delay for next execution loop (2s -> 4s -> 8s)
-		case <-ctx.Done():
-			return "", "", ctx.Err()
-		}
-	}
-
-	return "", "", fmt.Errorf("gemini platform remained unavailable after %d retry attempts", maxRetries)
-}
-
-// parseVerb extracts the verb from the "Verb of the Hour:" line of a drill so it
-// can be stored as part of the user's history.
-func parseVerb(drill string) string {
-	for _, line := range strings.Split(drill, "\n") {
-		lower := strings.ToLower(line)
-		if !strings.Contains(lower, "verb of the hour") {
-			continue
-		}
-		idx := strings.Index(line, ":")
-		if idx == -1 {
-			continue
-		}
-		verb := line[idx+1:]
-		// Strip markdown emphasis, brackets and surrounding punctuation/whitespace.
-		verb = strings.Trim(verb, " *_`[]()\t\r")
-		verb = strings.TrimSpace(verb)
-		if verb == "" {
-			continue
-		}
-		// Keep only the first token (the verb itself) and normalise case.
-		if fields := strings.Fields(verb); len(fields) > 0 {
-			verb = fields[0]
-		}
-		verb = strings.Trim(verb, " *_`[]().,!?")
-		return strings.ToLower(verb)
-	}
-	return ""
 }
 
 func sendToTelegram(chatID int64, text string) error {
@@ -408,12 +333,12 @@ func sendToTelegram(chatID int64, text string) error {
 	payload := map[string]interface{}{
 		"chat_id":    chatID,
 		"text":       text,
-		"parse_mode": "Markdown",
+		"parse_mode": "HTML",
 	}
 
 	jsonPayload, _ := json.Marshal(payload)
 
-	log.Printf("➔ [HTTP_POST] Target URL: %s | Outbound payload byte length: %d", fmt.Sprintf(".../bot%s/sendMessage", TelegramBotToken[:5]), len(jsonPayload))
+	log.Printf("➔ [HTTP_POST] sendMessage to ChatID %d | payload %d bytes", chatID, len(jsonPayload))
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return err
@@ -422,10 +347,30 @@ func sendToTelegram(chatID int64, text string) error {
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("telegram returned status code: %d | Raw API response: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("telegram returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
+}
+
+// sendPendingChangelogs delivers any changelog entries the user has not yet
+// seen and marks them as delivered immediately after each successful send.
+func sendPendingChangelogs(store *Store, chatID int64) {
+	unseen, err := store.UnseenChangelogs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [CHANGELOG] Could not fetch unseen changelogs for ChatID %d: %v", chatID, err)
+		return
+	}
+	for _, entry := range unseen {
+		if err := sendToTelegram(chatID, entry.Text); err != nil {
+			log.Printf("❌ [CHANGELOG] Failed to deliver v%s to ChatID %d: %v", entry.Version, chatID, err)
+			continue
+		}
+		if err := store.MarkChangelogSeen(chatID, entry.Version); err != nil {
+			log.Printf("⚠️  [CHANGELOG] Could not mark v%s seen for ChatID %d: %v", entry.Version, chatID, err)
+		}
+		log.Printf("📣 [CHANGELOG] Delivered v%s to ChatID %d.", entry.Version, chatID)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -455,6 +400,35 @@ func openStore(path string) (*Store, error) {
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_sent_words_chat ON sent_words(chat_id);
+	CREATE TABLE IF NOT EXISTS sent_vocab (
+		chat_id INTEGER NOT NULL,
+		word    TEXT    NOT NULL,
+		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, word)
+	);
+	CREATE INDEX IF NOT EXISTS idx_sent_vocab_chat ON sent_vocab(chat_id);
+	CREATE TABLE IF NOT EXISTS changelog_delivery (
+		chat_id INTEGER NOT NULL,
+		version TEXT    NOT NULL,
+		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, version)
+	);
+	CREATE TABLE IF NOT EXISTS content_pool (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		kind       TEXT    NOT NULL,
+		term       TEXT    NOT NULL,
+		meaning    TEXT    DEFAULT '',
+		text       TEXT    NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE (kind, term)
+	);
+	CREATE INDEX IF NOT EXISTS idx_content_pool_kind ON content_pool(kind, created_at);
+	CREATE TABLE IF NOT EXISTS daily_review_delivery (
+		chat_id     INTEGER NOT NULL,
+		review_date TEXT    NOT NULL,
+		sent_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, review_date)
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
@@ -476,7 +450,7 @@ func (s *Store) Close() error {
 func (s *Store) migrateLegacyJSON() {
 	data, err := os.ReadFile(legacyDBFile)
 	if err != nil {
-		return // No legacy file, nothing to migrate.
+		return
 	}
 
 	var legacy struct {
@@ -565,8 +539,8 @@ func (s *Store) RecordSentWord(chatID int64, word string) error {
 	return err
 }
 
-// ResetSentWords deletes all sent-word history for a chat and returns the number
-// of records that were removed.
+// ResetSentWords deletes all sent-word history for a chat and returns the
+// number of records removed.
 func (s *Store) ResetSentWords(chatID int64) (int64, error) {
 	res, err := s.db.Exec("DELETE FROM sent_words WHERE chat_id = ?", chatID)
 	if err != nil {
@@ -575,9 +549,94 @@ func (s *Store) ResetSentWords(chatID int64) (int64, error) {
 	return res.RowsAffected()
 }
 
+// SentVocab returns the list of vocabulary words already sent to a given chat.
+func (s *Store) SentVocab(chatID int64) ([]string, error) {
+	rows, err := s.db.Query("SELECT word FROM sent_vocab WHERE chat_id = ? ORDER BY sent_at", chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var words []string
+	for rows.Next() {
+		var w string
+		if err := rows.Scan(&w); err != nil {
+			return nil, err
+		}
+		words = append(words, w)
+	}
+	return words, rows.Err()
+}
+
+// RecordSentVocab stores a vocabulary word as having been sent to a chat (idempotent).
+func (s *Store) RecordSentVocab(chatID int64, word string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO sent_vocab (chat_id, word) VALUES (?, ?)",
+		chatID, strings.ToLower(strings.TrimSpace(word)),
+	)
+	return err
+}
+
+// ResetSentVocab deletes all sent vocabulary history for a chat and returns the
+// number of records removed.
+func (s *Store) ResetSentVocab(chatID int64) (int64, error) {
+	res, err := s.db.Exec("DELETE FROM sent_vocab WHERE chat_id = ?", chatID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// MarkChangelogSeen records that a changelog version has been delivered to a chat.
+func (s *Store) MarkChangelogSeen(chatID int64, version string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO changelog_delivery (chat_id, version) VALUES (?, ?)",
+		chatID, version,
+	)
+	return err
+}
+
+// UnseenChangelogs returns the Changelog entries not yet delivered to chatID.
+func (s *Store) UnseenChangelogs(chatID int64) ([]ChangelogEntry, error) {
+	if len(Changelogs) == 0 {
+		return nil, nil
+	}
+
+	rows, err := s.db.Query("SELECT version FROM changelog_delivery WHERE chat_id = ?", chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	seen := make(map[string]bool)
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		seen[v] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var unseen []ChangelogEntry
+	for _, entry := range Changelogs {
+		if !seen[entry.Version] {
+			unseen = append(unseen, entry)
+		}
+	}
+	return unseen, nil
+}
+
 func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}
 	return fallback
+}
+
+// lookupEnv reports whether an environment variable is set and returns its value.
+func lookupEnv(key string) (string, bool) {
+	return os.LookupEnv(key)
 }

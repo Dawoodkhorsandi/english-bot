@@ -1,0 +1,225 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"strings"
+)
+
+const (
+	kindDrill = "drill"
+	kindWord  = "word"
+)
+
+// drillPromptBase is the grammar-drill prompt without the per-user exclusion clause.
+const drillPromptBase = `Choose ONE common, useful everyday English verb and produce a Grammar Muscle Memory Drill.
+
+Use this exact HTML format (for Telegram). Replace each {sentence} with a short, natural sentence (max 12 words). Wrap the target verb form inside <b>…</b> in every sentence.
+
+🎯 <b>Verb of the Hour: {VERB}</b>
+————————————————————
+
+<b>1. Simple Present</b> · Routine / Habit
+→ {sentence}
+
+<b>2. Present Continuous</b> · Right Now / Temporary
+→ {sentence}
+
+<b>3. Present Perfect</b> · Experience / Recent Result
+→ {sentence}
+
+<b>4. Present Perfect Continuous</b> · Ongoing Until Now
+→ {sentence}
+
+<b>5. Simple Past</b> · Finished Action
+→ {sentence}
+
+<b>6. Past Continuous</b> · Was in Progress
+→ {sentence}
+
+<b>7. Past Perfect</b> · Before Another Past Event
+→ {sentence}
+
+<b>8. Past Perfect Continuous</b> · Duration Before a Past Event
+→ {sentence}
+
+<b>9. Future: be going to</b> · Plan / Intention
+→ {sentence}
+
+<b>10. Future: will</b> · Prediction / Spontaneous Decision
+→ {sentence}
+
+<b>11. Future Continuous</b> · In Progress at a Future Moment
+→ {sentence}
+
+<b>12. Future Perfect</b> · Completed by a Future Point
+→ {sentence}
+
+<b>13. Future Perfect Continuous</b> · Duration up to a Future Point
+→ {sentence}
+
+<b>14. First Conditional</b> · Real Future Possibility
+→ {sentence}
+
+💡 <i>Say each sentence out loud — build the muscle memory!</i>
+
+Rules:
+- Replace {VERB} with the base form of the chosen verb (e.g. walk).
+- Keep sentences short (max 12 words) and natural for daily conversation.
+- Bold only the verb form using <b>…</b>. Use no other HTML tags.
+- Output the drill only — no preamble, no explanation.`
+
+// wordPromptBase is the vocabulary-card prompt without the per-user exclusion clause.
+const wordPromptBase = `Choose ONE useful intermediate / upper-intermediate English word (any part of speech) that an English learner would benefit from knowing, and produce a Vocabulary Card.
+
+Use this EXACT HTML format (for Telegram). Replace each {…} placeholder with real content. Keep it concise and easy to read.
+
+📘 <b>Word of the Hour: {WORD}</b>
+————————————————————
+
+💬 <b>Meaning</b>
+{one clear, simple sentence explaining the meaning}
+
+🔊 <b>Pronunciation</b>
+{simple syllable spelling, e.g. VIG-uhr-uhs-lee}  ·  {official IPA, e.g. /ˈvɪɡ.ɚ.əs.li/}
+
+✅ <b>Synonyms</b>
+{3–5 synonyms, comma-separated}
+
+⛔ <b>Opposites</b>
+{2–4 antonyms, comma-separated}
+
+📝 <b>Examples</b>
+• {natural everyday example sentence}
+• {a second example in a different context}
+
+💡 <i>Read it aloud and try using it in your own sentence today!</i>
+
+Rules:
+- Replace {WORD} with the chosen word in its base/dictionary form.
+- Bold the target word using <b>…</b> inside each example sentence.
+- Use only <b> and <i> HTML tags — no other tags or Markdown.
+- Keep example sentences short (max 14 words) and natural.
+- Output the card only — no preamble, no explanation.`
+
+func buildDrillPrompt(exclude []string) string {
+	if len(exclude) == 0 {
+		return drillPromptBase
+	}
+	return drillPromptBase + fmt.Sprintf(
+		"\n\nIMPORTANT: Do NOT use any of these verbs (already practiced): %s.\nChoose a completely different everyday verb not in that list.",
+		strings.Join(exclude, ", "),
+	)
+}
+
+func buildWordPrompt(exclude []string) string {
+	if len(exclude) == 0 {
+		return wordPromptBase
+	}
+	return wordPromptBase + fmt.Sprintf(
+		"\n\nIMPORTANT: Do NOT use any of these words (already sent): %s.\nChoose a completely different word not in that list.",
+		strings.Join(exclude, ", "),
+	)
+}
+
+// generateContent builds the prompt for kind, runs the provider chain, and parses
+// the term (and meaning, for words). Returns (text, term, meaning, provider, err).
+func generateContent(ctx context.Context, chain *ProviderChain, kind string, exclude []string) (text, term, meaning, provider string, err error) {
+	var prompt string
+	if kind == kindWord {
+		prompt = buildWordPrompt(exclude)
+	} else {
+		prompt = buildDrillPrompt(exclude)
+	}
+
+	text, provider, err = chain.Generate(ctx, prompt)
+	if err != nil {
+		return "", "", "", "", err
+	}
+
+	if kind == kindWord {
+		term = parseWord(text)
+		meaning = parseMeaning(text)
+	} else {
+		term = parseVerb(text)
+	}
+	return text, term, meaning, provider, nil
+}
+
+// parseVerb extracts the verb from the "Verb of the Hour:" line of a drill.
+func parseVerb(drill string) string {
+	return parseLabeledTerm(drill, "verb of the hour")
+}
+
+// parseWord extracts the word from the "Word of the Hour:" line of a vocab card.
+func parseWord(card string) string {
+	return parseLabeledTerm(card, "word of the hour")
+}
+
+// parseLabeledTerm scans text for a line containing label (case-insensitive),
+// then extracts the first token after the ":" separator, stripping HTML and
+// Markdown punctuation, and lowercases it.
+func parseLabeledTerm(text, label string) string {
+	for _, line := range strings.Split(text, "\n") {
+		lower := strings.ToLower(line)
+		if !strings.Contains(lower, label) {
+			continue
+		}
+		idx := strings.Index(line, ":")
+		if idx == -1 {
+			continue
+		}
+		term := line[idx+1:]
+		if lt := strings.Index(term, "<"); lt != -1 {
+			term = term[:lt]
+		}
+		term = strings.Trim(term, " *_`[]()\t\r")
+		term = strings.TrimSpace(term)
+		if term == "" {
+			continue
+		}
+		if fields := strings.Fields(term); len(fields) > 0 {
+			term = fields[0]
+		}
+		term = strings.Trim(term, " *_`[]().,!?")
+		return strings.ToLower(term)
+	}
+	return ""
+}
+
+// parseMeaning extracts the one-line meaning that follows the "Meaning" header in
+// a vocabulary card, stripping any HTML tags. Empty if not found.
+func parseMeaning(card string) string {
+	lines := strings.Split(card, "\n")
+	for i, line := range lines {
+		if !strings.Contains(strings.ToLower(line), "meaning") || !strings.Contains(line, "<b>") {
+			continue
+		}
+		for j := i + 1; j < len(lines); j++ {
+			m := strings.TrimSpace(stripHTMLTags(lines[j]))
+			if m != "" {
+				return m
+			}
+		}
+	}
+	return ""
+}
+
+// stripHTMLTags removes everything between '<' and '>' and trims the result.
+func stripHTMLTags(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch r {
+		case '<':
+			inTag = true
+		case '>':
+			inTag = false
+		default:
+			if !inTag {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
