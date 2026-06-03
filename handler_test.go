@@ -805,6 +805,26 @@ func TestHandleQuizNotEnoughWords(t *testing.T) {
 	}
 }
 
+func TestHandleChallengeAlreadyActive(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	store.AddSubscriber(100)
+	if err := store.StartChallenge(100, time.Now()); err != nil {
+		t.Fatalf("StartChallenge: %v", err)
+	}
+
+	msg := &TelegramMessage{
+		MessageID: 1,
+		Chat:      TelegramChat{ID: 100},
+		Text:      "/challenge",
+	}
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+
+	if !strings.Contains(mock.lastSentText(), "already have an active challenge") {
+		t.Fatalf("expected active challenge reminder, got %q", mock.lastSentText())
+	}
+}
+
 func TestHandleWordLookup(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}

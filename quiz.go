@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"math/rand"
@@ -350,13 +351,21 @@ func makeQuiz(store *Store, chatID int64, now time.Time, rng *rand.Rand) (quizQu
 // in its callback data, wrong ones an "x". All buttons record against the same
 // subject word so a tap always grades that word.
 func quizKeyboard(q quizQuestion) [][]inlineButton {
+	return quizKeyboardWithPrefix(q, "quiz:")
+}
+
+func challengeQuizKeyboard(q quizQuestion) [][]inlineButton {
+	return quizKeyboardWithPrefix(q, "chal:")
+}
+
+func quizKeyboardWithPrefix(q quizQuestion, prefix string) [][]inlineButton {
 	rows := make([][]inlineButton, 0, len(q.options))
 	for i, opt := range q.options {
 		cx := "x"
 		if i == q.correctIdx {
 			cx = "c"
 		}
-		rows = append(rows, []inlineButton{{Text: opt, CallbackData: "quiz:" + cx + ":" + q.word}})
+		rows = append(rows, []inlineButton{{Text: opt, CallbackData: prefix + cx + ":" + q.word}})
 	}
 	return rows
 }
@@ -456,6 +465,102 @@ func (s *Store) QuizStats(chatID int64) (answered, correct int, err error) {
 	return answered, correct, err
 }
 
+// StartChallenge opens (or resets) a 5-question challenge session.
+func (s *Store) StartChallenge(chatID int64, now time.Time) error {
+	_, err := s.db.Exec(
+		`INSERT INTO challenge_sessions (chat_id, question_index, correct_count, started_at)
+		 VALUES (?, 0, 0, ?)
+		 ON CONFLICT(chat_id) DO UPDATE SET
+		   question_index = 0,
+		   correct_count = 0,
+		   started_at = excluded.started_at`,
+		chatID, now.UTC(),
+	)
+	return err
+}
+
+// GetChallenge returns the active challenge session state for a user.
+func (s *Store) GetChallenge(chatID int64) (index, correct int, active bool, err error) {
+	err = s.db.QueryRow(
+		"SELECT question_index, correct_count FROM challenge_sessions WHERE chat_id = ?",
+		chatID,
+	).Scan(&index, &correct)
+	if err == sql.ErrNoRows {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, err
+	}
+	return index, correct, true, nil
+}
+
+// AdvanceChallenge records one answer and advances the question index.
+func (s *Store) AdvanceChallenge(chatID int64, correct bool) (newIndex, totalCorrect int, done bool, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0, false, err
+	}
+	defer tx.Rollback()
+
+	var index, count int
+	if err := tx.QueryRow(
+		"SELECT question_index, correct_count FROM challenge_sessions WHERE chat_id = ?",
+		chatID,
+	).Scan(&index, &count); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, 0, false, nil
+		}
+		return 0, 0, false, err
+	}
+	if correct {
+		count++
+	}
+	index++
+	if _, err := tx.Exec(
+		"UPDATE challenge_sessions SET question_index = ?, correct_count = ? WHERE chat_id = ?",
+		index, count, chatID,
+	); err != nil {
+		return 0, 0, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, false, err
+	}
+	return index, count, index >= challengeQuestionCount, nil
+}
+
+// ClearChallenge clears an active challenge session.
+func (s *Store) ClearChallenge(chatID int64) error {
+	_, err := s.db.Exec("DELETE FROM challenge_sessions WHERE chat_id = ?", chatID)
+	return err
+}
+
+// RecordChallengeCompletion increments completion count and best score.
+func (s *Store) RecordChallengeCompletion(chatID int64, score int) error {
+	_, err := s.db.Exec(
+		`INSERT INTO user_prefs (chat_id, challenge_completed, best_challenge_score)
+		 VALUES (?, 1, ?)
+		 ON CONFLICT(chat_id) DO UPDATE SET
+		   challenge_completed = challenge_completed + 1,
+		   best_challenge_score = MAX(best_challenge_score, excluded.best_challenge_score),
+		   updated_at = CURRENT_TIMESTAMP`,
+		chatID, score,
+	)
+	return err
+}
+
+// ChallengeStats returns completed challenge count and best score (out of 5).
+func (s *Store) ChallengeStats(chatID int64) (completed, best int, err error) {
+	err = s.db.QueryRow(
+		`SELECT COALESCE(challenge_completed, 0), COALESCE(best_challenge_score, 0)
+		 FROM user_prefs WHERE chat_id = ?`,
+		chatID,
+	).Scan(&completed, &best)
+	if err == sql.ErrNoRows {
+		return 0, 0, nil
+	}
+	return completed, best, err
+}
+
 // ---------------------------------------------------------------------------
 // Command + callback handlers
 // ---------------------------------------------------------------------------
@@ -474,6 +579,41 @@ func handleQuiz(store *Store, notifier Notifier, chatID int64) {
 	}
 	if err := notifier.SendKeyboard(chatID, q.prompt, quizKeyboard(q)); err != nil {
 		log.Printf("❌ [QUIZ] Could not send quiz to chat %d: %v", chatID, err)
+	}
+}
+
+// handleChallenge starts a rapid 5-question challenge session.
+func handleChallenge(store *Store, notifier Notifier, chatID int64) {
+	_, _, active, err := store.GetChallenge(chatID)
+	if err != nil {
+		log.Printf("❌ [CHALLENGE] Could not read session for chat %d: %v", chatID, err)
+		_ = notifier.Send(chatID, "❌ Sorry, I couldn't start a challenge right now. Please try again.")
+		return
+	}
+	if active {
+		_ = notifier.Send(chatID, "🏁 You already have an active challenge. Finish it first!")
+		return
+	}
+	if err := store.StartChallenge(chatID, time.Now()); err != nil {
+		log.Printf("❌ [CHALLENGE] Could not start challenge for chat %d: %v", chatID, err)
+		_ = notifier.Send(chatID, "❌ Sorry, I couldn't start a challenge right now. Please try again.")
+		return
+	}
+	q, ok, err := makeQuiz(store, chatID, time.Now(), newRand())
+	if err != nil {
+		log.Printf("❌ [CHALLENGE] Could not build first question for chat %d: %v", chatID, err)
+		_ = store.ClearChallenge(chatID)
+		_ = notifier.Send(chatID, "❌ Sorry, I couldn't make challenge questions right now. Please try again.")
+		return
+	}
+	if !ok {
+		_ = store.ClearChallenge(chatID)
+		_ = notifier.Send(chatID, "🧩 Not enough learned words for a challenge yet — keep practising and try again soon!")
+		return
+	}
+	msg := fmt.Sprintf("🏁 <b>Grammar Challenge</b>\n\nQuestion 1/%d\n\n%s", challengeQuestionCount, q.prompt)
+	if err := notifier.SendKeyboard(chatID, msg, challengeQuizKeyboard(q)); err != nil {
+		log.Printf("❌ [CHALLENGE] Could not send first question to chat %d: %v", chatID, err)
 	}
 }
 
@@ -519,6 +659,97 @@ func handleQuizCallback(store *Store, notifier Notifier, cb *TelegramCallbackQue
 	_ = notifier.AnswerCallback(cb.ID, toast)
 	if cb.Message != nil {
 		_ = notifier.EditMessage(chatID, cb.Message.MessageID, reveal, [][]inlineButton{})
+	}
+}
+
+func challengeSummary(score int) string {
+	switch score {
+	case challengeQuestionCount:
+		return "🏆 Perfect score! You're on fire!"
+	case 4:
+		return "⭐ Excellent! Almost perfect!"
+	case 3:
+		return "👍 Good effort! Keep practicing!"
+	case 2:
+		return "💪 Keep going — you're improving!"
+	case 1, 0:
+		return "🌱 Every expert was once a beginner. Try again!"
+	default:
+		return "🌱 Every expert was once a beginner. Try again!"
+	}
+}
+
+// handleChallengeCallback grades one challenge answer, advances the session, and
+// immediately sends the next question (or final summary at 5/5).
+func handleChallengeCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+	rest := strings.TrimPrefix(cb.Data, "chal:")
+	cx, word, found := strings.Cut(rest, ":")
+	if !found || word == "" {
+		_ = notifier.AnswerCallback(cb.ID, "")
+		return
+	}
+	correct := cx == "c"
+	if err := store.RecordQuizResult(chatID, word, correct); err != nil {
+		log.Printf("⚠️  [CHALLENGE] Could not record result for chat %d word %q: %v", chatID, word, err)
+	}
+
+	now := time.Now()
+	if correct {
+		_, _ = store.ApplyReviewKnown(chatID, word, now)
+	} else {
+		_, _ = store.ApplyReviewForgot(chatID, word, now)
+	}
+	newIndex, totalCorrect, done, err := store.AdvanceChallenge(chatID, correct)
+	if err != nil {
+		log.Printf("❌ [CHALLENGE] Could not advance challenge for chat %d: %v", chatID, err)
+		_ = notifier.AnswerCallback(cb.ID, "Could not save, try again")
+		return
+	}
+	if newIndex == 0 && !done {
+		_ = notifier.AnswerCallback(cb.ID, "Challenge expired")
+		return
+	}
+
+	toast := "Not quite — keep going!"
+	if correct {
+		toast = "Correct! ✅"
+	}
+	_ = notifier.AnswerCallback(cb.ID, toast)
+	if cb.Message != nil {
+		reveal := "❌ <b>Not quite.</b>"
+		if correct {
+			reveal = "✅ <b>Correct!</b>"
+		}
+		_ = notifier.EditMessage(chatID, cb.Message.MessageID, reveal, [][]inlineButton{})
+	}
+
+	if done {
+		if err := store.RecordChallengeCompletion(chatID, totalCorrect); err != nil {
+			log.Printf("⚠️  [CHALLENGE] Could not persist completion for chat %d: %v", chatID, err)
+		}
+		if err := store.ClearChallenge(chatID); err != nil {
+			log.Printf("⚠️  [CHALLENGE] Could not clear session for chat %d: %v", chatID, err)
+		}
+		_ = notifier.Send(chatID, fmt.Sprintf("🏁 <b>Challenge complete!</b>\n\nScore: <b>%d/%d</b>\n%s", totalCorrect, challengeQuestionCount, challengeSummary(totalCorrect)))
+		return
+	}
+
+	q, ok, err := makeQuiz(store, chatID, time.Now(), newRand())
+	if err != nil {
+		log.Printf("❌ [CHALLENGE] Could not build question %d for chat %d: %v", newIndex+1, chatID, err)
+		_ = store.ClearChallenge(chatID)
+		_ = notifier.Send(chatID, "❌ Challenge ended early due to a temporary issue. Please try /challenge again.")
+		return
+	}
+	if !ok {
+		log.Printf("⚠️  [CHALLENGE] Could not build enough material for chat %d at question %d.", chatID, newIndex+1)
+		_ = store.ClearChallenge(chatID)
+		_ = notifier.Send(chatID, "❌ Challenge ended early because there weren't enough quiz options. Try again after learning more words.")
+		return
+	}
+	msg := fmt.Sprintf("🏁 <b>Grammar Challenge</b>\n\nQuestion %d/%d\n\n%s", newIndex+1, challengeQuestionCount, q.prompt)
+	if err := notifier.SendKeyboard(chatID, msg, challengeQuizKeyboard(q)); err != nil {
+		log.Printf("❌ [CHALLENGE] Could not send question %d to chat %d: %v", newIndex+1, chatID, err)
 	}
 }
 

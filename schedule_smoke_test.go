@@ -95,6 +95,13 @@ func TestIntervalMigration(t *testing.T) {
 	if prefs.Interval != defaultInterval {
 		t.Errorf("interval = %d, want default %d", prefs.Interval, defaultInterval)
 	}
+	completed, best, err := store.ChallengeStats(7)
+	if err != nil {
+		t.Fatalf("ChallengeStats: %v", err)
+	}
+	if completed != 0 || best != 0 {
+		t.Errorf("ChallengeStats = %d/%d, want 0/0", completed, best)
+	}
 }
 
 func TestNextWeekdayTime(t *testing.T) {

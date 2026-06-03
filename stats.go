@@ -21,6 +21,8 @@ type UserStats struct {
 	Mastered       int // words moved into long-term memory (Change D)
 	QuizAnswered   int // quiz questions answered (Change E)
 	QuizCorrect    int // quiz questions answered correctly (Change E)
+	ChallengesDone int // completed /challenge sessions
+	ChallengeBest  int // best /challenge score out of 5
 	ActiveDays     int // distinct local days with any activity
 	CurrentStreak  int // consecutive active days ending today/yesterday
 	LongestStreak  int // best run of consecutive active days ever
@@ -70,6 +72,10 @@ func (s *Store) UserStats(chatID int64) (UserStats, error) {
 	if answered, correct, err := s.QuizStats(chatID); err == nil {
 		st.QuizAnswered = answered
 		st.QuizCorrect = correct
+	}
+	if completed, best, err := s.ChallengeStats(chatID); err == nil {
+		st.ChallengesDone = completed
+		st.ChallengeBest = best
 	}
 
 	var created any
@@ -184,6 +190,7 @@ func formatStats(st UserStats) string {
 		pct := st.QuizCorrect * 100 / st.QuizAnswered
 		msg += fmt.Sprintf("🧩 Quiz accuracy: <b>%d%%</b> (%d/%d)\n", pct, st.QuizCorrect, st.QuizAnswered)
 	}
+	msg += fmt.Sprintf("🏁 Challenges completed: <b>%d</b> | Best score: <b>%d/%d</b>\n", st.ChallengesDone, st.ChallengeBest, challengeQuestionCount)
 	if st.Paused {
 		msg += "⏸️ Scheduled sends: <b>paused</b> (use /resume)\n"
 	}
