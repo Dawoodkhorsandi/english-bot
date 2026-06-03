@@ -993,7 +993,7 @@ handler, keyboard and callback branch in `main.go`.
 
 ---
 
-## Change M — Word Lookup (send any word)
+## Change M — Word Lookup (send any word) — IMPLEMENTED in v1.7.0
 
 Let a user look up a specific word on demand by simply **typing it** (no command),
 and get back a vocabulary card formatted exactly like `/word`.
@@ -1059,8 +1059,8 @@ and get back a vocabulary card formatted exactly like `/word`.
    `sent_vocab`/`subscribers`; streak derived from `sent_at` dates).
 3. ~~**Change L (`/interval`)**~~ — ✅ **DONE in v1.6.0** (per-user send frequency;
    `user_prefs.interval_minutes` + per-user due-check sweep; reused `callback_query` infra).
-4. **Change M (Word lookup)** — type any word to get a `/word`-style card; small
-   generation variant + replaces the `default` message branch; pairs naturally with L.
+4. ~~**Change M (Word lookup)**~~ — ✅ **DONE in v1.7.0** (`generateWordFor` +
+   `handleWordLookup` replacing the `default` branch; pools & records like `/word`).
 5. **Change D (Spaced Repetition)** — the core learning upgrade; reuses existing history.
 6. **Change E (Quiz / Active Recall)** — adds `callback_query` handling; pairs with D to
    feed difficulty signals.

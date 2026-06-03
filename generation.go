@@ -124,6 +124,19 @@ func buildWordPrompt(level string, exclude []string) string {
 	)
 }
 
+// buildWordLookupPrompt builds a vocabulary-card prompt for a SPECIFIC term the
+// user supplied (Change M). The model resolves the input to its English headword
+// — translating from another language if needed — and builds the card around it.
+func buildWordLookupPrompt(level, term string) string {
+	return wordPromptBase + "\n\n" + levelInstruction(level) + fmt.Sprintf(`
+
+LOOKUP MODE — the learner asked about: "%s"
+- Build the card for THIS specific word. Do NOT pick a different word.
+- If the input is not English (e.g. Persian/Farsi), translate it to its most common English equivalent and build the card around that English word.
+- If the input is an inflected or misspelled form, use its correct base/dictionary form as {WORD}.
+- If the input is a short phrase, treat its key headword as {WORD}.`, term)
+}
+
 // levelInstruction returns a difficulty directive injected into the prompt so the
 // chosen verb/word and example sentences match the user's selected level.
 func levelInstruction(level string) string {
@@ -159,6 +172,17 @@ func generateContent(ctx context.Context, chain *ProviderChain, kind, level stri
 		term = parseVerb(text)
 	}
 	return text, term, meaning, provider, nil
+}
+
+// generateWordFor generates a vocabulary card for a specific user-supplied term
+// (Change M), resolving/translating it to an English headword. Returns the card
+// text, the resolved English word, its meaning, and the provider used.
+func generateWordFor(ctx context.Context, chain *ProviderChain, level, term string) (text, word, meaning, provider string, err error) {
+	text, provider, err = chain.Generate(ctx, buildWordLookupPrompt(level, term))
+	if err != nil {
+		return "", "", "", "", err
+	}
+	return text, parseWord(text), parseMeaning(text), provider, nil
 }
 
 // parseVerb extracts the verb from the "Verb of the Hour:" line of a drill.

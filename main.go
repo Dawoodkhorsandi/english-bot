@@ -83,6 +83,12 @@ var Changelogs = []ChangelogEntry{
 			"• ⏱️ <b>/interval</b> lets you choose how often you get practice — anywhere from every 30 minutes to every 12 hours\n" +
 			"• Tap the buttons or send e.g. <code>/interval 60</code> to set it",
 	},
+	{
+		Version: "1.7.0",
+		Text: "📣 <b>What's New in v1.7.0</b>\n\n" +
+			"• 💬 <b>Look up any word!</b> Just send me a word — in English or Persian — and I'll reply with a full vocabulary card (meaning, pronunciation, synonyms, examples)\n" +
+			"• Persian words are translated to their English equivalent automatically",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -297,6 +303,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"Every 30 minutes I send you something to practice — alternating between:\n" +
 			"• 🎯 a <b>grammar drill</b> (one verb across 14 tenses)\n" +
 			"• 📘 a <b>vocabulary word</b> (meaning, pronunciation, synonyms, opposites & examples)\n\n" +
+			"💬 <b>Tip:</b> send me <b>any word</b> (English or Persian) and I'll explain it like a vocabulary card!\n\n" +
 			"📚 <b>Commands:</b>\n" +
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
@@ -315,6 +322,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"🎯 <b>Grammar drills</b> take one everyday verb through <b>14 tenses</b>:\n" +
 			"Simple, Continuous, Perfect, Perfect Continuous — across past, present and future — plus the First Conditional.\n\n" +
 			"📘 <b>Vocabulary words</b> give you the meaning, pronunciation, synonyms, opposites and real examples for a useful new word.\n\n" +
+			"💬 <b>Look up any word:</b> just type it (English or Persian) and I'll send a full card for it.\n\n" +
 			"You get one of each per hour, about 30 minutes apart (quiet overnight).\n\n" +
 			"/drill — generate a grammar drill on demand\n" +
 			"/word — generate a vocabulary word on demand\n" +
@@ -409,8 +417,13 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 		))
 
 	default:
-		log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
-		_ = sendToTelegram(chatID, "🤖 I only understand commands. Try /drill, /word, /stats or /help!")
+		if strings.HasPrefix(command, "/") {
+			log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
+			_ = sendToTelegram(chatID, "🤖 I don't know that command. Try /drill, /word, /stats or /help — or just send me any word to look it up!")
+			return
+		}
+		// Plain text (no leading slash) is treated as a word lookup (Change M).
+		handleWordLookup(ctx, chain, store, chatID, msg.Text)
 	}
 }
 
@@ -443,6 +456,45 @@ func handleLevel(store *Store, chatID int64, args []string) {
 	if err := sendToTelegramWithKeyboard(chatID, text, keyboard); err != nil {
 		log.Printf("❌ [LEVEL_ERR] Could not send level keyboard to ChatID %d: %v", chatID, err)
 	}
+}
+
+// handleWordLookup treats a plain (non-command) message as a vocabulary lookup
+// (Change M): it generates a /word-style card for the user-supplied term at their
+// level, translating from another language when needed, then pools and records it.
+func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, chatID int64, text string) {
+	term := strings.TrimSpace(text)
+	fields := strings.Fields(term)
+	if len(fields) == 0 {
+		return
+	}
+	if len(fields) > 4 || len([]rune(term)) > 40 {
+		_ = sendToTelegram(chatID, "🔎 Send me a single word (or a short phrase) and I'll explain it — that looked more like a sentence!")
+		return
+	}
+
+	log.Printf("🔎 [LOOKUP] ChatID %d looked up %q.", chatID, term)
+	_ = sendToTelegram(chatID, "🔄 <b>Looking that up...</b>")
+
+	level := store.GetLevel(chatID)
+	card, word, meaning, provider, err := generateWordFor(ctx, chain, level, term)
+	if err != nil {
+		log.Printf("❌ [LOOKUP_ERR] Generation failed for ChatID %d term %q: %v", chatID, term, err)
+		_ = sendToTelegram(chatID, "❌ Sorry, I couldn't look that up right now. Please try again.")
+		return
+	}
+
+	// Treat a successful lookup like an on-demand /word: pool it and record it so
+	// it counts toward /stats, feeds the daily review, and isn't repeated.
+	if word != "" {
+		if err := store.AddToPool(kindWord, level, word, meaning, card); err != nil {
+			log.Printf("⚠️  [LOOKUP] Could not pool %q: %v", word, err)
+		}
+		if err := store.recordSentFor(kindWord, chatID, word); err != nil {
+			log.Printf("⚠️  [LOOKUP] Could not record %q for chat %d: %v", word, chatID, err)
+		}
+	}
+	log.Printf("✅ [LOOKUP] Delivered %q (resolved %q) to chat %d via %s.", term, word, chatID, provider)
+	_ = sendToTelegram(chatID, card)
 }
 
 // levelKeyboard builds a one-row inline keyboard of the three levels, marking the
