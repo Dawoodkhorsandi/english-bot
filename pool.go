@@ -345,7 +345,7 @@ func runRefillCycle(ctx context.Context, chain *ProviderChain, store *Store) {
 		log.Printf("⚠️  [POOL_FILLER] Could not load active levels: %v (using default only)", err)
 		levels = []string{defaultLevel}
 	}
-	for _, kind := range []string{kindDrill, kindWord} {
+	for _, kind := range []string{kindDrill, kindWord, kindIdiom} {
 		for _, level := range levels {
 			if ctx.Err() != nil {
 				return

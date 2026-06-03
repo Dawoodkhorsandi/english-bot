@@ -256,6 +256,29 @@ func TestHandleDrillCallbackNoop(t *testing.T) {
 	}
 }
 
+func TestHandleMessageIdiom(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+	store.AddToPool(kindIdiom, defaultLevel, "break the ice", "to start a conversation", "idiom card text")
+
+	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/idiom"}
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+
+	texts := mock.sentTexts()
+	if len(texts) < 2 {
+		t.Fatalf("expected at least 2 messages, got %d", len(texts))
+	}
+	if texts[len(texts)-1] != "idiom card text" {
+		t.Errorf("last message should be the idiom card, got %q", texts[len(texts)-1])
+	}
+	// And it should be recorded so it isn't repeated.
+	if _, _, _, ok, _ := store.PooledUnseen(kindIdiom, defaultLevel, 100); ok {
+		t.Error("served idiom should be recorded as seen")
+	}
+}
+
 func TestHandleMessageWord(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}

@@ -345,6 +345,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"📚 <b>Commands:</b>\n" +
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
+			"/idiom — Get an idiom of the day\n" +
 			"/quiz — Test yourself on a word you've learned\n" +
 			"/level — Choose your difficulty (beginner/intermediate/advanced)\n" +
 			"/interval — Choose how often you get practice\n" +
@@ -361,12 +362,14 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"🎯 <b>Grammar drills</b> take one everyday verb through <b>21 forms</b>, split into easy pages — tap <b>◀️ Back</b> / <b>Next ▶️</b> to move between them:\n" +
 			"present, past & future tenses (Simple, Continuous, Perfect, Perfect Continuous), all four conditionals, plus modals, passive, imperative and <i>used to</i>.\n\n" +
 			"📘 <b>Vocabulary words</b> give you the meaning, pronunciation, synonyms, opposites and real examples for a useful new word.\n\n" +
+			"🗣️ <b>Idiom of the day:</b> a common English expression with its meaning and real examples — sent once a day, or anytime via /idiom.\n\n" +
 			"🧠 <b>Spaced repetition:</b> words you've learned come back as quick <b>memory checks</b> at growing intervals — tap ✅ Knew it / ❌ Forgot and I'll tune when you see each one next.\n\n" +
 			"🧩 <b>Quizzes:</b> multiple-choice questions test your recall — send /quiz anytime, and one pops up now and then. Your answers also tune your review schedule.\n\n" +
 			"💬 <b>Look up any word:</b> just type it (English or Persian) and I'll send a full card for it.\n\n" +
 			"You get one of each per hour, about 30 minutes apart (quiet overnight).\n\n" +
 			"/drill — generate a grammar drill on demand\n" +
 			"/word — generate a vocabulary word on demand\n" +
+			"/idiom — get a common idiom with meaning and examples\n" +
 			"/quiz — test yourself on a word you've already learned\n" +
 			"/level — set difficulty: beginner, intermediate or advanced\n" +
 			"/interval — set how often scheduled practice arrives\n" +
@@ -402,6 +405,20 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Word delivered to ChatID %d.", chatID)
+		_ = notifier.Send(chatID, card)
+
+	case "/idiom":
+		log.Printf("🤖 [AI_FLOW] /idiom requested by ChatID %d.", chatID)
+		_ = notifier.Send(chatID, "🔄 <b>Finding an idiom for you...</b>")
+
+		card, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), true)
+		if err != nil {
+			log.Printf("❌ [AI_ERR] Idiom generation failed for ChatID %d: %v", chatID, err)
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
+			return
+		}
+
+		log.Printf("✅ [AI_SUCCESS] Idiom delivered to ChatID %d.", chatID)
 		_ = notifier.Send(chatID, card)
 
 	case "/level":
@@ -456,10 +473,16 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reset your history right now. Please try again.")
 			return
 		}
+		clearedIdioms, err := store.ResetSentIdiom(chatID)
+		if err != nil {
+			log.Printf("❌ [RESET_ERR] Failed to clear idiom history for ChatID %d: %v", chatID, err)
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reset your history right now. Please try again.")
+			return
+		}
 
-		log.Printf("✅ [RESET] Cleared %d verbs and %d words for ChatID %d.", clearedVerbs, clearedWords, chatID)
+		log.Printf("✅ [RESET] Cleared %d verbs, %d words and %d idioms for ChatID %d.", clearedVerbs, clearedWords, clearedIdioms, chatID)
 		_ = notifier.Send(chatID, fmt.Sprintf(
-			"♻️ <b>History reset!</b>\n\nCleared <b>%d</b> practiced verbs and <b>%d</b> vocabulary words. You may see them again in future sends.", clearedVerbs, clearedWords,
+			"♻️ <b>History reset!</b>\n\nCleared <b>%d</b> practiced verbs, <b>%d</b> vocabulary words and <b>%d</b> idioms. You may see them again in future sends.", clearedVerbs, clearedWords, clearedIdioms,
 		))
 
 	case "/metrics":
@@ -593,7 +616,7 @@ func handleMetrics(store *Store, chain *ProviderChain, notifier Notifier, chatID
 
 	b.WriteString("📦 <b>Pool depth:</b>\n")
 	levels, _ := store.ActiveLevels()
-	for _, kind := range []string{kindDrill, kindWord} {
+	for _, kind := range []string{kindDrill, kindWord, kindIdiom} {
 		for _, level := range levels {
 			count, _ := store.PoolCount(kind, level)
 			target := poolTargetFor(level)
