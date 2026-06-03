@@ -584,7 +584,7 @@ the rest are skipped and logged. Recommended default order (fastest/most-generou
 free tiers first):
 
 ```
-Gemini -> Groq -> Cerebras -> OpenRouter -> GitHub Models -> Cloudflare -> Mistral
+Gemini -> Groq -> Cerebras -> OpenRouter -> GitHub Models -> Cloudflare -> Mistral -> Gemini2 -> SambaNova -> Cohere
 ```
 
 ### Fallback algorithm
@@ -622,6 +622,9 @@ that **at least one** must be configured.
 | GitHub Models | `GITHUB_MODELS_TOKEN` | `https://models.github.ai/inference` | `openai/gpt-4o-mini` |
 | Cloudflare Workers AI | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | `https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1` | `@cf/meta/llama-3.1-8b-instruct` |
 | Mistral | `MISTRAL_API_KEY` | `https://api.mistral.ai/v1` | `mistral-small-latest` |
+| Gemini2 | `GEMINI_API_KEY` (reused) | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` |
+| SambaNova | `SAMBANOVA_API_KEY` | `https://api.sambanova.ai/v1` | `Meta-Llama-3.3-70B-Instruct` |
+| Cohere | `COHERE_API_KEY` | `https://api.cohere.ai/compatibility/v1` | `command-r` |
 
 Optional overrides (per provider): `<PROVIDER>_MODEL` to swap the model without code
 changes, and `AI_PROVIDER_ORDER` (comma-separated names) to reorder/disable the chain.
