@@ -22,16 +22,20 @@ jobs:
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
           IMAGE: ${{ env.IMAGE }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: ENV_FILE,IMAGE
+          envs: ENV_FILE,IMAGE,GHCR_TOKEN
           script: |
             set -e
 
             mkdir -p ~/english-bot && cd ~/english-bot
+
+            # Authenticate with GitHub Container Registry
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u github --password-stdin
 
             # Write .env from GitHub secret
             echo "$ENV_FILE" > .env
