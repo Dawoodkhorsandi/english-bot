@@ -1,12 +1,9 @@
-name: Deploy
+name: Release & Deploy
 
 on:
   push:
     tags:
       - 'v*'
-
-env:
-  IMAGE_NAME: english-bot
 
 jobs:
   test:
@@ -84,31 +81,27 @@ jobs:
           VERSION="${TAG#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-          # Extract the changelog text for this version from main.go
-          # Look for the Version field matching this release
-          CHANGELOG=$(python3 -c "
-          import re, sys
-          with open('main.go') as f:
+          python3 <<'PYEOF' > release-notes.md
+          import re
+          version = "$VERSION"
+          with open("main.go") as f:
               content = f.read()
-          # Find the entry for this version
-          pattern = r'Version:\s*\"${VERSION}\".*?Text:\s*((?:\"[^\"]*\"|[^}])*)'
+          pattern = r'Version:\s*"' + re.escape(version) + r'".*?Text:\s*((?:"[^"]*"\s*\+?\s*)*)'
           m = re.search(pattern, content, re.DOTALL)
           if m:
               raw = m.group(1).strip()
-              # Concatenate Go string literals
-              parts = re.findall(r'\"([^\"]*)\"', raw)
-              text = ''.join(parts)
-              # Convert HTML to markdown-ish for release notes
-              text = text.replace('<b>', '**').replace('</b>', '**')
-              text = text.replace('<code>', '\`').replace('</code>', '\`')
-              text = text.replace('\\\\n', '\n')
+              parts = re.findall(r'"([^"]*)"', raw)
+              text = "".join(parts)
+              text = text.replace("<b>", "**").replace("</b>", "**")
+              text = text.replace("<code>", "`").replace("</code>", "`")
+              text = text.replace("\\n", "\n")
               print(text)
           else:
-              print('Release ${VERSION}')
-          ")
+              print(f"Release v{version}")
+          PYEOF
 
-          # Write to file for the release body
-          echo "$CHANGELOG" > release-notes.md
+          echo "--- Release notes ---"
+          cat release-notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -121,12 +114,23 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    # Only deploy if SSH secrets are configured
-    if: ${{ vars.DEPLOY_ENABLED == 'true' || secrets.SSH_HOST != '' }}
+    environment: production
     steps:
+      - name: Check SSH config
+        id: check
+        run: |
+          if [ -z "${{ secrets.SSH_HOST }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "SSH_HOST not configured, skipping deploy"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.check.outputs.skip != 'true'
 
       - name: Deploy to VPS
+        if: steps.check.outputs.skip != 'true'
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -136,7 +140,6 @@ jobs:
           script: |
             set -e
 
-            # Navigate to project directory (clone if first deploy)
             if [ ! -d ~/english-bot ]; then
               git clone https://github.com/${{ github.repository }}.git ~/english-bot
             fi
@@ -145,12 +148,10 @@ jobs:
             git fetch --all --tags
             git checkout ${{ github.ref_name }}
 
-            # Build and restart
             docker compose down
             docker compose build --no-cache
             docker compose up -d
 
-            # Clean up dangling images
             docker image prune -f
 
             echo "Deployed ${{ github.ref_name }} successfully"
