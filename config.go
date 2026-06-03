@@ -22,6 +22,10 @@ var (
 	// Provider chain order (Change A). Comma-separated provider names; any
 	// provider whose key/config is unset at runtime is skipped automatically.
 	providerOrder = getEnv("AI_PROVIDER_ORDER", "gemini,groq,cerebras,openrouter,github,cloudflare,mistral")
+
+	// Spaced-repetition review tuning (Change D).
+	reviewCheckInterval = getEnvDuration("REVIEW_CHECK_INTERVAL", time.Hour)
+	reviewBatchMax      = getEnvInt("REVIEW_BATCH_MAX", 3)
 )
 
 // appLocation is the time.Location used for all scheduling decisions.

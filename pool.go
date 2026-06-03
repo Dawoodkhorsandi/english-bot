@@ -93,9 +93,17 @@ func (s *Store) PooledOldest(kind, level string) (term, meaning, text string, ok
 }
 
 // recordSentFor records a sent term in the appropriate per-user history table.
+// For vocabulary words it also seeds the spaced-repetition schedule (Change D),
+// so every word a user receives is enrolled for future review.
 func (s *Store) recordSentFor(kind string, chatID int64, term string) error {
 	if kind == kindWord {
-		return s.RecordSentVocab(chatID, term)
+		if err := s.RecordSentVocab(chatID, term); err != nil {
+			return err
+		}
+		if err := s.SeedReview(chatID, term, time.Now()); err != nil {
+			log.Printf("⚠️  [SRS] Could not seed review for %q (chat %d): %v", term, chatID, err)
+		}
+		return nil
 	}
 	return s.RecordSentWord(chatID, term)
 }

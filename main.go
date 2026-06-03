@@ -89,6 +89,13 @@ var Changelogs = []ChangelogEntry{
 			"• 💬 <b>Look up any word!</b> Just send me a word — in English or Persian — and I'll reply with a full vocabulary card (meaning, pronunciation, synonyms, examples)\n" +
 			"• Persian words are translated to their English equivalent automatically",
 	},
+	{
+		Version: "1.8.0",
+		Text: "📣 <b>What's New in v1.8.0</b>\n\n" +
+			"• 🧠 <b>Spaced repetition!</b> Words you've learned now come back as quick <b>memory checks</b> at growing intervals — the proven way to move them into long-term memory\n" +
+			"• Tap <b>✅ Knew it</b> or <b>❌ Forgot</b> and I'll fine-tune when you see each word next\n" +
+			"• 📊 /stats now shows how many words you've <b>mastered</b>",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -160,9 +167,11 @@ func main() {
 	//   1. poolFiller keeps the pre-generated content pool stocked.
 	//   2. broadcast scheduler fans pooled content out every 30 min (quiet-hour aware).
 	//   3. daily review scheduler sends a bedtime word recap at local midnight.
+	//   4. spaced-repetition scheduler resurfaces due words for review (Change D).
 	go poolFiller(ctx, chain, store)
 	go runBroadcastScheduler(ctx, chain, store)
 	go runDailyReviewScheduler(ctx, store)
+	go runReviewScheduler(ctx, store)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store)
@@ -322,6 +331,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"🎯 <b>Grammar drills</b> take one everyday verb through <b>14 tenses</b>:\n" +
 			"Simple, Continuous, Perfect, Perfect Continuous — across past, present and future — plus the First Conditional.\n\n" +
 			"📘 <b>Vocabulary words</b> give you the meaning, pronunciation, synonyms, opposites and real examples for a useful new word.\n\n" +
+			"🧠 <b>Spaced repetition:</b> words you've learned come back as quick <b>memory checks</b> at growing intervals — tap ✅ Knew it / ❌ Forgot and I'll tune when you see each one next.\n\n" +
 			"💬 <b>Look up any word:</b> just type it (English or Persian) and I'll send a full card for it.\n\n" +
 			"You get one of each per hour, about 30 minutes apart (quiet overnight).\n\n" +
 			"/drill — generate a grammar drill on demand\n" +
@@ -631,8 +641,61 @@ func handleCallback(store *Store, cb *TelegramCallbackQuery) {
 		return
 	}
 
+	if strings.HasPrefix(cb.Data, "srs:") {
+		handleReviewCallback(store, cb, chatID)
+		return
+	}
+
 	log.Printf("ℹ️  [CALLBACK_UNHANDLED] Unknown callback data %q from ChatID %d.", cb.Data, chatID)
 	_ = answerCallbackQuery(cb.ID, "")
+}
+
+// handleReviewCallback applies a spaced-repetition self-grade ("Knew it" /
+// "Forgot") from a memory-check card tap (Change D). Callback data is of the
+// form "srs:known:<word>" or "srs:forgot:<word>".
+func handleReviewCallback(store *Store, cb *TelegramCallbackQuery, chatID int64) {
+	rest := strings.TrimPrefix(cb.Data, "srs:")
+	action, word, found := strings.Cut(rest, ":")
+	if !found || word == "" {
+		_ = answerCallbackQuery(cb.ID, "")
+		return
+	}
+
+	now := time.Now()
+	var (
+		ok      bool
+		err     error
+		toast   string
+		confirm string
+	)
+	switch action {
+	case "known":
+		ok, err = store.ApplyReviewKnown(chatID, word, now)
+		toast = "Great — pushed further out 👍"
+		confirm = fmt.Sprintf("✅ <b>%s</b> — nice! I'll show it again later, spaced further out.", word)
+	case "forgot":
+		ok, err = store.ApplyReviewForgot(chatID, word, now)
+		toast = "No worries — you'll see it again soon"
+		confirm = fmt.Sprintf("❌ <b>%s</b> — no problem. I'll bring it back soon so it sticks.", word)
+	default:
+		_ = answerCallbackQuery(cb.ID, "")
+		return
+	}
+
+	if err != nil {
+		log.Printf("❌ [SRS] Could not apply %q for chat %d word %q: %v", action, chatID, word, err)
+		_ = answerCallbackQuery(cb.ID, "Could not save, try again")
+		return
+	}
+	if !ok {
+		_ = answerCallbackQuery(cb.ID, "That review has expired")
+		return
+	}
+	log.Printf("🧠 [SRS] ChatID %d graded %q as %q.", chatID, word, action)
+	_ = answerCallbackQuery(cb.ID, toast)
+	if cb.Message != nil {
+		_ = editMessageText(chatID, cb.Message.MessageID, confirm, [][]inlineButton{})
+	}
 }
 
 func sendToTelegram(chatID int64, text string) error {
@@ -792,6 +855,16 @@ func openStore(path string) (*Store, error) {
 		interval_minutes INTEGER NOT NULL DEFAULT 30,
 		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+	CREATE TABLE IF NOT EXISTS review_schedule (
+		chat_id       INTEGER NOT NULL,
+		word          TEXT    NOT NULL,
+		interval_days INTEGER NOT NULL DEFAULT 1,
+		ease          REAL    NOT NULL DEFAULT 2.5,
+		reps          INTEGER NOT NULL DEFAULT 0,
+		due_at        DATETIME NOT NULL,
+		PRIMARY KEY (chat_id, word)
+	);
+	CREATE INDEX IF NOT EXISTS idx_review_due ON review_schedule(chat_id, due_at);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err

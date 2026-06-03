@@ -18,6 +18,7 @@ type UserStats struct {
 	Paused         bool
 	Verbs          int // total grammar drills practised
 	Words          int // total vocabulary words learned
+	Mastered       int // words moved into long-term memory (Change D)
 	ActiveDays     int // distinct local days with any activity
 	CurrentStreak  int // consecutive active days ending today/yesterday
 	LongestStreak  int // best run of consecutive active days ever
@@ -60,6 +61,9 @@ func (s *Store) UserStats(chatID int64) (UserStats, error) {
 	}
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM sent_vocab WHERE chat_id = ?", chatID).Scan(&st.Words); err != nil {
 		return st, err
+	}
+	if mastered, err := s.MasteredCount(chatID); err == nil {
+		st.Mastered = mastered
 	}
 
 	var created any
@@ -164,6 +168,7 @@ func formatStats(st UserStats) string {
 	msg := "📊 <b>Your Progress</b>\n\n" +
 		fmt.Sprintf("🎯 Grammar drills practised: <b>%d</b>\n", st.Verbs) +
 		fmt.Sprintf("📘 Vocabulary words learned: <b>%d</b>\n", st.Words) +
+		fmt.Sprintf("🧠 Words mastered: <b>%d</b>\n", st.Mastered) +
 		fmt.Sprintf("🗓️ Active days: <b>%d</b>\n", st.ActiveDays) +
 		fmt.Sprintf("⚡ Current streak: <b>%d</b> day%s%s\n", st.CurrentStreak, plural(st.CurrentStreak), flame) +
 		fmt.Sprintf("🏆 Longest streak: <b>%d</b> day%s\n", st.LongestStreak, plural(st.LongestStreak)) +

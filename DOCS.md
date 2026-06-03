@@ -754,7 +754,7 @@ double-send. `review_date` is the Tehran calendar date being recapped.
 
 ---
 
-## Change D — Spaced Repetition Review (top priority)
+## Change D — Spaced Repetition Review (top priority) — IMPLEMENTED in v1.8.0
 
 The highest-ROI learning feature: instead of seeing a word once, users re-encounter it
 at growing intervals so it moves into long-term memory.
@@ -786,6 +786,27 @@ PK `(chat_id, word)`. A word enters the schedule the first time it is sent (seed
 picks words whose `due_at` has passed and re-sends a compact reminder card, then bumps
 the interval. Difficulty feedback comes from Change E's quiz answers (correct = promote,
 wrong = reset to interval 1) or from a simple "Knew it / Forgot" inline keyboard.
+
+**Implementation (v1.8.0):** `srs.go` holds the SM-2-lite logic (`srsKnown` grows the
+interval 1 → 3 → `round(interval × ease)` and nudges ease up; `srsForgot` resets to a
+1-day interval and lowers ease, floored at `srsMinEase = 1.3`) plus the `review_schedule`
+store methods (`SeedReview`, `DueReviews`, `ApplyReviewKnown`, `ApplyReviewForgot`,
+`SnoozeReview`, `MasteredCount`). Words are seeded inside `recordSentFor(kindWord, …)`
+(the single choke point for vocabulary sends), so every word a user receives — scheduled,
+on-demand `/word`, or a Change-M lookup — is enrolled, idempotently. `runReviewScheduler`
+ticks every `REVIEW_CHECK_INTERVAL` (default 1h), skips quiet hours and paused users, and
+sends up to `REVIEW_BATCH_MAX` (default 3) compact "memory check" cards per user with a
+`✅ Knew it` / `❌ Forgot` inline keyboard; each reminded word is snoozed so it isn't
+re-sent before the user answers. The button tap routes through the `srs:` callback branch
+(`handleReviewCallback`) which applies the promote/reset and reschedules from the user's
+response. Timestamps are stored as UTC strings (`2006-01-02 15:04:05`) so lexicographic
+`due_at <= now` comparison is correct. `/stats` gained a **Words mastered** line
+(`interval_days >= srsMasteredIntervalDays = 21`). Tests: `srs_smoke_test.go`.
+
+| Config | Default | Description |
+|---|---|---|
+| `REVIEW_CHECK_INTERVAL` | `1h` | How often the scheduler scans for due reviews |
+| `REVIEW_BATCH_MAX` | `3` | Max review reminders sent per user per scan |
 
 ---
 
@@ -1061,7 +1082,9 @@ and get back a vocabulary card formatted exactly like `/word`.
    `user_prefs.interval_minutes` + per-user due-check sweep; reused `callback_query` infra).
 4. ~~**Change M (Word lookup)**~~ — ✅ **DONE in v1.7.0** (`generateWordFor` +
    `handleWordLookup` replacing the `default` branch; pools & records like `/word`).
-5. **Change D (Spaced Repetition)** — the core learning upgrade; reuses existing history.
+5. ~~**Change D (Spaced Repetition)**~~ — ✅ **DONE in v1.8.0** (`review_schedule` +
+   SM-2-lite `srs.go`; seeded on every word send; hourly reminder sweep with
+   Knew-it/Forgot buttons; `/stats` mastered count).
 6. **Change E (Quiz / Active Recall)** — adds `callback_query` handling; pairs with D to
    feed difficulty signals.
 7. **Change J (Admin metrics)** — operational visibility once the above add moving parts.
