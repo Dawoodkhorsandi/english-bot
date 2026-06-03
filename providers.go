@@ -192,6 +192,24 @@ func buildProviders(ctx context.Context) map[string]Provider {
 			model:   getEnv("MISTRAL_MODEL", "mistral-small-latest"),
 			client:  httpClient,
 		},
+		"together": &OpenAICompatProvider{
+			name: "together", apiKey: getEnv("TOGETHER_API_KEY", ""),
+			baseURL: getEnv("TOGETHER_BASE_URL", "https://api.together.xyz/v1"),
+			model:   getEnv("TOGETHER_MODEL", "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free"),
+			client:  httpClient,
+		},
+		"sambanova": &OpenAICompatProvider{
+			name: "sambanova", apiKey: getEnv("SAMBANOVA_API_KEY", ""),
+			baseURL: getEnv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1"),
+			model:   getEnv("SAMBANOVA_MODEL", "Meta-Llama-3.3-70B-Instruct"),
+			client:  httpClient,
+		},
+		"cohere": &OpenAICompatProvider{
+			name: "cohere", apiKey: getEnv("COHERE_API_KEY", ""),
+			baseURL: getEnv("COHERE_BASE_URL", "https://api.cohere.ai/compatibility/v1"),
+			model:   getEnv("COHERE_MODEL", "command-r"),
+			client:  httpClient,
+		},
 	}
 }
 
