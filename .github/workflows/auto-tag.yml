@@ -1,0 +1,50 @@
+name: Auto Tag
+
+# Bridges the app version to git tags: on every push to master, read the newest
+# entry in the Changelogs slice in main.go and, if no matching vX.Y.Z tag exists,
+# create and push it. Pushing the tag (with a PAT, not GITHUB_TOKEN) triggers
+# release.yml, which builds, releases, and deploys that version.
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full history + tags to check for an existing tag
+
+      - name: Determine version from changelog
+        id: ver
+        run: |
+          # Newest changelog entry is the last `Version: "X.Y.Z"` in the slice.
+          VERSION=$(grep -oP 'Version:\s*"\K[0-9]+\.[0-9]+\.[0-9]+' main.go | tail -1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::No Changelogs version found in main.go"
+            exit 1
+          fi
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Newest changelog version: v$VERSION"
+
+      - name: Create and push tag if missing
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          # Push with the PAT so the tag push triggers release.yml (GITHUB_TOKEN
+          # pushes would not, due to GitHub's workflow-recursion prevention).
+          git push "https://x-access-token:${GHCR_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
+          echo "Pushed $TAG — release + deploy will follow."
