@@ -3,71 +3,58 @@ name: Deploy
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: 'Tag, branch, or commit to deploy (e.g. v1.10.0, master, abc1234)'
+      tag:
+        description: 'Image tag to deploy (e.g. v1.10.0, latest)'
         required: true
-        default: 'master'
+        default: 'latest'
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.ref }}
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Test
-        run: go test ./... -count=1 -race
-
   deploy:
-    needs: test
     runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag }}
     steps:
-      - name: Debug connectivity
-        run: |
-          echo "Host length: ${#HOST}"
-          echo "User length: ${#USER}"
-          echo "Key length: ${#KEY}"
-          echo "Port: $PORT"
-          nc -zv -w 5 "$HOST" "$PORT" 2>&1 || echo "TCP connection failed"
-        env:
-          HOST: ${{ secrets.SSH_HOST }}
-          USER: ${{ secrets.SSH_USER }}
-          KEY: ${{ secrets.SSH_KEY }}
-          PORT: ${{ secrets.SSH_PORT || 22 }}
+      - name: Lowercase image name
+        run: echo "IMAGE=${IMAGE,,}" >> "$GITHUB_ENV"
 
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
+          IMAGE: ${{ env.IMAGE }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: ENV_FILE
+          envs: ENV_FILE,IMAGE
           script: |
             set -e
 
-            if [ ! -d ~/english-bot ]; then
-              git clone https://github.com/${{ github.repository }}.git ~/english-bot
-            fi
-
-            cd ~/english-bot
-            git fetch --all --tags
-            git checkout ${{ github.event.inputs.ref }}
+            mkdir -p ~/english-bot && cd ~/english-bot
 
             # Write .env from GitHub secret
             echo "$ENV_FILE" > .env
 
-            docker compose down
-            docker compose build --no-cache
+            # Write docker-compose.yml pointing to the registry image
+            cat > docker-compose.yml <<EOF
+            services:
+              english-bot:
+                image: $IMAGE
+                container_name: english-bot
+                restart: unless-stopped
+                env_file:
+                  - .env
+                volumes:
+                  - bot-data:/data
+
+            volumes:
+              bot-data:
+            EOF
+
+            docker compose pull
             docker compose up -d
 
             docker image prune -f
 
-            echo "Deployed ${{ github.event.inputs.ref }} successfully"
+            echo "Deployed $IMAGE successfully"
