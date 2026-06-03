@@ -141,3 +141,13 @@ jobs:
           body_path: release-notes.md
           files: release/*
           generate_release_notes: false
+
+  # Auto-deploy the freshly pushed version tag to the VPS. Reuses deploy.yml so
+  # the deploy script stays a single source of truth (it also remains available
+  # as a manual workflow_dispatch). Runs after the image is in the registry.
+  deploy:
+    needs: docker
+    uses: ./.github/workflows/deploy.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
