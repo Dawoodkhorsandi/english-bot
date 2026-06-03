@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./... -count=1 -race
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          BINARY="english-bot-${{ matrix.goos }}-${{ matrix.goarch }}"
+          go build -trimpath -ldflags="-s -w" -o "$BINARY" .
+          chmod +x "$BINARY"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: english-bot-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: english-bot-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find artifacts -type f -name 'english-bot-*' -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Extract changelog
+        id: changelog
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          export RELEASE_VERSION="$VERSION"
+
+          python3 <<'PYEOF' > release-notes.md
+          import re, os
+          version = os.environ["RELEASE_VERSION"]
+          with open("main.go") as f:
+              content = f.read()
+          pattern = r'Version:\s*"' + re.escape(version) + r'".*?Text:\s*((?:"(?:[^"\\]|\\.)*"\s*\+?\s*)*)'
+          m = re.search(pattern, content, re.DOTALL)
+          if m:
+              raw = m.group(1).strip()
+              parts = re.findall(r'"((?:[^"\\]|\\.)*)"', raw)
+              text = "".join(parts)
+              text = text.replace('\\"', '"')
+              text = text.replace("<b>", "**").replace("</b>", "**")
+              text = text.replace("<code>", "`").replace("</code>", "`")
+              text = text.replace("\\n", "\n")
+              print(text)
+          else:
+              print(f"Release v{version}")
+          PYEOF
+
+          echo "--- Release notes ---"
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ github.ref_name }}"
+          body_path: release-notes.md
+          files: release/*
+          generate_release_notes: false
