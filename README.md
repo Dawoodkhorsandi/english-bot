@@ -1,7 +1,7 @@
 # English Muscle Memory Bot
 
 [![CI](https://github.com/Dawoodkhorsandi/english-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Dawoodkhorsandi/english-bot/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Dawoodkhorsandi/COVERAGE_GIST_ID/raw/coverage-badge.json)](https://github.com/Dawoodkhorsandi/english-bot/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/Dawoodkhorsandi/bf1536b78d62b052a98f2d090b29b011/raw/coverage-badge.json)](https://github.com/Dawoodkhorsandi/english-bot/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
