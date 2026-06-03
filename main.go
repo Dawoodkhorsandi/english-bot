@@ -201,6 +201,7 @@ func main() {
 	go runReviewScheduler(ctx, store, notifier)
 	go runQuizScheduler(ctx, store, notifier)
 	go runWeeklyDigestScheduler(ctx, store, notifier)
+	go runIdiomScheduler(ctx, chain, store, notifier)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store, notifier)
@@ -1121,6 +1122,12 @@ func openStore(path string) (*Store, error) {
 		review_date TEXT    NOT NULL,
 		sent_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, review_date)
+	);
+	CREATE TABLE IF NOT EXISTS idiom_delivery (
+		chat_id    INTEGER NOT NULL,
+		idiom_date TEXT    NOT NULL,
+		sent_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, idiom_date)
 	);
 	CREATE TABLE IF NOT EXISTS user_prefs (
 		chat_id          INTEGER PRIMARY KEY,

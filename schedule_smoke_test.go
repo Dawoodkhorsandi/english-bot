@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -450,6 +451,64 @@ func TestSendDailyReview_DeliversReview(t *testing.T) {
 	}
 	if !strings.Contains(text, "ephemeral") || !strings.Contains(text, "lucid") {
 		t.Error("expected reviewed words in message")
+	}
+}
+
+func TestNextDailyTime(t *testing.T) {
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	// Before today's target time → fires today.
+	got := nextDailyTime(time.Date(2026, 6, 3, 8, 0, 0, 0, time.UTC), 9, 0)
+	if want := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Errorf("before target: got %v, want %v", got, want)
+	}
+	// At/after the target → fires next day.
+	got = nextDailyTime(time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC), 9, 0)
+	if want := time.Date(2026, 6, 4, 9, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Errorf("at target: got %v, want %v", got, want)
+	}
+}
+
+func TestSendIdiomOfDay_DeliversAndIsIdempotent(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+	store.AddToPool(kindIdiom, defaultLevel, "break the ice", "to start a conversation", "🗣️ idiom card")
+
+	now := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
+	sendIdiomOfDay(context.Background(), emptyProviderChain(), store, mock, now)
+
+	if mock.sentCount() != 1 {
+		t.Fatalf("expected 1 idiom sent, got %d", mock.sentCount())
+	}
+	if mock.lastSentText() != "🗣️ idiom card" {
+		t.Errorf("got %q, want the idiom card", mock.lastSentText())
+	}
+
+	// Second run on the same day must not resend.
+	sendIdiomOfDay(context.Background(), emptyProviderChain(), store, mock, now)
+	if mock.sentCount() != 1 {
+		t.Errorf("expected no resend same day, got %d total", mock.sentCount())
+	}
+}
+
+func TestSendIdiomOfDay_SkipsPausedUsers(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+	store.SetPaused(100, true)
+	store.AddToPool(kindIdiom, defaultLevel, "piece of cake", "very easy", "card")
+
+	sendIdiomOfDay(context.Background(), emptyProviderChain(), store, mock, time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC))
+	if mock.sentCount() != 0 {
+		t.Error("expected no idiom for paused user")
 	}
 }
 

@@ -197,6 +197,32 @@ func (s *Store) MarkReviewDelivered(chatID int64, reviewDate string) error {
 	return err
 }
 
+// IdiomDelivered reports whether the idiom of the day for idiomDate has already
+// been delivered to chatID.
+func (s *Store) IdiomDelivered(chatID int64, idiomDate string) (bool, error) {
+	var one int
+	err := s.db.QueryRow(
+		"SELECT 1 FROM idiom_delivery WHERE chat_id = ? AND idiom_date = ?",
+		chatID, idiomDate,
+	).Scan(&one)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// MarkIdiomDelivered records that the idiom of the day for idiomDate was sent.
+func (s *Store) MarkIdiomDelivered(chatID int64, idiomDate string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO idiom_delivery (chat_id, idiom_date) VALUES (?, ?)",
+		chatID, idiomDate,
+	)
+	return err
+}
+
 // ---------------------------------------------------------------------------
 // weekly_digest_delivery store methods (Change K)
 // ---------------------------------------------------------------------------
