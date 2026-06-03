@@ -102,6 +102,13 @@ var Changelogs = []ChangelogEntry{
 			"• 🧩 <b>Quizzes!</b> Test yourself with multiple-choice questions on words you've learned — send /quiz anytime, and I'll also pop one in now and then\n" +
 			"• Your answers tune your spaced-repetition schedule and show up as <b>quiz accuracy</b> in /stats",
 	},
+	{
+		Version: "1.10.0",
+		Text: "📣 <b>What's New in v1.10.0</b>\n\n" +
+			"• 🧩 <b>New quiz types!</b> Synonym matching (\"Pick the synonym of…\") and fill-in-the-blank questions now rotate alongside the existing formats\n" +
+			"• 📅 <b>Weekly recap:</b> every Sunday evening you'll get a summary of the week's words, quiz accuracy, streak and a word-of-the-week highlight\n" +
+			"• 🔧 <b>Admin tools:</b> /metrics, /health and /announce for the bot maintainer",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -175,11 +182,13 @@ func main() {
 	//   3. daily review scheduler sends a bedtime word recap at local midnight.
 	//   4. spaced-repetition scheduler resurfaces due words for review (Change D).
 	//   5. quiz scheduler periodically tests learned words (Change E).
+	//   6. weekly digest scheduler sends a recap every DIGEST_DAY at DIGEST_TIME (Change K).
 	go poolFiller(ctx, chain, store)
 	go runBroadcastScheduler(ctx, chain, store)
 	go runDailyReviewScheduler(ctx, store)
 	go runReviewScheduler(ctx, store)
 	go runQuizScheduler(ctx, store)
+	go runWeeklyDigestScheduler(ctx, store)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store)
@@ -441,6 +450,31 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"♻️ <b>History reset!</b>\n\nCleared <b>%d</b> practiced verbs and <b>%d</b> vocabulary words. You may see them again in future sends.", clearedVerbs, clearedWords,
 		))
 
+	case "/metrics":
+		if !isMaintainer(chatID) {
+			_ = sendToTelegram(chatID, "🔒 This command is only available to the bot maintainer.")
+			return
+		}
+		handleMetrics(store, chain, chatID)
+
+	case "/announce":
+		if !isMaintainer(chatID) {
+			_ = sendToTelegram(chatID, "🔒 This command is only available to the bot maintainer.")
+			return
+		}
+		announceText := ""
+		if spaceIdx := strings.Index(msg.Text, " "); spaceIdx != -1 {
+			announceText = strings.TrimSpace(msg.Text[spaceIdx+1:])
+		}
+		handleAnnounce(store, chatID, announceText)
+
+	case "/health":
+		if !isMaintainer(chatID) {
+			_ = sendToTelegram(chatID, "🔒 This command is only available to the bot maintainer.")
+			return
+		}
+		handleHealth(store, chain, chatID)
+
 	default:
 		if strings.HasPrefix(command, "/") {
 			log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
@@ -520,6 +554,118 @@ func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, c
 	}
 	log.Printf("✅ [LOOKUP] Delivered %q (resolved %q) to chat %d via %s.", term, word, chatID, provider)
 	_ = sendToTelegram(chatID, card)
+}
+
+// ---------------------------------------------------------------------------
+// Admin commands (Change J) — gated by MAINTAINER_CHAT_ID
+// ---------------------------------------------------------------------------
+
+// isMaintainer reports whether chatID matches the configured maintainer.
+func isMaintainer(chatID int64) bool {
+	mID, err := strconv.ParseInt(MaintainerChatID, 10, 64)
+	if err != nil {
+		return false
+	}
+	return chatID == mID
+}
+
+// handleMetrics sends an operational summary to the maintainer (/metrics).
+func handleMetrics(store *Store, chain *ProviderChain, chatID int64) {
+	log.Printf("📊 [ADMIN] /metrics requested by ChatID %d.", chatID)
+
+	var b strings.Builder
+	b.WriteString("📊 <b>Bot Metrics</b>\n\n")
+
+	total, active, paused := store.SubscriberStats()
+	b.WriteString(fmt.Sprintf("👥 Subscribers: <b>%d</b> (active: %d, paused: %d)\n\n", total, active, paused))
+
+	b.WriteString("📦 <b>Pool depth:</b>\n")
+	levels, _ := store.ActiveLevels()
+	for _, kind := range []string{kindDrill, kindWord} {
+		for _, level := range levels {
+			count, _ := store.PoolCount(kind, level)
+			target := poolTargetFor(level)
+			b.WriteString(fmt.Sprintf("  %s/%s: <b>%d</b>/%d\n", kind, level, count, target))
+		}
+	}
+	b.WriteString("\n")
+
+	totalAnswered, totalCorrect, _ := store.TotalQuizStats()
+	if totalAnswered > 0 {
+		pct := totalCorrect * 100 / totalAnswered
+		b.WriteString(fmt.Sprintf("🧩 Quiz volume: <b>%d</b> answers (%d%% correct)\n", totalAnswered, pct))
+	} else {
+		b.WriteString("🧩 Quiz volume: <b>0</b> answers\n")
+	}
+
+	totalMastered, _ := store.TotalMasteredCount()
+	b.WriteString(fmt.Sprintf("🧠 Words mastered (all users): <b>%d</b>\n", totalMastered))
+
+	b.WriteString(fmt.Sprintf("\n⚡ Providers enabled: <b>%d</b>\n", len(chain.providers)))
+	for _, p := range chain.providers {
+		b.WriteString(fmt.Sprintf("  • %s\n", p.Name()))
+	}
+
+	_ = sendToTelegram(chatID, b.String())
+}
+
+// handleAnnounce broadcasts an HTML message to all non-paused subscribers (/announce).
+func handleAnnounce(store *Store, chatID int64, text string) {
+	if text == "" {
+		_ = sendToTelegram(chatID, "Usage: <code>/announce &lt;HTML message&gt;</code>")
+		return
+	}
+	log.Printf("📣 [ADMIN] /announce by ChatID %d: %q", chatID, text)
+
+	chats, err := store.Subscribers()
+	if err != nil {
+		log.Printf("❌ [ADMIN] Could not read subscribers: %v", err)
+		_ = sendToTelegram(chatID, "❌ Could not read subscribers.")
+		return
+	}
+
+	sent, failed := 0, 0
+	for _, id := range chats {
+		if store.IsPaused(id) {
+			continue
+		}
+		if err := sendToTelegram(id, text); err != nil {
+			failed++
+		} else {
+			sent++
+		}
+	}
+	log.Printf("📣 [ADMIN] Announcement delivered to %d, failed %d.", sent, failed)
+	_ = sendToTelegram(chatID, fmt.Sprintf("📣 Announcement delivered to <b>%d</b> subscriber(s) (%d failed).", sent, failed))
+}
+
+// handleHealth sends a quick system health check to the maintainer (/health).
+func handleHealth(store *Store, chain *ProviderChain, chatID int64) {
+	log.Printf("🏥 [ADMIN] /health requested by ChatID %d.", chatID)
+
+	var b strings.Builder
+	b.WriteString("🏥 <b>Health Check</b>\n\n")
+
+	if err := store.db.Ping(); err != nil {
+		b.WriteString("💾 Database: ❌ unreachable\n")
+	} else {
+		b.WriteString("💾 Database: ✅ OK\n")
+	}
+
+	b.WriteString(fmt.Sprintf("⚡ Providers: <b>%d</b> enabled\n", len(chain.providers)))
+	for _, p := range chain.providers {
+		b.WriteString(fmt.Sprintf("  • %s: ✅\n", p.Name()))
+	}
+
+	now := time.Now().In(appLocation)
+	b.WriteString(fmt.Sprintf("\n🕐 Server time: <b>%s</b>\n", now.Format("2006-01-02 15:04:05 MST")))
+	b.WriteString(fmt.Sprintf("🌙 Quiet hours: %s–%s", quietStart, quietEnd))
+	if isQuietHours(time.Now()) {
+		b.WriteString(" (currently quiet)")
+	}
+	b.WriteString("\n")
+
+	_ = sendToTelegram(chatID, b.String())
 }
 
 // levelKeyboard builds a one-row inline keyboard of the three levels, marking the
@@ -893,6 +1039,12 @@ func openStore(path string) (*Store, error) {
 		answered_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_quiz_chat ON quiz_results(chat_id);
+	CREATE TABLE IF NOT EXISTS weekly_digest_delivery (
+		chat_id    INTEGER NOT NULL,
+		week_start TEXT    NOT NULL,
+		sent_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, week_start)
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err

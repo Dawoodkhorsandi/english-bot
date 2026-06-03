@@ -265,3 +265,179 @@ func formatReview(items []reviewItem) string {
 	b.WriteString("\n😴 Sleep well — say each one aloud once more before you do!")
 	return b.String()
 }
+
+// ---------------------------------------------------------------------------
+// Weekly digest scheduler (Change K)
+// ---------------------------------------------------------------------------
+
+// runWeeklyDigestScheduler fires once a week at the configured day+time and
+// sends each subscriber a recap of the week's words, quiz accuracy, streak,
+// and a "word of the week" highlight.
+func runWeeklyDigestScheduler(ctx context.Context, store *Store) {
+	if digestDay < 0 {
+		log.Println("📅 [DIGEST] Weekly digest scheduler disabled.")
+		return
+	}
+	weekdayName := time.Weekday(digestDay).String()
+	log.Printf("📅 [DIGEST] Weekly digest scheduler started (%s at %s).", weekdayName, digestTime)
+	for {
+		next := nextWeekdayTime(time.Now(), time.Weekday(digestDay), digestTime)
+		wait := time.Until(next)
+		log.Printf("📅 [DIGEST] Next digest at %s (in %s).", next.Format("2006-01-02 15:04 MST"), wait.Truncate(time.Second))
+
+		select {
+		case <-ctx.Done():
+			log.Println("📅 [DIGEST] Weekly digest scheduler stopped.")
+			return
+		case <-time.After(wait):
+		}
+
+		sendWeeklyDigest(store, time.Now())
+	}
+}
+
+// nextWeekdayTime returns the next occurrence of the given weekday at the given
+// local time (HH:MM format, parsed via parseHourMinute) after t.
+func nextWeekdayTime(t time.Time, weekday time.Weekday, timeStr string) time.Time {
+	h, m := parseHourMinute(timeStr)
+	local := t.In(appLocation)
+	y, mo, d := local.Date()
+	target := time.Date(y, mo, d, h, m, 0, 0, appLocation)
+
+	// Advance until we reach the correct weekday AND the time is in the future.
+	for target.Weekday() != weekday || !target.After(local) {
+		target = target.AddDate(0, 0, 1)
+	}
+	return target
+}
+
+// sendWeeklyDigest computes the past-7-day window and sends each subscriber a
+// recap of the week's vocabulary, quiz accuracy, streak and a word highlight.
+// Idempotent per (chat, week_start) via weekly_digest_delivery.
+func sendWeeklyDigest(store *Store, now time.Time) {
+	local := now.In(appLocation)
+	weekStartLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, appLocation).AddDate(0, 0, -7)
+	weekStart := weekStartLocal.Format("2006-01-02")
+
+	startUTC := weekStartLocal.UTC().Format("2006-01-02 15:04:05")
+	endUTC := time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), local.Minute(), 0, 0, appLocation).UTC().Format("2006-01-02 15:04:05")
+
+	chats, err := store.Subscribers()
+	if err != nil {
+		log.Printf("❌ [DIGEST] Could not read subscribers: %v", err)
+		return
+	}
+	log.Printf("📅 [DIGEST] Building weekly digest for week %s (%d subscribers).", weekStart, len(chats))
+
+	sent := 0
+	for _, chatID := range chats {
+		if store.IsPaused(chatID) {
+			continue
+		}
+
+		delivered, err := store.WeeklyDigestDelivered(chatID, weekStart)
+		if err != nil {
+			log.Printf("⚠️  [DIGEST] Delivery check failed for chat %d: %v", chatID, err)
+			continue
+		}
+		if delivered {
+			continue
+		}
+
+		words, err := store.WordsSentBetween(chatID, startUTC, endUTC)
+		if err != nil {
+			log.Printf("⚠️  [DIGEST] Word lookup failed for chat %d: %v", chatID, err)
+			continue
+		}
+
+		stats, err := store.UserStats(chatID)
+		if err != nil {
+			log.Printf("⚠️  [DIGEST] Stats failed for chat %d: %v", chatID, err)
+			continue
+		}
+
+		weekQuizAnswered, weekQuizCorrect, _ := store.WeeklyQuizStats(chatID, startUTC, endUTC)
+
+		msg := formatWeeklyDigest(words, stats, weekQuizAnswered, weekQuizCorrect)
+		if msg == "" {
+			// Nothing to report; mark done so we don't retry.
+			_ = store.MarkWeeklyDigestDelivered(chatID, weekStart)
+			continue
+		}
+
+		if err := sendToTelegram(chatID, msg); err != nil {
+			log.Printf("❌ [DIGEST] Send to chat %d failed: %v", chatID, err)
+			continue
+		}
+		if err := store.MarkWeeklyDigestDelivered(chatID, weekStart); err != nil {
+			log.Printf("⚠️  [DIGEST] Could not mark digest delivered for chat %d: %v", chatID, err)
+		}
+		sent++
+		log.Printf("📅 [DIGEST] Sent weekly digest to chat %d.", chatID)
+	}
+	if sent > 0 {
+		log.Printf("📅 [DIGEST] Sweep complete: %d digest(s) delivered.", sent)
+	}
+}
+
+// formatWeeklyDigest renders the weekly recap message. Returns "" if there is
+// nothing worth reporting (no words learned and no quizzes taken).
+func formatWeeklyDigest(words []reviewItem, stats UserStats, weekQuizAnswered, weekQuizCorrect int) string {
+	if len(words) == 0 && weekQuizAnswered == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("📅 <b>Weekly Recap</b>\n\n")
+
+	if len(words) > 0 {
+		b.WriteString(fmt.Sprintf("📘 <b>Words learned this week:</b> %d\n", len(words)))
+		for _, w := range words {
+			if w.meaning != "" {
+				b.WriteString(fmt.Sprintf("  • <b>%s</b> — %s\n", w.term, w.meaning))
+			} else {
+				b.WriteString(fmt.Sprintf("  • <b>%s</b>\n", w.term))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	if weekQuizAnswered > 0 {
+		pct := weekQuizCorrect * 100 / weekQuizAnswered
+		b.WriteString(fmt.Sprintf("🧩 Quiz accuracy this week: <b>%d%%</b> (%d/%d)\n", pct, weekQuizCorrect, weekQuizAnswered))
+	}
+
+	if stats.CurrentStreak > 0 {
+		flame := ""
+		if stats.CurrentStreak >= 3 {
+			flame = " 🔥"
+		}
+		b.WriteString(fmt.Sprintf("⚡ Current streak: <b>%d</b> day%s%s\n", stats.CurrentStreak, plural(stats.CurrentStreak), flame))
+	}
+
+	if stats.Mastered > 0 {
+		b.WriteString(fmt.Sprintf("🧠 Total words mastered: <b>%d</b>\n", stats.Mastered))
+	}
+
+	// Word of the week: highlight the first word with a meaning.
+	if len(words) > 0 {
+		var wotw reviewItem
+		for _, w := range words {
+			if w.meaning != "" {
+				wotw = w
+				break
+			}
+		}
+		if wotw.term == "" {
+			wotw = words[0]
+		}
+		b.WriteString(fmt.Sprintf("\n⭐ <b>Word of the week:</b> <b>%s</b>", wotw.term))
+		if wotw.meaning != "" {
+			b.WriteString(fmt.Sprintf(" — %s", wotw.meaning))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\nKeep it up — consistency is the key to mastery! 💪")
+	return b.String()
+}

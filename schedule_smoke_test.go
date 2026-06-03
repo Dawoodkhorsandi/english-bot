@@ -95,3 +95,49 @@ func TestIntervalMigration(t *testing.T) {
 		t.Errorf("interval = %d, want default %d", prefs.Interval, defaultInterval)
 	}
 }
+
+func TestNextWeekdayTime(t *testing.T) {
+	// Wednesday 2026-06-03 14:00 Tehran; next Sunday at 20:00 should be 2026-06-07.
+	loc, _ := time.LoadLocation("Asia/Tehran")
+	appLocation = loc
+	now := time.Date(2026, 6, 3, 14, 0, 0, 0, loc) // Wednesday
+
+	next := nextWeekdayTime(now, time.Sunday, "20:00")
+	if next.Weekday() != time.Sunday {
+		t.Errorf("weekday = %s, want Sunday", next.Weekday())
+	}
+	if !next.After(now) {
+		t.Error("next must be after now")
+	}
+	if next.Hour() != 20 || next.Minute() != 0 {
+		t.Errorf("time = %02d:%02d, want 20:00", next.Hour(), next.Minute())
+	}
+	// Should be June 7 (the coming Sunday)
+	if next.Day() != 7 {
+		t.Errorf("day = %d, want 7", next.Day())
+	}
+}
+
+func TestNextWeekdayTimeSameDay(t *testing.T) {
+	// If today is Sunday at 10:00 and digest is Sunday 20:00, it should be today.
+	loc, _ := time.LoadLocation("Asia/Tehran")
+	appLocation = loc
+	now := time.Date(2026, 6, 7, 10, 0, 0, 0, loc) // Sunday 10:00
+
+	next := nextWeekdayTime(now, time.Sunday, "20:00")
+	if next.Day() != 7 {
+		t.Errorf("day = %d, want 7 (same day, later time)", next.Day())
+	}
+}
+
+func TestNextWeekdayTimePast(t *testing.T) {
+	// If today is Sunday at 21:00 and digest is Sunday 20:00, next should be next Sunday.
+	loc, _ := time.LoadLocation("Asia/Tehran")
+	appLocation = loc
+	now := time.Date(2026, 6, 7, 21, 0, 0, 0, loc) // Sunday 21:00
+
+	next := nextWeekdayTime(now, time.Sunday, "20:00")
+	if next.Day() != 14 {
+		t.Errorf("day = %d, want 14 (next Sunday)", next.Day())
+	}
+}

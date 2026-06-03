@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -127,7 +129,7 @@ func (s *Store) getReview(chatID int64, word string) (intervalDays int, ease flo
 		chatID, word,
 	).Scan(&intervalDays, &ease, &reps)
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return 0, 0, 0, false, nil
 		}
 		return 0, 0, 0, false, err

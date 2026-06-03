@@ -202,3 +202,39 @@ func plural(n int) string {
 	}
 	return "s"
 }
+
+// ---------------------------------------------------------------------------
+// Admin metrics (Change J)
+// ---------------------------------------------------------------------------
+
+// SubscriberStats returns the total, active and paused subscriber counts.
+func (s *Store) SubscriberStats() (total, active, paused int) {
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM subscribers").Scan(&total)
+	_ = s.db.QueryRow(`
+		SELECT COUNT(*) FROM subscribers sub
+		WHERE NOT EXISTS (
+			SELECT 1 FROM user_prefs up WHERE up.chat_id = sub.chat_id AND up.paused = 1
+		)
+	`).Scan(&active)
+	paused = total - active
+	return total, active, paused
+}
+
+// TotalQuizStats returns the total answered and correct quiz counts across all users.
+func (s *Store) TotalQuizStats() (answered, correct int, err error) {
+	err = s.db.QueryRow(
+		"SELECT COUNT(*), COALESCE(SUM(correct), 0) FROM quiz_results",
+	).Scan(&answered, &correct)
+	return answered, correct, err
+}
+
+// TotalMasteredCount returns the total number of mastered word-user pairs across
+// all users (words with interval >= srsMasteredIntervalDays).
+func (s *Store) TotalMasteredCount() (int, error) {
+	var n int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM review_schedule WHERE interval_days >= ?",
+		srsMasteredIntervalDays,
+	).Scan(&n)
+	return n, err
+}

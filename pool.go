@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -68,7 +70,7 @@ func (s *Store) PooledUnseen(kind, level string, chatID int64) (term, meaning, t
 
 	row := s.db.QueryRow(query, kind, level, chatID)
 	if err = row.Scan(&term, &meaning, &text); err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", "", "", false, nil
 		}
 		return "", "", "", false, err
@@ -84,7 +86,7 @@ func (s *Store) PooledOldest(kind, level string) (term, meaning, text string, ok
 		kind, level,
 	)
 	if err = row.Scan(&term, &meaning, &text); err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", "", "", false, nil
 		}
 		return "", "", "", false, err
@@ -152,7 +154,7 @@ func (s *Store) ReviewDelivered(chatID int64, reviewDate string) (bool, error) {
 		chatID, reviewDate,
 	).Scan(&one)
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}
 		return false, err
@@ -167,6 +169,46 @@ func (s *Store) MarkReviewDelivered(chatID int64, reviewDate string) error {
 		chatID, reviewDate,
 	)
 	return err
+}
+
+// ---------------------------------------------------------------------------
+// weekly_digest_delivery store methods (Change K)
+// ---------------------------------------------------------------------------
+
+// WeeklyDigestDelivered reports whether the weekly digest for weekStart has
+// already been delivered to chatID.
+func (s *Store) WeeklyDigestDelivered(chatID int64, weekStart string) (bool, error) {
+	var one int
+	err := s.db.QueryRow(
+		"SELECT 1 FROM weekly_digest_delivery WHERE chat_id = ? AND week_start = ?",
+		chatID, weekStart,
+	).Scan(&one)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// MarkWeeklyDigestDelivered records that the weekly digest for weekStart was sent.
+func (s *Store) MarkWeeklyDigestDelivered(chatID int64, weekStart string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO weekly_digest_delivery (chat_id, week_start) VALUES (?, ?)",
+		chatID, weekStart,
+	)
+	return err
+}
+
+// WeeklyQuizStats returns the total answered and correct quiz counts for a user
+// within the given UTC time range.
+func (s *Store) WeeklyQuizStats(chatID int64, startUTC, endUTC string) (answered, correct int, err error) {
+	err = s.db.QueryRow(
+		"SELECT COUNT(*), COALESCE(SUM(correct), 0) FROM quiz_results WHERE chat_id = ? AND answered_at >= ? AND answered_at < ?",
+		chatID, startUTC, endUTC,
+	).Scan(&answered, &correct)
+	return answered, correct, err
 }
 
 // ---------------------------------------------------------------------------

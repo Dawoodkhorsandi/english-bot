@@ -1,6 +1,8 @@
 package main
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -97,7 +99,7 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 		"SELECT level, paused, interval_minutes FROM user_prefs WHERE chat_id = ?", chatID,
 	).Scan(&level, &paused, &interval)
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return prefs, nil
 		}
 		return prefs, err

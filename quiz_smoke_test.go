@@ -2,6 +2,7 @@ package main
 
 import (
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 )
@@ -138,5 +139,227 @@ func TestMakeQuizFromSeenWords(t *testing.T) {
 	}
 	if reps != 1 {
 		t.Errorf("reps = %d, want 1 after one correct answer", reps)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Synonym quiz tests
+// ---------------------------------------------------------------------------
+
+const sampleCardWithSynonyms = `📘 <b>Word of the Hour: tedious</b>
+————————————————————
+
+💬 <b>Meaning</b>
+Too long, slow, or dull; tiringly monotonous.
+
+🔊 <b>Pronunciation</b>
+TEE-dee-uhs  ·  /ˈtiː.di.əs/
+
+✅ <b>Synonyms</b>
+boring, monotonous, dull, tiresome, wearisome
+
+⛔ <b>Opposites</b>
+exciting, interesting, stimulating
+
+📝 <b>Examples</b>
+• The lecture was so <b>tedious</b> that half the audience fell asleep.
+• Filing taxes is a <b>tedious</b> but necessary task.
+
+💡 <i>Read it aloud and try using it in your own sentence today!</i>`
+
+func TestParseSynonyms(t *testing.T) {
+	syns := parseSynonyms(sampleCardWithSynonyms)
+	if len(syns) == 0 {
+		t.Fatal("parseSynonyms returned no synonyms")
+	}
+	if syns[0] != "boring" {
+		t.Errorf("first synonym = %q, want boring", syns[0])
+	}
+	if len(syns) != 5 {
+		t.Errorf("got %d synonyms, want 5", len(syns))
+	}
+}
+
+func TestParseSynonymsEmpty(t *testing.T) {
+	if syns := parseSynonyms("no synonyms section here"); syns != nil {
+		t.Errorf("expected nil, got %v", syns)
+	}
+}
+
+func TestBuildSynonymQuiz(t *testing.T) {
+	subject := reviewItem{term: "tedious", meaning: "too long, slow or dull"}
+	pool := []reviewItem{
+		{term: "reluctant", meaning: "unwilling"},
+		{term: "vigorous", meaning: "energetic"},
+		{term: "candid", meaning: "honest"},
+		{term: "scarce", meaning: "in short supply"},
+	}
+
+	q, ok := buildSynonymQuiz(subject, pool, sampleCardWithSynonyms, fixedRand())
+	if !ok {
+		t.Fatal("buildSynonymQuiz returned ok=false")
+	}
+	if q.word != "tedious" {
+		t.Errorf("subject word = %q, want tedious", q.word)
+	}
+	if len(q.options) != quizOptionCount {
+		t.Fatalf("got %d options, want %d", len(q.options), quizOptionCount)
+	}
+	// The correct option should be one of the synonyms.
+	correct := q.options[q.correctIdx]
+	validSyns := map[string]bool{"boring": true, "monotonous": true, "dull": true, "tiresome": true, "wearisome": true}
+	if !validSyns[correct] {
+		t.Errorf("correct option %q is not a known synonym", correct)
+	}
+}
+
+func TestBuildSynonymQuizNoSynonyms(t *testing.T) {
+	subject := reviewItem{term: "tedious", meaning: "dull"}
+	pool := []reviewItem{{term: "reluctant", meaning: "unwilling"}}
+	if _, ok := buildSynonymQuiz(subject, pool, "no synonyms", fixedRand()); ok {
+		t.Error("expected ok=false with no synonyms")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fill-in-the-blank quiz tests
+// ---------------------------------------------------------------------------
+
+func TestParseExampleForBlank(t *testing.T) {
+	blanked, ok := parseExampleForBlank(sampleCardWithSynonyms)
+	if !ok {
+		t.Fatal("parseExampleForBlank returned ok=false")
+	}
+	if blanked == "" {
+		t.Fatal("blanked sentence is empty")
+	}
+	if !strings.Contains(blanked, "____") {
+		t.Errorf("blanked sentence does not contain ____: %q", blanked)
+	}
+	if strings.Contains(blanked, "<b>") || strings.Contains(blanked, "</b>") {
+		t.Errorf("blanked sentence still contains HTML tags: %q", blanked)
+	}
+}
+
+func TestParseExampleForBlankNoExamples(t *testing.T) {
+	if _, ok := parseExampleForBlank("no examples here"); ok {
+		t.Error("expected ok=false with no examples")
+	}
+}
+
+func TestBuildFillBlankQuiz(t *testing.T) {
+	subject := reviewItem{term: "tedious", meaning: "too long, slow or dull"}
+	pool := []reviewItem{
+		{term: "reluctant", meaning: "unwilling"},
+		{term: "vigorous", meaning: "energetic"},
+		{term: "candid", meaning: "honest"},
+	}
+
+	q, ok := buildFillBlankQuiz(subject, pool, sampleCardWithSynonyms, fixedRand())
+	if !ok {
+		t.Fatal("buildFillBlankQuiz returned ok=false")
+	}
+	if q.word != "tedious" {
+		t.Errorf("subject word = %q, want tedious", q.word)
+	}
+	if len(q.options) != quizOptionCount {
+		t.Fatalf("got %d options, want %d", len(q.options), quizOptionCount)
+	}
+	if q.options[q.correctIdx] != "tedious" {
+		t.Errorf("correct option = %q, want tedious", q.options[q.correctIdx])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Admin stats tests
+// ---------------------------------------------------------------------------
+
+func TestSubscriberStats(t *testing.T) {
+	store, err := openStore(t.TempDir() + "/adminstats.db")
+	if err != nil {
+		t.Fatalf("openStore: %v", err)
+	}
+	defer store.Close()
+
+	store.AddSubscriber(1)
+	store.AddSubscriber(2)
+	store.AddSubscriber(3)
+	store.SetPaused(2, true)
+
+	total, active, paused := store.SubscriberStats()
+	if total != 3 {
+		t.Errorf("total = %d, want 3", total)
+	}
+	if active != 2 {
+		t.Errorf("active = %d, want 2", active)
+	}
+	if paused != 1 {
+		t.Errorf("paused = %d, want 1", paused)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Weekly digest delivery tests
+// ---------------------------------------------------------------------------
+
+func TestWeeklyDigestDelivery(t *testing.T) {
+	store, err := openStore(t.TempDir() + "/digest.db")
+	if err != nil {
+		t.Fatalf("openStore: %v", err)
+	}
+	defer store.Close()
+
+	const chatID = int64(42)
+	const weekStart = "2025-05-26"
+
+	delivered, err := store.WeeklyDigestDelivered(chatID, weekStart)
+	if err != nil {
+		t.Fatalf("WeeklyDigestDelivered: %v", err)
+	}
+	if delivered {
+		t.Error("expected not delivered initially")
+	}
+
+	if err := store.MarkWeeklyDigestDelivered(chatID, weekStart); err != nil {
+		t.Fatalf("MarkWeeklyDigestDelivered: %v", err)
+	}
+
+	delivered, err = store.WeeklyDigestDelivered(chatID, weekStart)
+	if err != nil {
+		t.Fatalf("WeeklyDigestDelivered after mark: %v", err)
+	}
+	if !delivered {
+		t.Error("expected delivered after marking")
+	}
+}
+
+func TestFormatWeeklyDigestEmpty(t *testing.T) {
+	msg := formatWeeklyDigest(nil, UserStats{}, 0, 0)
+	if msg != "" {
+		t.Errorf("expected empty message for no activity, got %q", msg)
+	}
+}
+
+func TestFormatWeeklyDigestWithContent(t *testing.T) {
+	words := []reviewItem{
+		{term: "tedious", meaning: "too long or dull"},
+		{term: "candid", meaning: "honest and direct"},
+	}
+	stats := UserStats{CurrentStreak: 5, Mastered: 3}
+	msg := formatWeeklyDigest(words, stats, 10, 7)
+	if msg == "" {
+		t.Fatal("expected non-empty message")
+	}
+	if !strings.Contains(msg, "Weekly Recap") {
+		t.Error("missing Weekly Recap header")
+	}
+	if !strings.Contains(msg, "tedious") {
+		t.Error("missing word tedious")
+	}
+	if !strings.Contains(msg, "70%") {
+		t.Error("missing quiz accuracy")
+	}
+	if !strings.Contains(msg, "Word of the week") {
+		t.Error("missing word of the week")
 	}
 }

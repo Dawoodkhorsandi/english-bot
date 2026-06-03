@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,11 @@ var (
 	// Quiz / active-recall tuning (Change E). Set QUIZ_INTERVAL=0 to disable
 	// scheduled quizzes (the /quiz command still works).
 	quizInterval = getEnvDuration("QUIZ_INTERVAL", 6*time.Hour)
+
+	// Weekly digest tuning (Change K). Set DIGEST_DAY to "off" to disable
+	// the scheduled weekly recap; the default fires Sunday at 20:00 local.
+	digestDay  = getEnvWeekday("DIGEST_DAY", int(time.Sunday))
+	digestTime = getEnv("DIGEST_TIME", "20:00")
 )
 
 // appLocation is the time.Location used for all scheduling decisions.
@@ -64,5 +70,32 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		}
 		log.Printf("⚠️  [CONFIG] %s=%q is not a duration; using default %s.", key, v, fallback)
 	}
+	return fallback
+}
+
+// getEnvWeekday parses a weekday name (or abbreviation) from an env var.
+// Returns -1 when set to "off"/"none"/"disabled" (used to disable the feature).
+func getEnvWeekday(key string, fallback int) int {
+	v, ok := lookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "off" || v == "none" || v == "disabled" || v == "" {
+		return -1
+	}
+	weekdays := map[string]int{
+		"sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3,
+		"thursday": 4, "friday": 5, "saturday": 6,
+		"sun": 0, "mon": 1, "tue": 2, "wed": 3,
+		"thu": 4, "fri": 5, "sat": 6,
+	}
+	if d, found := weekdays[v]; found {
+		return d
+	}
+	if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 6 {
+		return n
+	}
+	log.Printf("⚠️  [CONFIG] %s=%q is not a valid weekday; using default.", key, v)
 	return fallback
 }

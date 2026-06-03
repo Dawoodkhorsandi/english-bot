@@ -7,6 +7,7 @@ english-bot
 .gitignore
 .idea/
 .claude/
+.opencode/
 .DS_Store
 
 # Local data & secrets — never bake these into the image
@@ -19,3 +20,6 @@ subscribers.json.migrated
 
 # Docs are not needed at runtime
 DOCS.md
+README.md
+CONTRIBUTING.md
+LICENSE

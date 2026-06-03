@@ -70,7 +70,7 @@ Rules:
 - Output the drill only — no preamble, no explanation.`
 
 // wordPromptBase is the vocabulary-card prompt without the per-user exclusion clause.
-const wordPromptBase = `Choose ONE useful intermediate / upper-intermediate English word (any part of speech) that an English learner would benefit from knowing, and produce a Vocabulary Card.
+const wordPromptBase = `Choose ONE useful English word (any part of speech) that an English learner would benefit from knowing, and produce a Vocabulary Card.
 
 Use this EXACT HTML format (for Telegram). Replace each {…} placeholder with real content. Keep it concise and easy to read.
 

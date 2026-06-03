@@ -22,6 +22,8 @@ import (
 const (
 	quizTypeWordToMeaning = "w2m" // "What does WORD mean?" → meaning options
 	quizTypeMeaningToWord = "m2w" // "Which word means …?" → word options
+	quizTypeSynonym       = "syn" // "Pick the synonym of WORD" → word options
+	quizTypeFillBlank     = "fib" // Fill-in-the-blank sentence → word options
 	quizOptionCount       = 4
 )
 
@@ -102,6 +104,185 @@ func buildQuiz(subject reviewItem, distractPool []reviewItem, qType string, rng 
 	return quizQuestion{word: subject.term, prompt: prompt, options: options, correctIdx: correctIdx}, true
 }
 
+// ---------------------------------------------------------------------------
+// Synonym quiz helpers (Change E extension)
+// ---------------------------------------------------------------------------
+
+// parseSynonyms extracts the comma-separated synonyms from a vocabulary card's
+// HTML text. Returns nil if the synonyms section is not found.
+func parseSynonyms(cardText string) []string {
+	lines := strings.Split(cardText, "\n")
+	for i, line := range lines {
+		if !strings.Contains(strings.ToLower(line), "synonym") {
+			continue
+		}
+		// The synonyms are on the next non-empty line after the header.
+		for j := i + 1; j < len(lines); j++ {
+			trimmed := strings.TrimSpace(stripHTMLTags(lines[j]))
+			if trimmed == "" {
+				continue
+			}
+			parts := strings.Split(trimmed, ",")
+			var syns []string
+			for _, p := range parts {
+				s := strings.TrimSpace(p)
+				if s != "" {
+					syns = append(syns, s)
+				}
+			}
+			if len(syns) > 0 {
+				return syns
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// buildSynonymQuiz assembles a "Pick the synonym of WORD" question. The correct
+// answer is one of the synonyms parsed from the card text; distractors are
+// random pool terms that are NOT synonyms of the subject.
+func buildSynonymQuiz(subject reviewItem, distractPool []reviewItem, cardText string, rng *rand.Rand) (quizQuestion, bool) {
+	syns := parseSynonyms(cardText)
+	if len(syns) == 0 {
+		return quizQuestion{}, false
+	}
+	correctSyn := syns[rng.Intn(len(syns))]
+
+	// Exclude the subject and all its synonyms from the distractor pool.
+	synSet := make(map[string]bool)
+	for _, s := range syns {
+		synSet[strings.ToLower(s)] = true
+	}
+	synSet[strings.ToLower(subject.term)] = true
+
+	shuffled := append([]reviewItem(nil), distractPool...)
+	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
+	used := map[string]bool{strings.ToLower(correctSyn): true}
+	var options []string
+	for _, it := range shuffled {
+		key := strings.ToLower(it.term)
+		if synSet[key] || used[key] {
+			continue
+		}
+		used[key] = true
+		options = append(options, it.term)
+		if len(options) == quizOptionCount-1 {
+			break
+		}
+	}
+	if len(options) < quizOptionCount-1 {
+		return quizQuestion{}, false
+	}
+
+	options = append(options, correctSyn)
+	rng.Shuffle(len(options), func(i, j int) { options[i], options[j] = options[j], options[i] })
+	correctIdx := 0
+	for i, o := range options {
+		if o == correctSyn {
+			correctIdx = i
+			break
+		}
+	}
+
+	prompt := fmt.Sprintf("🧩 <b>Quiz</b>\n\nPick the synonym of <b>%s</b>:", subject.term)
+	return quizQuestion{word: subject.term, prompt: prompt, options: options, correctIdx: correctIdx}, true
+}
+
+// ---------------------------------------------------------------------------
+// Fill-in-the-blank quiz helpers (Change E extension)
+// ---------------------------------------------------------------------------
+
+// parseExampleForBlank extracts an example sentence from a vocabulary card's
+// HTML text and replaces the bolded target word with "____". Returns ok=false
+// if no suitable example with a bolded word is found.
+func parseExampleForBlank(cardText string) (blanked string, ok bool) {
+	lines := strings.Split(cardText, "\n")
+	inExamples := false
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "example") && strings.Contains(line, "<b>") {
+			inExamples = true
+			continue
+		}
+		if inExamples {
+			trimmed := strings.TrimSpace(line)
+			if !strings.HasPrefix(trimmed, "•") {
+				if trimmed == "" {
+					continue
+				}
+				break // hit a non-example, non-empty line
+			}
+			sentence := strings.TrimSpace(strings.TrimPrefix(trimmed, "•"))
+			replaced := blankBoldedWords(sentence)
+			if replaced == sentence {
+				continue // no bold word found in this example
+			}
+			return stripHTMLTags(replaced), true
+		}
+	}
+	return "", false
+}
+
+// blankBoldedWords replaces all <b>…</b> spans in s with "____".
+func blankBoldedWords(s string) string {
+	for {
+		start := strings.Index(s, "<b>")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(s[start:], "</b>")
+		if end == -1 {
+			break
+		}
+		s = s[:start] + "____" + s[start+end+4:]
+	}
+	return s
+}
+
+// buildFillBlankQuiz assembles a fill-in-the-blank question using an example
+// sentence from the card text with the target word blanked out.
+func buildFillBlankQuiz(subject reviewItem, distractPool []reviewItem, cardText string, rng *rand.Rand) (quizQuestion, bool) {
+	blanked, ok := parseExampleForBlank(cardText)
+	if !ok {
+		return quizQuestion{}, false
+	}
+
+	used := map[string]bool{strings.ToLower(subject.term): true}
+	shuffled := append([]reviewItem(nil), distractPool...)
+	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
+	var options []string
+	for _, it := range shuffled {
+		key := strings.ToLower(it.term)
+		if used[key] {
+			continue
+		}
+		used[key] = true
+		options = append(options, it.term)
+		if len(options) == quizOptionCount-1 {
+			break
+		}
+	}
+	if len(options) < quizOptionCount-1 {
+		return quizQuestion{}, false
+	}
+
+	options = append(options, subject.term)
+	rng.Shuffle(len(options), func(i, j int) { options[i], options[j] = options[j], options[i] })
+	correctIdx := 0
+	for i, o := range options {
+		if o == subject.term {
+			correctIdx = i
+			break
+		}
+	}
+
+	prompt := fmt.Sprintf("🧩 <b>Quiz</b>\n\nFill in the blank:\n\n<i>%s</i>", blanked)
+	return quizQuestion{word: subject.term, prompt: prompt, options: options, correctIdx: correctIdx}, true
+}
+
 // makeQuiz builds a quiz for a user from their learned words, biasing the
 // subject toward words currently due for review. ok=false means there isn't
 // enough material yet (too few learned words / distractors).
@@ -137,20 +318,32 @@ func makeQuiz(store *Store, chatID int64, now time.Time, rng *rand.Rand) (quizQu
 		return quizQuestion{}, false, err
 	}
 
-	qType := quizTypeWordToMeaning
-	if rng.Intn(2) == 0 {
-		qType = quizTypeMeaningToWord
-	}
-	q, ok := buildQuiz(subject, pool, qType, rng)
-	if !ok {
-		// Fall back to the other question type before giving up.
-		other := quizTypeMeaningToWord
-		if qType == quizTypeMeaningToWord {
-			other = quizTypeWordToMeaning
+	// Try all quiz types in random order, falling back until one works.
+	allTypes := []string{quizTypeWordToMeaning, quizTypeMeaningToWord, quizTypeSynonym, quizTypeFillBlank}
+	rng.Shuffle(len(allTypes), func(i, j int) { allTypes[i], allTypes[j] = allTypes[j], allTypes[i] })
+
+	for _, qType := range allTypes {
+		var q quizQuestion
+		var ok bool
+		switch qType {
+		case quizTypeSynonym, quizTypeFillBlank:
+			cardText := store.PooledCardText(subject.term)
+			if cardText == "" {
+				continue
+			}
+			if qType == quizTypeSynonym {
+				q, ok = buildSynonymQuiz(subject, pool, cardText, rng)
+			} else {
+				q, ok = buildFillBlankQuiz(subject, pool, cardText, rng)
+			}
+		default:
+			q, ok = buildQuiz(subject, pool, qType, rng)
 		}
-		q, ok = buildQuiz(subject, pool, other, rng)
+		if ok {
+			return q, true, nil
+		}
 	}
-	return q, ok, nil
+	return quizQuestion{}, false, nil
 }
 
 // quizKeyboard renders one option per row; the correct option carries a "c" tag
@@ -229,6 +422,16 @@ func (s *Store) MeaningForWord(word string) string {
 		strings.ToLower(strings.TrimSpace(word)),
 	).Scan(&meaning)
 	return meaning
+}
+
+// PooledCardText returns the full HTML card text for a word ("" if none).
+func (s *Store) PooledCardText(word string) string {
+	var text string
+	_ = s.db.QueryRow(
+		"SELECT text FROM content_pool WHERE kind = 'word' AND term = ?",
+		strings.ToLower(strings.TrimSpace(word)),
+	).Scan(&text)
+	return text
 }
 
 // RecordQuizResult appends a quiz answer to the history.

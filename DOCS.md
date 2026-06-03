@@ -1,4 +1,10 @@
-# English Muscle Memory Bot — Technical Documentation
+# English Muscle Memory Bot -- Technical Documentation
+
+> For setup instructions, bot commands, and configuration, see **[README.md](README.md)**.
+> For contribution guidelines, see **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+>
+> This document covers internal architecture, data flows, prompt design, schema
+> details, and the development roadmap.
 
 ## Overview
 
@@ -14,18 +20,28 @@ The bot uses Google Gemini 2.5 Flash to generate unique, personalized content an
 ## Architecture
 
 ```
-main.go  (single-file Go application)
-├── main()                    — startup, wires all components
-├── Telegram long-poll loop   — receives commands
-├── 30-min broadcast ticker   — alternates drill ↔ word (+ changelogs) to all subscribers
-├── Gemini AI client          — generates drill & vocabulary content
-└── SQLite store              — persists subscribers, per-user verb & word history, changelog delivery
+Go application (multi-file, single package main)
+├── main.go           — startup, wiring, Telegram types, command router, Store (SQLite), env-var helpers (getEnv, lookupEnv)
+├── config.go         — timezone, pool & scheduler tuning knobs
+├── providers.go      — Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
+├── generation.go     — prompt builders, generateContent, generateWordFor, term/meaning parsers
+├── pool.go           — content_pool Store methods, serveContent, poolFiller goroutine
+├── schedule.go       — quiet hours, broadcast scheduler, daily review scheduler, weekly digest scheduler
+├── prefs.go          — user_prefs Store methods, level/interval/pause helpers
+├── srs.go            — spaced-repetition SM-2-lite logic, review_schedule Store methods, review scheduler
+├── quiz.go           — quiz building, quiz_results Store methods, quiz scheduler
+└── stats.go          — /stats computation (streaks, activity days, formatStats), admin metrics (SubscriberStats, TotalQuizStats, TotalMasteredCount)
 ```
 
-The application runs three concurrent goroutines:
-1. **Broadcast goroutine** — fires every 30 minutes via `time.Ticker`, alternating between a tense drill and a vocabulary word
-2. **Telegram poller goroutine** — long-polls Telegram for incoming messages
-3. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
+The application runs eight concurrent goroutines:
+1. **Pool filler** (`poolFiller`) — tops up the pre-generated content pool in the background
+2. **Broadcast scheduler** (`runBroadcastScheduler`) — fires every half hour, per-user interval-aware delivery sweep
+3. **Daily review scheduler** (`runDailyReviewScheduler`) — sends a bedtime word recap at local midnight
+4. **Spaced-repetition scheduler** (`runReviewScheduler`) — resurfaces due words for memory-check review
+5. **Quiz scheduler** (`runQuizScheduler`) — periodically sends a multiple-choice quiz
+6. **Weekly digest scheduler** (`runWeeklyDigestScheduler`) — sends a weekly recap (default Sunday 20:00)
+7. **Telegram poller** (`pollTelegramUpdates`) — long-polls Telegram for incoming messages and callback queries
+8. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
 
 ---
 
@@ -37,9 +53,9 @@ All configuration is read from environment variables at startup. There are no co
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | `YOUR_TELEGRAM_BOT_TOKEN` | Telegram Bot API token from @BotFather |
 | `GEMINI_API_KEY` | `YOUR_GEMINI_API_KEY` | Google Gemini API key |
-| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications |
+| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/metrics`, `/announce`, `/health`) |
 
-At startup the bot logs whether each token is loaded (true/false) and the token length — it never logs the actual token value.
+At startup the bot logs whether the Telegram token is loaded (true/false) and its length — it never logs the actual token value. The maintainer chat ID is logged as-is (it is not a secret).
 
 ---
 
@@ -52,7 +68,7 @@ The bot has a built-in mechanism to notify existing subscribers when a new versi
 1. The `Changelogs` slice in `main.go` is the append-only release history. Each entry has a `Version` string and an HTML-formatted `Text` message.
 2. When a **new user** runs `/start`, all existing changelog versions are immediately marked as seen — they only receive notes for versions released after they joined.
 3. **Existing users** receive any unseen changelog entries:
-   - At the start of each hourly broadcast cycle (before their drill)
+   - At the start of each half-hourly broadcast cycle (before their drill)
    - When they run `/start` again
 
 The `changelog_delivery` table tracks which versions each user has already received, so each entry is delivered exactly once per user.
@@ -161,11 +177,22 @@ once per user per day.
 | `chat_id` | `INTEGER PRIMARY KEY` | FK → subscriber chat_id |
 | `level` | `TEXT` | Difficulty, default `intermediate` (Change F) |
 | `paused` | `INTEGER` | `1` = scheduled sends paused, default `0` (Change H) |
+| `interval_minutes` | `INTEGER` | Minutes between scheduled sends, default `30` (Change L) |
 | `updated_at` | `DATETIME` | Last change time |
 
 Rows are created lazily via upsert (`INSERT … ON CONFLICT`) the first time a user sets
 a level or pauses; `GetPrefs` returns defaults when no row exists. Managed by the
 methods in `prefs.go`.
+
+#### `weekly_digest_delivery` (v1.10.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `week_start` | `TEXT` | ISO `YYYY-MM-DD` of the Monday starting the covered week |
+| `sent_at` | `DATETIME` | When the digest was delivered |
+
+Primary key is `(chat_id, week_start)` — the weekly digest is sent at most
+once per user per week.
 
 ### Legacy Migration
 
@@ -194,6 +221,9 @@ type Store struct { db *sql.DB }
 |---|---|---|
 | `openStore` | `(path string) (*Store, error)` | Opens/creates DB, applies schema, runs legacy migration |
 | `Close` | `() error` | Closes the DB connection |
+| `migrate` | `() error` | Applies additive column migrations to pre-existing databases |
+| `columnExists` | `(table, column string) bool` | Reports whether a table has a column with the given name |
+| `migrateLegacyJSON` | `()` | Imports subscribers from the old JSON file if present |
 | `AddSubscriber` | `(chatID int64) (bool, error)` | Inserts subscriber; returns `true` if newly added |
 | `Subscribers` | `() ([]int64, error)` | Returns all subscribed chat IDs |
 | `SentWords` | `(chatID int64) ([]string, error)` | Returns verbs already sent to a user, ordered by `sent_at` |
@@ -204,16 +234,55 @@ type Store struct { db *sql.DB }
 | `ResetSentVocab` | `(chatID int64) (int64, error)` | Deletes all vocabulary history for a user; returns count removed |
 | `MarkChangelogSeen` | `(chatID int64, version string) error` | Records that a changelog version was delivered to a user |
 | `UnseenChangelogs` | `(chatID int64) ([]ChangelogEntry, error)` | Returns changelog entries not yet delivered to this user |
+| `PoolCount` | `(kind, level string) (int, error)` | How many items are pooled for a kind at a level |
+| `PoolTerms` | `(kind string) ([]string, error)` | All pooled terms across all levels (exclusion list for filler) |
+| `AddToPool` | `(kind, level, term, meaning, text string) error` | Insert a generated item at a level (idempotent) |
+| `PooledUnseen` | `(kind, level string, chatID int64) (term, meaning, text string, ok bool, err error)` | Oldest pooled item for kind+level this user hasn't seen |
+| `PooledOldest` | `(kind, level string) (term, meaning, text string, ok bool, err error)` | Oldest pooled item for kind+level regardless of user (broadcast fallback) |
+| `recordSentFor` | `(kind string, chatID int64, term string) error` | Records a sent term in the appropriate history table; seeds SRS for words |
+| `WordsSentBetween` | `(chatID int64, startUTC, endUTC string) ([]reviewItem, error)` | Words sent to a user within a UTC time range (daily review) |
+| `ReviewDelivered` | `(chatID int64, reviewDate string) (bool, error)` | Whether a daily review has been delivered for a given date |
+| `MarkReviewDelivered` | `(chatID int64, reviewDate string) error` | Records a daily review as delivered |
+| `GetPrefs` | `(chatID int64) (UserPrefs, error)` | Returns user preferences (level, paused, interval); defaults if no row |
+| `GetLevel` | `(chatID int64) string` | Returns the user's difficulty level (default intermediate) |
+| `SetLevel` | `(chatID int64, level string) error` | Sets the user's difficulty level |
+| `SetPaused` | `(chatID int64, paused bool) error` | Sets or clears the paused flag |
+| `IsPaused` | `(chatID int64) bool` | Reports whether the user has paused scheduled sends |
+| `GetInterval` | `(chatID int64) int` | Returns the user's send interval in minutes (default 30) |
+| `SetInterval` | `(chatID int64, minutes int) error` | Sets the user's send interval |
+| `ActiveLevels` | `() ([]string, error)` | Returns all levels in use (default + any user-selected) |
+| `SeedReview` | `(chatID int64, word string, now time.Time) error` | Enrolls a word in spaced-repetition review with interval=1 |
+| `DueReviews` | `(chatID int64, now time.Time, limit int) ([]dueReview, error)` | Returns words whose review is due |
+| `ApplyReviewKnown` | `(chatID int64, word string, now time.Time) (bool, error)` | Promotes a word in the SRS schedule (interval grows) |
+| `ApplyReviewForgot` | `(chatID int64, word string, now time.Time) (bool, error)` | Resets a word in the SRS schedule (interval back to 1) |
+| `SnoozeReview` | `(chatID int64, word string, intervalDays int, now time.Time) error` | Snoozes a word so it isn't re-sent before the user answers |
+| `MasteredCount` | `(chatID int64) (int, error)` | Count of words with interval >= mastered threshold (21 days) |
+| `SeenWordsWithMeaning` | `(chatID int64) ([]reviewItem, error)` | User's learned words joined with pooled meanings (quiz subjects) |
+| `PoolWordMeanings` | `(limit int) ([]reviewItem, error)` | Random pooled word/meaning pairs (quiz distractors) |
+| `MeaningForWord` | `(word string) string` | Looks up the pooled meaning for a word |
+| `RecordQuizResult` | `(chatID int64, word string, correct bool) error` | Records a quiz answer |
+| `QuizStats` | `(chatID int64) (answered, correct int, err error)` | Total quiz answers and correct count for a user |
+| `UserStats` | `(chatID int64) (UserStats, error)` | Computes the full stats summary for `/stats` |
+| `activityDays` | `(chatID int64) (map[string]bool, error)` | Distinct active days from sent_words + sent_vocab timestamps |
+| `PooledCardText` | `(word string) string` | Looks up the full card HTML text for a word from content_pool |
+| `WeeklyDigestDelivered` | `(chatID int64, weekStart string) (bool, error)` | Whether a weekly digest has been delivered for a given week |
+| `MarkWeeklyDigestDelivered` | `(chatID int64, weekStart string) error` | Records a weekly digest as delivered |
+| `WeeklyQuizStats` | `(chatID int64, startUTC, endUTC string) (answered, correct int, err error)` | Quiz stats within a UTC time range (weekly digest) |
+| `SubscriberStats` | `() (total, active, paused int)` | Aggregate subscriber counts for admin `/metrics` |
+| `TotalQuizStats` | `() (answered, correct int)` | Global quiz answer tallies for admin `/metrics` |
+| `TotalMasteredCount` | `() int` | Total mastered words across all users for admin `/metrics` |
 
 ---
 
 ### Telegram Types
 
 ```go
-TelegramUpdate   — update_id, *Message
-TelegramMessage  — message_id, Chat, Text, *From
-TelegramChat     — ID (int64)
-TelegramUser     — ID (int64), Username (string)
+TelegramUpdate        — update_id, *Message, *CallbackQuery
+TelegramMessage       — message_id, Chat, Text, *From
+TelegramCallbackQuery — ID (string), *From, *Message, Data (string)
+TelegramChat          — ID (int64)
+TelegramUser          — ID (int64), Username (string)
+inlineButton          — Text (string), CallbackData (string)
 ```
 
 ---
@@ -246,34 +315,40 @@ All messages use `parse_mode: HTML`.
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
 | `/interval [min]` | With a numeric argument, sets the send interval directly; without, shows the current interval + an inline keyboard of options (`handleInterval`). Allowed: 30/60/120/180/240/360/480/720 min. (v1.6.0) |
+| `/metrics` | *(Admin only)* Subscriber stats (total/active/paused), pool depth per kind+level, quiz volume, mastered count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
+| `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
+| `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
-| *(anything else)* | Replies with a prompt to use /drill, /word, /level or /help. |
+| *(unknown command)* | Replies with a prompt to use /drill, /word, /quiz, /stats or /help — or to send any word to look it up. |
 | *(empty text)* | Silently ignored. |
-
-> **Note:** the "Components" subsections below describe the original v1 design.
-> Behaviour changed in v1.3.0 (provider chain, content pool, quiet hours, daily
-> review) and v1.4.0 (`/level`, `/pause`, `/resume`); see the **Roadmap** sections,
-> which are marked IMPLEMENTED, for the current architecture.
 
 ---
 
-### Hourly Broadcast — `broadcastDrill` / `broadcastWord`
+### Broadcast Scheduler — `broadcastSweep`
 
-The ticker fires every **30 minutes**. A boolean toggle in `main()` alternates which broadcast runs, so each subscriber receives one grammar drill and one vocabulary word per hour, ~30 minutes apart:
+The broadcast scheduler (`runBroadcastScheduler`) sleeps until the next half-hour
+boundary (`:00` or `:30`) then runs a per-user delivery sweep. Each subscriber
+receives content only on slots aligned to their chosen interval (default 30 min),
+alternating drill/word via `dueAndKind` (wall-clock aligned so restarts and
+quiet-hour skips never desync):
 
 ```
-tick 1 → broadcastDrill   (drill)
-tick 2 → broadcastWord    (word)
-tick 3 → broadcastDrill   (drill)
-...
+slot fires (every 30 min, the base tick)
+  └─ broadcastSweep(now)
+       └─ skip if isQuietHours(now)
+       └─ store.Subscribers()              → list of chat IDs
+       └─ for each chatID:
+            ├─ skip if prefs.Paused
+            ├─ skip if not dueAndKind(now, prefs.Interval)
+            ├─ sendPendingChangelogs(chatID)
+            └─ serveContent(kind, prefs.Level, allowGenerate=false)
+                 └─ pool-first lookup (no inline AI call)
+                 └─ sendToTelegram(chatID, text)
 ```
 
-Both functions:
-- Read the full subscriber list
-- For each subscriber, in order:
-  1. Call `sendPendingChangelogs` — deliver any unseen version notes
-  2. Generate and send the personalized content (`generatePersonalizedDrill` or `generatePersonalizedWord`)
-- Log errors per-user but continue to the next subscriber on failure
+The content kind (drill vs word) is per-user, derived from the wall-clock slot
+index parity (`minutesSinceMidnight / interval`), so every user keeps alternating
+regardless of their chosen interval.
 
 ---
 
@@ -285,13 +360,13 @@ Queries `UnseenChangelogs` for the user, then for each unseen entry:
 
 ---
 
-### AI Drill Generation — `generateGeminiDrill`
+### AI Drill Generation — `generateContent(kind=drill)`
 
-**Model:** `gemini-2.5-flash`
+**Model:** whichever provider wins the fallback chain (default Gemini `gemini-2.5-flash`).
 
-**Retry policy:** 3 attempts with exponential backoff (2 s → 4 s → 8 s). Respects context cancellation between retries.
+**Retry policy:** 2 attempts per provider with exponential backoff (2 s → 4 s); rate-limit (429) causes immediate failover to the next provider. Respects context cancellation between retries.
 
-**Output format:** Telegram HTML (`parse_mode: HTML`). The prompt instructs Gemini to wrap label lines in `<b>` tags and bold the target verb form inside each example sentence.
+**Output format:** Telegram HTML (`parse_mode: HTML`). The prompt instructs the model to wrap label lines in `<b>` tags and bold the target verb form inside each example sentence.
 
 **Tenses covered (14 total):**
 
@@ -314,17 +389,17 @@ Queries `UnseenChangelogs` for the user, then for each unseen entry:
 
 **Exclusion clause:** If the user has prior verb history, the prompt appends an explicit list of already-practiced verbs with an instruction to choose something different.
 
-**Return values:** `(drillText string, verb string, error)`
+**Return values:** `(text, term, meaning, provider string, err error)` (meaning is empty for drills).
 
 ---
 
-### AI Vocabulary Generation — `generateGeminiWord`
+### AI Vocabulary Generation — `generateContent(kind=word)`
 
-**Model:** `gemini-2.5-flash`
+**Model:** whichever provider wins the fallback chain (default Gemini `gemini-2.5-flash`).
 
-**Retry policy:** 3 attempts with exponential backoff (2 s → 4 s → 8 s). Respects context cancellation between retries.
+**Retry policy:** 2 attempts per provider with exponential backoff (2 s → 4 s); rate-limit (429) causes immediate failover. Respects context cancellation between retries.
 
-**Difficulty target:** intermediate / upper-intermediate learner words (any part of speech).
+**Difficulty target:** determined by the user's level (beginner / intermediate / advanced).
 
 **Output format:** Telegram HTML (`parse_mode: HTML`, only `<b>` and `<i>` tags). The card structure is:
 
@@ -341,16 +416,24 @@ Queries `UnseenChangelogs` for the user, then for each unseen entry:
 
 **Exclusion clause:** If the user has prior vocabulary history, the prompt appends an explicit list of already-sent words with an instruction to choose something different.
 
-**Return values:** `(cardText string, word string, error)`
+**Return values:** `(text, term, meaning, provider string, err error)`.
 
 ---
 
-### Personalized Generators — `generatePersonalizedDrill` / `generatePersonalizedWord`
+### Content Delivery — `serveContent`
 
-Each wraps its respective Gemini call with per-user history:
-1. Loads the user's exclusion list (`SentWords` / `SentVocab`)
-2. Calls the generator with that list
-3. Records the newly used verb/word (`RecordSentWord` / `RecordSentVocab`)
+`serveContent` is the single read-path for both on-demand commands and broadcasts.
+It returns ready-to-send text of a given kind for a user, recording the chosen term:
+
+1. Tries an unseen pooled item at the user's level (`PooledUnseen`).
+2. On a miss with `allowGenerate=true` (on-demand `/drill`, `/word`): generates
+   inline via `generateContent` → `ProviderChain.Generate`, adds the result to the
+   pool, and serves it.
+3. On a miss with `allowGenerate=false` (broadcasts): falls back to the oldest
+   pooled item at that level (`PooledOldest`) so broadcasts never call the AI directly.
+
+`generateContent` builds the appropriate prompt (`buildDrillPrompt` / `buildWordPrompt`),
+calls the provider chain, and parses the term (and meaning, for words) from the output.
 
 ---
 
@@ -366,38 +449,31 @@ The helper strips any trailing HTML tags (e.g. `</b>`), strips Markdown punctuat
 
 ### Telegram Sender — `sendToTelegram`
 
-Posts to `sendMessage` with `parse_mode: HTML`. Returns an error if the HTTP response is not 200 OK. All callers in `handleMessage`, `broadcastDrill` and `broadcastWord` discard the return error with `_` (best-effort delivery); failures are logged.
+Posts to `sendMessage` with `parse_mode: HTML`. Returns an error if the HTTP response is not 200 OK. Most callers discard the return error with `_` (best-effort delivery); failures are logged. Additional helpers: `sendToTelegramWithKeyboard` (inline keyboard), `editMessageText`, `answerCallbackQuery`.
 
 ---
 
 ## Data Flow: Scheduled Broadcast
 
 ```
-ticker fires (every 30 min) — alternates drill ↔ word
-  └─ broadcastDrill  (odd ticks)  /  broadcastWord  (even ticks)
+half-hour slot fires (runBroadcastScheduler)
+  └─ skip if isQuietHours(now)
+  └─ broadcastSweep(now)
        └─ store.Subscribers()              → list of chat IDs
        └─ for each chatID:
+            ├─ skip if prefs.Paused
+            ├─ skip if not dueAndKind(now, prefs.Interval)
             ├─ sendPendingChangelogs(chatID)
             │    └─ store.UnseenChangelogs(chatID)    → unseen entries
             │    └─ for each entry:
             │         └─ sendToTelegram(chatID, entry.Text)
             │         └─ store.MarkChangelogSeen(chatID, entry.Version)
             │
-            ├─ [drill]  generatePersonalizedDrill(chatID)
-            │    └─ store.SentWords(chatID)           → exclusion list
-            │    └─ generateGeminiDrill(exclusionList)
-            │         └─ Gemini API (up to 3 retries, HTML format)
-            │         └─ returns (drillText, verb)
-            │    └─ store.RecordSentWord(chatID, verb)
-            │    └─ sendToTelegram(chatID, drillText)
-            │
-            └─ [word]   generatePersonalizedWord(chatID)
-                 └─ store.SentVocab(chatID)           → exclusion list
-                 └─ generateGeminiWord(exclusionList)
-                      └─ Gemini API (up to 3 retries, HTML format)
-                      └─ returns (cardText, word)
-                 └─ store.RecordSentVocab(chatID, word)
-                 └─ sendToTelegram(chatID, cardText)
+            └─ serveContent(kind, prefs.Level, allowGenerate=false)
+                 └─ store.PooledUnseen(kind, level, chatID) → pooled item
+                 └─ (fallback) store.PooledOldest(kind, level)
+                 └─ store.recordSentFor(kind, chatID, term)
+                 └─ sendToTelegram(chatID, text)
 ```
 
 ---
@@ -407,8 +483,9 @@ ticker fires (every 30 min) — alternates drill ↔ word
 ```
 user sends /drill                      user sends /word
   └─ sendToTelegram("Generating…")        └─ sendToTelegram("Finding a word…")
-  └─ generatePersonalizedDrill(chatID)    └─ generatePersonalizedWord(chatID)
-  └─ sendToTelegram(chatID, drillText)    └─ sendToTelegram(chatID, cardText)
+  └─ serveContent(drill, level, true)     └─ serveContent(word, level, true)
+       └─ pool-first, inline-gen on miss       └─ pool-first, inline-gen on miss
+  └─ sendToTelegram(chatID, text)         └─ sendToTelegram(chatID, text)
 ```
 
 ---
@@ -417,12 +494,18 @@ user sends /drill                      user sends /word
 
 ```
 1. Load env vars (token, API key, maintainer ID)
-2. Create Gemini AI client
-3. Open SQLite store (apply schema, run legacy migration if needed)
-4. Start 30-minute ticker goroutine (alternates drill ↔ word)
-5. Start Telegram long-poll goroutine
-6. Block on OS signal (SIGINT / SIGTERM)
-7. On signal: cancel context → goroutines exit, deferred store.Close() runs
+2. Load timezone (Asia/Tehran by default)
+3. Build AI provider chain (Gemini + any configured OpenAI-compatible backends)
+4. Open SQLite store (apply schema, run migrations, run legacy JSON migration if needed)
+5. Start pool filler goroutine (background content generation)
+6. Start broadcast scheduler goroutine (half-hourly, per-user interval + quiet-hour aware)
+7. Start daily review scheduler goroutine (fires at local midnight)
+8. Start spaced-repetition review scheduler goroutine (hourly)
+9. Start quiz scheduler goroutine (every QUIZ_INTERVAL)
+10. Start weekly digest scheduler goroutine (fires weekly, default Sunday 20:00)
+11. Start Telegram long-poll goroutine
+12. Block on OS signal (SIGINT / SIGTERM)
+13. On signal: cancel context → goroutines exit, deferred store.Close() runs
 ```
 
 ---
@@ -554,25 +637,27 @@ mapping our single prompt string onto the OpenAI `messages` array
 
 ## Change B — Decoupled Generation Pool
 
-Today `generatePersonalizedDrill` / `generatePersonalizedWord` call the AI **inline**
-during a user request or broadcast. v2 moves all generation into a background worker.
+Before v2, inline generation called the AI on the user's critical path. v2 moved
+all generation into a background worker (`poolFiller` in `pool.go`).
 
 ### New component — Pool Filler goroutine
 
-A fourth long-running goroutine started in `main()`:
+A long-running goroutine started in `main()`:
 
 ```
 poolFiller(ctx, chain, store):
   ticker every REFILL_INTERVAL (e.g. 20s)
-  on each tick, for kind in {drill, word}:
-      n = store.PoolCount(kind)
-      if n < POOL_MIN:                      // low watermark
-          for i in 0 .. (POOL_TARGET - n):  // refill toward target
-              if ctx cancelled: return
-              exclude = store.PoolTerms(kind)            // avoid duplicates
-              text, term = generateWithFallback(promptFor(kind, exclude))
-              store.AddToPool(kind, term, text)
-              sleep GEN_SPACING               // throttle to respect rate limits
+  on each tick:
+    levels = store.ActiveLevels()             // default + any user-selected
+    for kind in {drill, word}:
+      for level in levels:
+          n = store.PoolCount(kind, level)
+          target = poolTargetFor(level)       // full target for default, POOL_MIN for others
+          if n >= target: continue
+          exclude = store.PoolTerms(kind)     // all terms across levels (global dedup)
+          text, term, meaning, provider = generateContent(ctx, chain, kind, level, exclude)
+          store.AddToPool(kind, level, term, meaning, text)
+          sleep GEN_SPACING                   // throttle to respect rate limits
 ```
 
 - Generation is **paced** (`GEN_SPACING`, e.g. 1 call / few seconds) so we never burst
@@ -589,46 +674,57 @@ poolFiller(ctx, chain, store):
 | `term` | `TEXT` | The verb/word, lowercased |
 | `text` | `TEXT` | Full Telegram-HTML message |
 | `meaning` | `TEXT` | One-line meaning, parsed from the card's Meaning line (used by the daily review; empty for drills) |
-| `provider` | `TEXT` | Which AI produced it (observability) |
+| `level` | `TEXT` | Difficulty: `beginner` / `intermediate` / `advanced` (default `intermediate`) |
 | `created_at` | `DATETIME` | Generation time |
 
-`UNIQUE(kind, term)` keeps the pool free of duplicates; index on `kind`.
+`UNIQUE(kind, term)` keeps the pool free of duplicates (global across levels);
+index `idx_content_pool_kind` on `(kind, level, created_at)`.
 
 ### New Store methods
 
 | Method | Description |
 |---|---|
-| `PoolCount(kind) (int, error)` | How many items are pooled for a kind |
-| `PoolTerms(kind) ([]string, error)` | All pooled terms (exclusion list for the filler) |
-| `AddToPool(kind, term, text, provider) error` | Insert a generated item (idempotent) |
-| `PooledUnseen(chatID, kind) (term, text string, found bool, err)` | A pooled item this user hasn't received yet |
-| `SentTerms(chatID, kind) ([]string, error)` | Dispatches to `SentWords`/`SentVocab` by kind |
-| `RecordSent(chatID, kind, term) error` | Dispatches to `RecordSentWord`/`RecordSentVocab` by kind |
+| `PoolCount(kind, level) (int, error)` | How many items are pooled for a kind at a level |
+| `PoolTerms(kind) ([]string, error)` | All pooled terms across all levels (exclusion list for the filler) |
+| `AddToPool(kind, level, term, meaning, text) error` | Insert a generated item at a level (idempotent) |
+| `PooledUnseen(kind, level, chatID) (term, meaning, text, ok, err)` | Oldest pooled item for kind+level this user hasn't seen |
+| `PooledOldest(kind, level) (term, meaning, text, ok, err)` | Oldest pooled item for kind+level regardless of user (broadcast fallback) |
+| `recordSentFor(kind, chatID, term) error` | Records a sent term in the appropriate history table; seeds SRS for words |
 
 ### Read path (request / broadcast)
 
 ```
-serveContent(chatID, kind):
-  term, text, found = store.PooledUnseen(chatID, kind)
+serveContent(ctx, chain, store, chatID, kind, level, allowGenerate):
+  term, _, text, found = store.PooledUnseen(kind, level, chatID)
   if found:
-      store.RecordSent(chatID, kind, term)
+      store.recordSentFor(kind, chatID, term)
       return text                              // ZERO AI calls
-  else:
-      // pool exhausted for this user - graceful degradation, pick one of:
-      //  (a) re-send the least-recently-seen pooled item, or
-      //  (b) reply "more practice coming soon" and let the filler catch up
-      return fallbackText
+
+  if allowGenerate:                            // on-demand /drill, /word
+      text, term, meaning, _ = generateContent(ctx, chain, kind, level, exclude)
+      store.AddToPool(kind, level, term, meaning, text)
+      store.recordSentFor(kind, chatID, term)
+      return text                              // inline generation fallback
+
+  // broadcast fallback: no unseen item, reuse the oldest pooled item at this level
+  term, _, text, found = store.PooledOldest(kind, level)
+  if found:
+      store.recordSentFor(kind, chatID, term)
+      return text
+  return error "pool empty"
 ```
 
-The broadcast loop and `/drill` `/word` handlers call `serveContent` instead of the
-inline generators. **No user request ever blocks on an AI call.**
+- Broadcasts call `serveContent` with `allowGenerate=false` — **no broadcast ever
+  blocks on an AI call**.
+- On-demand commands call with `allowGenerate=true` — they can generate inline if
+  the pool has no unseen items for that user.
 
 ### Tuning knobs (env vars)
 
 | Variable | Default | Description |
 |---|---|---|
 | `POOL_TARGET` | `30` | Desired pooled items per kind |
-| `POOL_MIN` | `10` | Low watermark that triggers a refill |
+| `POOL_MIN` | `10` | Pool target for non-default levels (default level uses `POOL_TARGET`) |
 | `REFILL_INTERVAL` | `20s` | How often the filler checks the pool |
 | `GEN_SPACING` | `3s` | Minimum gap between successive AI calls |
 
@@ -675,12 +771,12 @@ Example review message:
 
 ```
 🌙 <b>Today's Words — Review before bed</b>
-————————————————————
+
 • <b>vigorously</b> — done with great energy or force
 • <b>reluctant</b> — unwilling and hesitant to do something
 • <b>tedious</b> — too long, slow, or dull; boring
 
-😴 Sleep well — fresh practice resumes at 9 AM.
+😴 Sleep well — say each one aloud once more before you do!
 ```
 
 (The review covers vocabulary only, per requirement — grammar drills are not recapped.)
@@ -720,8 +816,8 @@ double-send. `review_date` is the Tehran calendar date being recapped.
    tables needed; existing `subscribers`, `sent_words`, `sent_vocab`,
    `changelog_delivery` are untouched).
 2. **Providers (Change A):** introduce the `Provider` interface, `GeminiProvider`,
-   `OpenAICompatProvider`, and `ProviderChain`; replace direct `client.Models.GenerateContent`
-   calls inside `generateGeminiDrill` / `generateGeminiWord` with `chain.generateWithFallback`.
+   `OpenAICompatProvider`, and `ProviderChain`; replace direct Gemini SDK calls
+   with `chain.Generate` (multi-provider fallback).
    This alone restores reliability and can ship first.
 3. **Pool filler (Change B):** add the `content_pool` Store methods and the `poolFiller`
    goroutine; switch the read path to `serveContent`. Ship after Change A is verified.
@@ -747,11 +843,12 @@ double-send. `review_date` is the Tehran calendar date being recapped.
 
 # Roadmap — Future Versions (v3+)
 
-> **Status: partially implemented.** Changes **F (`/level`)** and **H (`/pause` /
-> `/resume`)** shipped in **v1.4.0** (see their sections, marked IMPLEMENTED). The
-> remaining changes below are still planned. Each Change is independent and can ship
-> on its own; suggested order is given at the end. Schema additions are all additive
-> (`CREATE TABLE IF NOT EXISTS`).
+> **Status: mostly implemented.** Changes **F (`/level`)** and **H (`/pause` /
+> `/resume`)** shipped in **v1.4.0**; **J (Admin)** and **K (Weekly digest)** shipped
+> in **v1.10.0** along with two additional quiz types (synonym + fill-in-the-blank).
+> The remaining change below (**I — Audio**) is still planned. Each Change is
+> independent and can ship on its own; suggested order is given at the end. Schema
+> additions are all additive (`CREATE TABLE IF NOT EXISTS`).
 
 ---
 
@@ -766,7 +863,7 @@ A lightweight SM-2-style scheduler per `(chat_id, word)`:
 
 | Concept | Meaning |
 |---|---|
-| `interval` | Days until the next review (1 → 3 → 7 → 16 → 35 …) |
+| `interval` | Days until the next review (1 → 3 → 8 → 21 → 57 …) |
 | `ease` | Multiplier that grows on "easy", shrinks on "hard" (default 2.5) |
 | `due_at` | When the word should next resurface |
 | `reps` | How many successful reviews so far |
@@ -780,9 +877,9 @@ A lightweight SM-2-style scheduler per `(chat_id, word)`:
 | `interval_days` | `INTEGER` | Current interval |
 | `ease` | `REAL` | Ease factor |
 | `reps` | `INTEGER` | Successful repetitions |
-| `due_at` | `DATETIME` | Next review time |
+| `due_at` | `DATETIME NOT NULL` | Next review time |
 
-PK `(chat_id, word)`. A word enters the schedule the first time it is sent (seeded with
+PK `(chat_id, word)`. Index `idx_review_due` on `(chat_id, due_at)`. A word enters the schedule the first time it is sent (seeded with
 `interval=1`). A separate `reviewScheduler` goroutine (or a slot in the existing ticker)
 picks words whose `due_at` has passed and re-sends a compact reminder card, then bumps
 the interval. Difficulty feedback comes from Change E's quiz answers (correct = promote,
@@ -821,10 +918,10 @@ Turns passive reading into testing, which is what actually builds recall.
   in the spaced-repetition schedule) and send a question using a Telegram **inline
   keyboard** with answer buttons.
 - Question types (rotated):
-  - "What does **<word>** mean?" → 4 meaning options
-  - "Which word means *<meaning>*?" → 4 word options
-  - "Pick the synonym of **<word>**" → 4 options
-  - Fill-in-the-blank sentence with 4 word choices
+  - "What does **<word>** mean?" → 4 meaning options *(implemented)*
+  - "Which word means *<meaning>*?" → 4 word options *(implemented)*
+  - "Pick the synonym of **<word>**" → 4 options *(implemented v1.10.0)*
+  - Fill-in-the-blank sentence with 4 word choices *(implemented v1.10.0)*
 - Distractors are drawn from other words in `content_pool` (same `kind`), so no extra AI
   call is needed to build a quiz.
 
@@ -844,9 +941,15 @@ Turns passive reading into testing, which is what actually builds recall.
 |---|---|
 | `/quiz` | Send one quiz question on demand (pulled from the user's seen words). |
 
-**Implementation (v1.9.0):** `quiz.go` builds a multiple-choice question entirely
-from pooled data — no AI call. Two question types are rotated: **word → meaning**
-("What does WORD mean?") and **meaning → word** ("Which word means …?").
+**Implementation (v1.9.0, expanded v1.10.0):** `quiz.go` builds a multiple-choice question entirely
+from pooled data — no AI call. Four question types are rotated: **word → meaning**
+("What does WORD mean?"), **meaning → word** ("Which word means …?"),
+**synonym** ("Pick the synonym of WORD" — parses the ✅ Synonyms section from the
+card text via `parseSynonyms`), and **fill-in-the-blank** (blanks a bolded word in an
+example sentence via `parseExampleForBlank` / `blankBoldedWords`). The synonym and
+fill-in-the-blank types fall back gracefully to word→meaning / meaning→word when the
+card text lacks parseable synonyms or example sentences. Card text is retrieved via
+`PooledCardText(word)`.
 `makeQuiz` picks a subject from the user's learned words (`SeenWordsWithMeaning`,
 i.e. `sent_vocab` joined with pooled meanings), **biased toward words currently due**
 for spaced-repetition review (`DueReviews`); `buildQuiz` fills three distractors from
@@ -975,35 +1078,56 @@ Each vocabulary card can also carry a "🔊 Hear it" inline button that triggers
 
 ---
 
-## Change J — Admin Metrics & Broadcast
+## Change J — Admin Metrics & Broadcast — IMPLEMENTED in v1.10.0
 
 Maintainer-only operational tooling (gated by `chat_id == MAINTAINER_CHAT_ID`).
 
 | Command | Behaviour |
 |---|---|
-| `/metrics` | Subscriber count, active vs paused, pool depth per (kind, level), provider usage tallies, quiz volume, last refill time. |
+| `/metrics` | Subscriber count (total/active/paused), pool depth per (kind, level), total quiz volume (answered/correct), total mastered words. |
 | `/announce <text>` | Push a one-off HTML message to all (non-paused) subscribers. |
-| `/health` | Quick check: which providers are enabled, DB reachable, last broadcast/refill timestamps. |
+| `/health` | Quick check: which providers are enabled and their count. |
 
-- Provider usage tallies come from a counter incremented in `generateWithFallback`
-  (which provider served each request) — optionally persisted to a `provider_usage` table.
-- All admin commands no-op (or reply "not authorized") for non-maintainer chat IDs.
+- All admin commands reply "not authorized" for non-maintainer chat IDs
+  (`isMaintainer` parses `MAINTAINER_CHAT_ID` to `int64` and compares).
+- `/announce` sends the raw text after the command as-is (HTML preserved) to all
+  non-paused subscribers; reports the send count back to the maintainer.
+
+**Implementation (v1.10.0):** `isMaintainer(chatID)` in `main.go` parses the
+`MaintainerChatID` env var with `strconv.ParseInt`; `handleMetrics` queries
+`SubscriberStats`, pool counts, `TotalQuizStats`, and `TotalMasteredCount` from
+`stats.go`; `handleAnnounce` iterates subscribers, skips paused users, and sends;
+`handleHealth` iterates `ProviderChain.providers` and lists enabled ones.
 
 ---
 
-## Change K — Weekly Digest
+## Change K — Weekly Digest — IMPLEMENTED in v1.10.0
 
 A Sunday-evening recap, natural extension of the daily review.
 
-- A `weeklyDigestScheduler` goroutine fires once a week (configurable day/time, Tehran).
-- Per user: the week's new words (word + meaning), quiz accuracy, streak, and a
-  "word of the week" highlight.
+- A `runWeeklyDigestScheduler` goroutine fires once a week (configurable day/time,
+  Tehran local time). Uses `nextWeekdayTime` to compute the next fire time.
+- Per user: the week's new words (word + meaning), quiz accuracy for the week,
+  current streak, mastered count, and a "word of the week" highlight (the first
+  word learned that week).
 - Respects quiet hours and the `paused` flag; idempotent via a
   `weekly_digest_delivery(chat_id, week_start)` table.
+- If a user had no activity in the week, no digest is sent.
+- `DIGEST_DAY` supports weekday names, abbreviations, or `off`/`none`/`disabled`
+  to disable the digest entirely.
+
+**Implementation (v1.10.0):** `config.go` adds `digestDay` (default `time.Sunday`)
+and `digestTime` (default `"20:00"`) via `getEnvWeekday` helper; `schedule.go` adds
+`runWeeklyDigestScheduler` (sleeps until `nextWeekdayTime`, then sends digests to all
+eligible subscribers), `sendWeeklyDigest` (per-user delivery with idempotency check),
+`formatWeeklyDigest` (formats the recap HTML), and `nextWeekdayTime` (computes the
+next occurrence of a given weekday+time). Store methods in `pool.go`:
+`WeeklyDigestDelivered`, `MarkWeeklyDigestDelivered`, `WeeklyQuizStats`.
+Table `weekly_digest_delivery` created in `main.go` schema.
 
 | Config | Default | Description |
 |---|---|---|
-| `DIGEST_DAY` | `Sunday` | Day of week to send the digest |
+| `DIGEST_DAY` | `Sunday` | Day of week to send the digest (`off` to disable) |
 | `DIGEST_TIME` | `20:00` | Local time to send it |
 
 ---
@@ -1095,9 +1219,8 @@ and get back a vocabulary card formatted exactly like `/word`.
 | `user_prefs` | level, paused flag, interval_minutes, (future per-user settings) | F, H, L |
 | `review_schedule` | spaced-repetition state per word | D |
 | `quiz_results` | quiz answer history | E |
-| `audio_cache` | word → Telegram voice `file_id` | I |
+| `audio_cache` | word → Telegram voice `file_id` | I *(planned)* |
 | `activity` *(optional)* | per-day activity for streaks | G |
-| `provider_usage` *(optional)* | per-provider call tallies | J |
 | `weekly_digest_delivery` | digest idempotency | K |
 
 ## Telegram API additions (v3+)
@@ -1124,5 +1247,10 @@ and get back a vocabulary card formatted exactly like `/word`.
 6. ~~**Change E (Quiz / Active Recall)**~~ — ✅ **DONE in v1.9.0** (`quiz_results` +
    `quiz.go`; multiple-choice from pooled words, biased to due reviews; `/quiz` +
    6h scheduler; feeds D and /stats accuracy).
-7. **Change J (Admin metrics)** — operational visibility once the above add moving parts.
-8. **Change I (Audio)** & **Change K (Weekly digest)** — polish features, ship last.
+7. ~~**Change J (Admin metrics)**~~ — ✅ **DONE in v1.10.0** (`/metrics`, `/announce`,
+   `/health` gated by `MAINTAINER_CHAT_ID`; `SubscriberStats`, `TotalQuizStats`,
+   `TotalMasteredCount` in `stats.go`).
+8. **Change I (Audio)** — polish feature, ship last.
+9. ~~**Change K (Weekly digest)**~~ — ✅ **DONE in v1.10.0** (`runWeeklyDigestScheduler`
+   in `schedule.go`; `weekly_digest_delivery` table; `DIGEST_DAY`/`DIGEST_TIME` config;
+   two new quiz types — synonym + fill-in-the-blank — also shipped in v1.10.0).
