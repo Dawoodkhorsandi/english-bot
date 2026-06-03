@@ -96,6 +96,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          # Only the build binaries — not the .dockerbuild metadata artifact that
+          # docker/build-push-action uploads, which download-artifact can't extract.
+          pattern: english-bot-*
 
       - name: Prepare release assets
         run: |
