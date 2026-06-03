@@ -116,6 +116,13 @@ var Changelogs = []ChangelogEntry{
 			"• 📄 <b>Easy paging:</b> drills are split into bite-size pages by theme — tap <b>◀️ Back</b> and <b>Next ▶️</b> to move through present, past, future, conditionals and more\n" +
 			"• Say each one out loud as you go — that's how the muscle memory sticks! 💪",
 	},
+	{
+		Version: "1.12.0",
+		Text: "📣 <b>What's New in v1.12.0</b>\n\n" +
+			"• 🗣️ <b>Idiom of the Day!</b> Each day you'll get a common English idiom with its meaning and real examples — or grab one anytime with /idiom\n" +
+			"• 🎯 <b>Drills lead with the essentials:</b> page 1 of every grammar drill now opens with the forms you use most — Simple Present, Present Continuous, Simple Past and Future <i>will</i>\n" +
+			"• Say them out loud and make them stick! 💪",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
