@@ -17,6 +17,7 @@ import (
 )
 
 const geminiTTSModel = "gemini-2.5-flash"
+const maxTTSTextLength = 40
 
 var ttsHTTPClient = &http.Client{Timeout: 45 * time.Second}
 
@@ -42,6 +43,10 @@ func maybeSendWordTTS(ctx context.Context, store *Store, notifier Notifier, chat
 	if word == "" {
 		return
 	}
+	word = sanitizeTTSText(word)
+	if word == "" {
+		return
+	}
 
 	audio, ext, err := generateGeminiTTS(ctx, word)
 	if err != nil {
@@ -60,7 +65,7 @@ func maybeSendWordTTS(ctx context.Context, store *Store, notifier Notifier, chat
 }
 
 func generateGeminiTTS(ctx context.Context, text string) ([]byte, string, error) {
-	if GeminiAPIKey == "" || GeminiAPIKey == "YOUR_GEMINI_API_KEY" {
+	if !geminiTTSConfigured() {
 		return nil, "", fmt.Errorf("gemini api key not configured")
 	}
 
@@ -72,7 +77,7 @@ func generateGeminiTTS(ctx context.Context, text string) ([]byte, string, error)
 		"contents": []map[string]any{
 			{
 				"parts": []map[string]string{
-					{"text": "Pronounce this English word clearly and naturally: " + text},
+					{"text": fmt.Sprintf("Pronounce this English word clearly and naturally: %q", text)},
 				},
 			},
 		},
@@ -87,7 +92,10 @@ func generateGeminiTTS(ctx context.Context, text string) ([]byte, string, error)
 			},
 		},
 	}
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -100,7 +108,10 @@ func generateGeminiTTS(ctx context.Context, text string) ([]byte, string, error)
 		return nil, "", err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("gemini tts read response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("gemini tts http %d: %s", resp.StatusCode, truncate(string(respBody), 200))
 	}
@@ -136,6 +147,18 @@ func generateGeminiTTS(ctx context.Context, text string) ([]byte, string, error)
 	return nil, "", fmt.Errorf("gemini tts returned no audio")
 }
 
+func geminiTTSConfigured() bool {
+	key := strings.TrimSpace(GeminiAPIKey)
+	if key == "" {
+		return false
+	}
+	// Treat obvious placeholders as not configured.
+	if strings.HasPrefix(strings.ToUpper(key), "YOUR_") {
+		return false
+	}
+	return true
+}
+
 func generateESpeakTTS(ctx context.Context, text string) ([]byte, string, error) {
 	tmp, err := os.CreateTemp("", "english-bot-tts-*.wav")
 	if err != nil {
@@ -165,4 +188,32 @@ func extensionForAudioMime(mime string) string {
 	default:
 		return "wav"
 	}
+}
+
+func sanitizeTTSText(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r == ' ' || r == '-' || r == '\'':
+			b.WriteRune(r)
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return ""
+	}
+	// Keep voice clips short and focused.
+	runes := []rune(out)
+	if len(runes) > maxTTSTextLength {
+		out = string(runes[:maxTTSTextLength])
+	}
+	return out
 }

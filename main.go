@@ -28,6 +28,8 @@ var (
 	MaintainerChatID = getEnv("MAINTAINER_CHAT_ID", "YOUR_PERSONAL_CHAT_ID")
 )
 
+var telegramHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 const (
 	dbFile       = "subscribers.db"
 	legacyDBFile = "subscribers.json"
@@ -1063,12 +1065,15 @@ func (n *telegramNotifier) SendWithMessageID(chatID int64, text string) (int64, 
 	jsonPayload, _ := json.Marshal(payload)
 
 	log.Printf("➔ [HTTP_POST] sendMessage to ChatID %d | payload %d bytes", chatID, len(jsonPayload))
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	resp, err := telegramHTTPClient.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("telegram sendMessage read response: %w", err)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("telegram returned status %d: %s", resp.StatusCode, string(respBody))
@@ -1090,9 +1095,13 @@ func (n *telegramNotifier) SendVoice(chatID int64, voice []byte, filename string
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
-	_ = writer.WriteField("chat_id", strconv.FormatInt(chatID, 10))
+	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
+		return err
+	}
 	if replyToMessageID > 0 {
-		_ = writer.WriteField("reply_to_message_id", strconv.FormatInt(replyToMessageID, 10))
+		if err := writer.WriteField("reply_to_message_id", strconv.FormatInt(replyToMessageID, 10)); err != nil {
+			return err
+		}
 	}
 
 	part, err := writer.CreateFormFile("voice", filename)
@@ -1112,7 +1121,7 @@ func (n *telegramNotifier) SendVoice(chatID int64, voice []byte, filename string
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := telegramHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -1129,7 +1138,7 @@ func telegramPost(method string, payload map[string]interface{}) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", TelegramBotToken, method)
 	jsonPayload, _ := json.Marshal(payload)
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	resp, err := telegramHTTPClient.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return err
 	}
