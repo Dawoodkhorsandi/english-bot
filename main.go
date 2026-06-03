@@ -109,6 +109,13 @@ var Changelogs = []ChangelogEntry{
 			"• 📅 <b>Weekly recap:</b> every Sunday evening you'll get a summary of the week's words, quiz accuracy, streak and a word-of-the-week highlight\n" +
 			"• 🔧 <b>Admin tools:</b> /metrics, /health and /announce for the bot maintainer",
 	},
+	{
+		Version: "1.11.0",
+		Text: "📣 <b>What's New in v1.11.0</b>\n\n" +
+			"• 🎯 <b>Bigger, better drills!</b> Every grammar drill now takes your verb through <b>21 forms</b> — all 12 tenses, <b>all four conditionals</b> (zero, first, second, third), plus modals, passive voice, the imperative and <i>used to</i>\n" +
+			"• 📄 <b>Easy paging:</b> drills are split into bite-size pages by theme — tap <b>◀️ Back</b> and <b>Next ▶️</b> to move through present, past, future, conditionals and more\n" +
+			"• Say each one out loud as you go — that's how the muscle memory sticks! 💪",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
