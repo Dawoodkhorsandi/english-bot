@@ -363,6 +363,9 @@ func TestFormatStatsVariants(t *testing.T) {
 		if !strings.Contains(msg, "Vocabulary words") {
 			t.Error("missing 'Vocabulary words'")
 		}
+		if !strings.Contains(msg, "Challenges completed") {
+			t.Error("missing 'Challenges completed'")
+		}
 	})
 
 	t.Run("with quiz stats", func(t *testing.T) {

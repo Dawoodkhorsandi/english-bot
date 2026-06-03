@@ -116,6 +116,13 @@ var Changelogs = []ChangelogEntry{
 			"• 📄 <b>Easy paging:</b> drills are split into bite-size pages by theme — tap <b>◀️ Back</b> and <b>Next ▶️</b> to move through present, past, future, conditionals and more\n" +
 			"• Say each one out loud as you go — that's how the muscle memory sticks! 💪",
 	},
+	{
+		Version: "1.14.0",
+		Text: "📣 <b>What's New in v1.14.0</b>\n\n" +
+			"• 🏁 <b>/challenge</b> is here: play a rapid-fire 5-question quiz session and get your final score + encouragement\n" +
+			"• 🧠 Challenge answers now feed your spaced-repetition schedule just like regular quizzes\n" +
+			"• 📊 /stats now includes challenge completions and your best challenge score",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -346,6 +353,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
 			"/quiz — Test yourself on a word you've learned\n" +
+			"/challenge — Play a 5-question quiz challenge\n" +
 			"/level — Choose your difficulty (beginner/intermediate/advanced)\n" +
 			"/interval — Choose how often you get practice\n" +
 			"/stats — See your progress and streak\n" +
@@ -363,11 +371,13 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"📘 <b>Vocabulary words</b> give you the meaning, pronunciation, synonyms, opposites and real examples for a useful new word.\n\n" +
 			"🧠 <b>Spaced repetition:</b> words you've learned come back as quick <b>memory checks</b> at growing intervals — tap ✅ Knew it / ❌ Forgot and I'll tune when you see each one next.\n\n" +
 			"🧩 <b>Quizzes:</b> multiple-choice questions test your recall — send /quiz anytime, and one pops up now and then. Your answers also tune your review schedule.\n\n" +
+			"🏁 <b>Challenge mode:</b> send /challenge for 5 back-to-back quiz questions and a final score.\n\n" +
 			"💬 <b>Look up any word:</b> just type it (English or Persian) and I'll send a full card for it.\n\n" +
 			"You get one of each per hour, about 30 minutes apart (quiet overnight).\n\n" +
 			"/drill — generate a grammar drill on demand\n" +
 			"/word — generate a vocabulary word on demand\n" +
 			"/quiz — test yourself on a word you've already learned\n" +
+			"/challenge — play a 5-question quiz challenge\n" +
 			"/level — set difficulty: beginner, intermediate or advanced\n" +
 			"/interval — set how often scheduled practice arrives\n" +
 			"/stats — see your progress, streak and totals\n" +
@@ -423,6 +433,10 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 	case "/quiz":
 		log.Printf("🧩 [QUIZ] requested by ChatID %d.", chatID)
 		handleQuiz(store, notifier, chatID)
+
+	case "/challenge":
+		log.Printf("🏁 [CHALLENGE] requested by ChatID %d.", chatID)
+		handleChallenge(store, notifier, chatID)
 
 	case "/pause":
 		if err := store.SetPaused(chatID, true); err != nil {
@@ -490,7 +504,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 	default:
 		if strings.HasPrefix(command, "/") {
 			log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
-			_ = notifier.Send(chatID, "🤖 I don't know that command. Try /drill, /word, /quiz, /stats or /help — or just send me any word to look it up!")
+			_ = notifier.Send(chatID, "🤖 I don't know that command. Try /drill, /word, /quiz, /challenge, /stats or /help — or just send me any word to look it up!")
 			return
 		}
 		// Plain text (no leading slash) is treated as a word lookup (Change M).
@@ -824,6 +838,11 @@ func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) 
 		return
 	}
 
+	if strings.HasPrefix(cb.Data, "chal:") {
+		handleChallengeCallback(store, notifier, cb, chatID)
+		return
+	}
+
 	if strings.HasPrefix(cb.Data, "drill:") {
 		handleDrillCallback(store, notifier, cb, chatID)
 		return
@@ -1097,6 +1116,8 @@ func openStore(path string) (*Store, error) {
 		level            TEXT    NOT NULL DEFAULT 'intermediate',
 		paused           INTEGER NOT NULL DEFAULT 0,
 		interval_minutes INTEGER NOT NULL DEFAULT 30,
+		challenge_completed INTEGER NOT NULL DEFAULT 0,
+		best_challenge_score INTEGER NOT NULL DEFAULT 0,
 		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS review_schedule (
@@ -1117,6 +1138,12 @@ func openStore(path string) (*Store, error) {
 		answered_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_quiz_chat ON quiz_results(chat_id);
+	CREATE TABLE IF NOT EXISTS challenge_sessions (
+		chat_id        INTEGER PRIMARY KEY,
+		question_index INTEGER NOT NULL DEFAULT 0,
+		correct_count  INTEGER NOT NULL DEFAULT 0,
+		started_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	CREATE TABLE IF NOT EXISTS weekly_digest_delivery (
 		chat_id    INTEGER NOT NULL,
 		week_start TEXT    NOT NULL,
@@ -1169,6 +1196,32 @@ func (s *Store) migrate() error {
 		); err != nil {
 			return err
 		}
+	}
+	if !s.columnExists("user_prefs", "challenge_completed") {
+		log.Println("💾 [DB_MIGRATE] Adding user_prefs.challenge_completed column...")
+		if _, err := s.db.Exec(
+			"ALTER TABLE user_prefs ADD COLUMN challenge_completed INTEGER NOT NULL DEFAULT 0",
+		); err != nil {
+			return err
+		}
+	}
+	if !s.columnExists("user_prefs", "best_challenge_score") {
+		log.Println("💾 [DB_MIGRATE] Adding user_prefs.best_challenge_score column...")
+		if _, err := s.db.Exec(
+			"ALTER TABLE user_prefs ADD COLUMN best_challenge_score INTEGER NOT NULL DEFAULT 0",
+		); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.Exec(
+		`CREATE TABLE IF NOT EXISTS challenge_sessions (
+			chat_id        INTEGER PRIMARY KEY,
+			question_index INTEGER NOT NULL DEFAULT 0,
+			correct_count  INTEGER NOT NULL DEFAULT 0,
+			started_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+	); err != nil {
+		return err
 	}
 	return nil
 }

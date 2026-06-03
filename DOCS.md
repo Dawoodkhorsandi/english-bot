@@ -1003,6 +1003,7 @@ Turns passive reading into testing, which is what actually builds recall.
 | Command | Behaviour |
 |---|---|
 | `/quiz` | Send one quiz question on demand (pulled from the user's seen words). |
+| `/challenge` | Run a 5-question rapid quiz challenge, then show a final score with encouragement. |
 
 **Implementation (v1.9.0, expanded v1.10.0):** `quiz.go` builds a multiple-choice question entirely
 from pooled data — no AI call. Four question types are rotated: **word → meaning**
@@ -1039,6 +1040,19 @@ material are skipped gracefully. Tests: `quiz_smoke_test.go`.
 
 Index `idx_quiz_chat` on `chat_id`. Append-only history (no uniqueness) feeding
 `/stats` accuracy and the spaced-repetition ease/interval updates.
+
+#### `challenge_sessions` table
+
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER PK` | FK → subscriber (one active challenge per user) |
+| `question_index` | `INTEGER` | Current question number (`0..4`) |
+| `correct_count` | `INTEGER` | Correct answers so far |
+| `started_at` | `DATETIME` | Session start timestamp |
+
+Challenge callbacks use `chal:c:<word>` / `chal:x:<word>` to distinguish them from
+regular quiz callbacks. Each challenge answer is still recorded in `quiz_results`
+and applies the same spaced-repetition promotion/reset behavior as `/quiz`.
 
 | Config | Default | Description |
 |---|---|---|
@@ -1080,7 +1094,8 @@ Engagement driver: show the user their progress.
 
 - Reads existing tables only: `sent_words`, `sent_vocab`, `subscribers`. Since
   v1.8.0/v1.9.0 it also surfaces **words mastered** (from `review_schedule`,
-  Change D) and **quiz accuracy** (from `quiz_results`, Change E).
+  Change D), **quiz accuracy** (from `quiz_results`, Change E), and challenge
+  totals/best score (from `user_prefs`, Change v1.14.0).
 - Reports: total verbs practised, total words learned, distinct active days,
   current **streak** and longest streak (consecutive active days), level, and
   member-since date.
