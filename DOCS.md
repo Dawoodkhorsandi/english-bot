@@ -1254,3 +1254,209 @@ and get back a vocabulary card formatted exactly like `/word`.
 9. ~~**Change K (Weekly digest)**~~ — ✅ **DONE in v1.10.0** (`runWeeklyDigestScheduler`
    in `schedule.go`; `weekly_digest_delivery` table; `DIGEST_DAY`/`DIGEST_TIME` config;
    two new quiz types — synonym + fill-in-the-blank — also shipped in v1.10.0).
+
+---
+
+# Competitive Insights & Future Roadmap
+
+> Research date: June 2026. Compared against real Telegram English-learning bots
+> and mainstream language platforms.
+
+## Telegram Bot Landscape
+
+| Bot | Focus | Key differentiator |
+|---|---|---|
+| **@AndyRobot** | Conversational AI | Free-form English chat, grammar explanations on demand, topic-based discussions. Most popular English bot on Telegram (millions of users). |
+| **@LingualeoBot** | Vocabulary platform | Personal dictionary, spaced repetition flashcards, word training. Extension of the Lingualeo web/mobile platform. |
+| **@wordly_bot** | Vocabulary drills | Word-of-the-day, quizzes, translations. Purely vocabulary-focused. |
+| **@vocab_bot** | Custom flashcards | Users build personal word lists and drill them. Anki-like in Telegram. |
+| **@Multitran_bot** | Dictionary | Inline translations from the Multitran crowdsourced dictionary. Lookup-only, no learning loop. |
+| **@daily_english_bot** | Daily lessons | Scheduled English content for Farsi speakers. Push-based daily delivery. |
+| **@englishclub_bot** | Community content | Regular grammar tips and exercises. Community-oriented. |
+
+### Where our bot stands
+
+Our bot already covers the core features of most Telegram competitors:
+- Spaced repetition (SM-2) -- matches @LingualeoBot, @vocab_bot
+- Scheduled content push -- matches @daily_english_bot
+- Multiple quiz types -- matches or exceeds @wordly_bot
+- Word lookup -- matches @Multitran_bot (but with full AI-generated cards)
+- Difficulty levels + personalization -- exceeds most Telegram bots
+- Weekly/daily review -- not common in Telegram bots
+
+### What top competitors do that we don't
+
+1. **Conversational practice** (@AndyRobot's core feature -- and the #1 reason it dominates)
+2. **Topic/theme selection** (Lingualeo, Drops -- users pick what to learn)
+3. **Custom word lists** (@vocab_bot, Anki -- user-curated study decks)
+4. **Inline mode** (@Multitran_bot -- translate without opening the bot)
+5. **Pronunciation/audio** (ELSA Speak, Change I in our roadmap)
+6. **Grammar correction** (no major Telegram bot does this well -- opportunity)
+7. **Points/XP gamification** (Duolingo's retention engine)
+8. **Placement test** (auto-detect level instead of user guessing)
+
+---
+
+## Proposed Changes (v1.11.0+)
+
+### Change N — AI Conversation Practice (`/chat`)
+
+**Priority: HIGH** | **Effort: Medium** | **Inspired by: @AndyRobot**
+
+The single biggest feature gap. Let users have free-form English conversations
+with the bot, with real-time grammar and vocabulary corrections.
+
+- `/chat` toggles conversation mode. User writes in English, bot responds
+  naturally and highlights mistakes inline.
+- `/chat topic` starts a themed conversation (e.g. `/chat restaurant`,
+  `/chat job interview`, `/chat travel`).
+- `/endchat` exits conversation mode and shows a summary: mistakes made,
+  words used, suggestions for improvement.
+- Uses existing AI provider chain -- no new infrastructure needed.
+- New table: `chat_sessions(chat_id, started_at, topic, message_count,
+  mistakes_found, ended_at)` for tracking.
+- Words discovered during conversation are auto-seeded into the SRS schedule.
+
+**Why this matters:** @AndyRobot is the most popular English bot on Telegram
+primarily because of conversational practice. This is the highest-impact
+feature we can add.
+
+---
+
+### Change O — Topic/Theme Selection (`/topic`)
+
+**Priority: HIGH** | **Effort: Low** | **Inspired by: Drops, Lingualeo**
+
+Let users choose what vocabulary domain to study instead of receiving
+random words.
+
+- `/topic` shows available topics via inline keyboard: General, Travel,
+  Business, Technology, Food & Cooking, Medical, Academic, Idioms & Slang.
+- Topic stored in `user_prefs.topic` (default: `general`).
+- Prompt builders append the topic constraint: "Generate a vocabulary word
+  related to [topic]..."
+- `general` behaves like today (no constraint).
+- Pool filler generates content per-level AND per-topic.
+
+| New column | Table | Type | Default |
+|---|---|---|---|
+| `topic` | `user_prefs` | `TEXT` | `'general'` |
+
+---
+
+### Change P — Grammar Correction (`/correct`)
+
+**Priority: HIGH** | **Effort: Low** | **Inspired by: Grammarly, no major Telegram bot does this**
+
+User sends a sentence, bot corrects grammar and explains each mistake.
+
+- `/correct I go to store yesterday` returns a corrected version with
+  inline explanations.
+- Also works without the command: if conversation mode (Change N) is
+  active, corrections happen automatically within the chat flow.
+- Uses existing AI providers with a grammar-correction prompt.
+- Tracks corrections in `quiz_results` (new `correction` question type)
+  so repeated mistakes surface more often in quizzes.
+
+**Opportunity:** No major Telegram bot does grammar correction well.
+This could be a differentiator.
+
+---
+
+### Change Q — Idiom & Phrase of the Day
+
+**Priority: MEDIUM** | **Effort: Low**
+
+Add idioms/phrases as a third content kind alongside drills and words.
+
+- New content kind: `idiom` (pool key `kind='idiom'`).
+- Broadcast rotation: drill -> word -> idiom -> drill -> word -> idiom...
+- Idiom card format: the phrase, meaning, literal translation (if
+  applicable), 2-3 example sentences, origin/context note.
+- `/idiom` command for on-demand idiom delivery.
+- Idioms are seeded into SRS like words.
+
+---
+
+### Change R — Placement Test (`/test`)
+
+**Priority: MEDIUM** | **Effort: Medium** | **Inspired by: ELSA, Busuu**
+
+Auto-detect user level instead of requiring them to guess.
+
+- `/test` presents 10-15 adaptive questions (vocabulary, grammar,
+  sentence completion) starting at intermediate.
+- Each correct answer increases difficulty; each wrong answer decreases it.
+- After the test, the bot sets `/level` automatically and reports the
+  result: "Your level: Intermediate (B1). I've adjusted your content."
+- Can be re-taken anytime.
+- New table: `placement_results(chat_id, taken_at, score, assigned_level)`.
+
+---
+
+### Change S — Sentence Rearrangement Quiz
+
+**Priority: MEDIUM** | **Effort: Medium** | **Inspired by: Duolingo**
+
+New quiz type: scrambled words, user taps buttons in order to form a
+correct sentence.
+
+- Bot presents a shuffled sentence as numbered inline buttons.
+- User taps buttons in sequence; bot confirms or shows the correct order.
+- Good for testing grammar intuition (word order, prepositions, articles).
+- Added as a 5th quiz type in the existing `makeQuiz` rotation.
+
+---
+
+### Change T — Custom Word Lists (`/add`, `/list`)
+
+**Priority: MEDIUM** | **Effort: Low** | **Inspired by: Anki, @vocab_bot**
+
+Let users curate their own study list.
+
+- `/add ephemeral` adds a word to the user's custom list (generates a
+  full card via AI and pools it).
+- `/list` shows all custom words with mastery status.
+- Custom words get priority in quiz rotation and SRS scheduling.
+- New table: `custom_words(chat_id, word, added_at)`.
+
+---
+
+### Change U — Points & Streaks Gamification
+
+**Priority: LOW** | **Effort: Medium** | **Inspired by: Duolingo**
+
+XP system to drive daily engagement.
+
+- Earn XP for: drills (+5), words (+5), quizzes (+10 correct / +3
+  wrong), reviews (+5 known / +2 forgot), conversations (+2/message),
+  daily streak bonus (streak * 5).
+- `/stats` shows total XP alongside existing stats.
+- Weekly digest includes XP earned that week.
+- New column: `user_prefs.xp INTEGER DEFAULT 0`.
+- Future: leaderboard among all users (`/leaderboard`).
+
+---
+
+### Change I — Audio Pronunciation (existing, still planned)
+
+**Priority: LOW** | **Effort: Medium**
+
+Already documented above. Send voice notes via TTS. Cache by `file_id`.
+Ship last as a polish feature.
+
+---
+
+## Suggested implementation order (v1.11.0+)
+
+| Order | Change | Version | Rationale |
+|---|---|---|---|
+| 1 | **O (Topics)** | v1.11.0 | Lowest effort, immediate personalization value |
+| 2 | **P (Grammar correction)** | v1.11.0 | Low effort, no Telegram competitor does this |
+| 3 | **Q (Idioms)** | v1.11.0 | New content kind, tiny code change |
+| 4 | **N (Conversation)** | v1.12.0 | Highest impact, needs conversation state management |
+| 5 | **R (Placement test)** | v1.12.0 | Pairs well with conversation -- both need AI prompts |
+| 6 | **T (Custom words)** | v1.13.0 | User-driven content, extends existing pool infra |
+| 7 | **S (Sentence rearrangement)** | v1.13.0 | New quiz type, needs button-sequence UX |
+| 8 | **U (XP/Gamification)** | v1.14.0 | Cross-cutting -- add after core features stabilize |
+| 9 | **I (Audio)** | v1.15.0 | Polish feature, needs TTS integration |
