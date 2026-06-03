@@ -303,6 +303,72 @@ func TestBuildWordPrompt(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// buildIdiomPrompt / parseIdiom
+// ---------------------------------------------------------------------------
+
+func TestBuildIdiomPrompt(t *testing.T) {
+	t.Run("no exclusions", func(t *testing.T) {
+		prompt := buildIdiomPrompt(levelIntermediate, nil)
+		if strings.Contains(prompt, "Do NOT use any of these idioms") {
+			t.Error("should not contain exclusion clause when exclude list is empty")
+		}
+		if !strings.Contains(prompt, "Idiom of the Day") {
+			t.Error("prompt should contain the idiom card header")
+		}
+	})
+
+	t.Run("with exclusions", func(t *testing.T) {
+		prompt := buildIdiomPrompt(levelIntermediate, []string{"break the ice", "piece of cake"})
+		if !strings.Contains(prompt, "break the ice, piece of cake") {
+			t.Error("should contain the excluded idioms")
+		}
+		if !strings.Contains(prompt, "Do NOT use any of these idioms") {
+			t.Error("should contain exclusion clause")
+		}
+	})
+}
+
+func TestParseIdiom(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "real idiom card keeps full phrase",
+			input: `🗣️ <b>Idiom of the Day: break the ice</b>
+————————————————————
+
+💬 <b>Meaning</b>
+To start a conversation in a relaxed way.`,
+			want: "break the ice",
+		},
+		{
+			name:  "phrase with closing tag and no newline",
+			input: "🗣️ <b>Idiom of the Day: under the weather</b>",
+			want:  "under the weather",
+		},
+		{
+			name:  "empty input",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "missing label",
+			input: "Word of the Hour: tedious",
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseIdiom(tt.input); got != tt.want {
+				t.Errorf("parseIdiom() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // buildWordLookupPrompt
 // ---------------------------------------------------------------------------
 
