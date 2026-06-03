@@ -984,6 +984,44 @@ handler, keyboard and callback branch in `main.go`.
 
 ---
 
+## Change M — Word Lookup (send any word)
+
+Let a user look up a specific word on demand by simply **typing it** (no command),
+and get back a vocabulary card formatted exactly like `/word`.
+
+- **Trigger:** any non-command message (text without a leading `/`). Today this
+  falls through to the `default` branch ("I only understand commands"); that branch
+  becomes the lookup entry point.
+- **Behaviour:** generate a vocabulary card for the *user-supplied term* at the
+  user's level, using the same card layout/parser as `/word`
+  (`📘 Word of the Hour …` → meaning, pronunciation, synonyms, opposites, examples).
+- **Translation:** the input may be English **or the user's native language
+  (Farsi)**. The prompt instructs the model to resolve the input to its English
+  headword (translating if needed) and build the card around that English word, so
+  "سیب" → an **apple** card. *(Open decision: also append a one-line native-language
+  translation of the meaning. Default: yes, a short Farsi gloss under the meaning.)*
+- **Generation:** add a term-targeted prompt builder + a generation entry point
+  that accepts an explicit term, e.g. `buildWordLookupPrompt(level, term)` and a
+  `generateWordFor(ctx, chain, level, term)` (parallel to `generateContent`).
+- **Storage:** treat a successful lookup like an on-demand `/word`: add the card to
+  `content_pool` at the user's level and record it in `sent_vocab` (so it counts
+  toward `/stats`, the daily review meaning-join works, and repeats are avoided).
+- **Guards:** reject empty input and over-long messages (e.g. > 4 words / > 40
+  chars) with a gentle hint, so sentences/paragraphs aren't treated as a word.
+  Send a "🔄 Looking that up…" ack like `/drill` and `/word` do.
+
+**Planned implementation:** `buildWordLookupPrompt` + `generateWordFor` in
+`generation.go`; lookup handler replacing the `default` branch in `main.go`
+(length guard, ack, generate, pool + record, send); welcome/help mention.
+
+| Input | Behaviour |
+|---|---|
+| `serendipity` (plain text) | Returns a full vocabulary card for *serendipity*. |
+| `سیب` (plain text, Farsi) | Translates to English and returns an *apple* card. |
+| (a long sentence) | Gentle hint to send a single word instead. |
+
+---
+
 ## Consolidated new tables (v3+)
 
 | Table | Purpose | Introduced by |
@@ -1012,8 +1050,10 @@ handler, keyboard and callback branch in `main.go`.
    `sent_vocab`/`subscribers`; streak derived from `sent_at` dates).
 3. **Change L (`/interval`)** — per-user send frequency; small `user_prefs` column +
    per-user due-check in the broadcast sweep; reuses `callback_query` infra.
-4. **Change D (Spaced Repetition)** — the core learning upgrade; reuses existing history.
-5. **Change E (Quiz / Active Recall)** — adds `callback_query` handling; pairs with D to
+4. **Change M (Word lookup)** — type any word to get a `/word`-style card; small
+   generation variant + replaces the `default` message branch; pairs naturally with L.
+5. **Change D (Spaced Repetition)** — the core learning upgrade; reuses existing history.
+6. **Change E (Quiz / Active Recall)** — adds `callback_query` handling; pairs with D to
    feed difficulty signals.
-6. **Change J (Admin metrics)** — operational visibility once the above add moving parts.
-7. **Change I (Audio)** & **Change K (Weekly digest)** — polish features, ship last.
+7. **Change J (Admin metrics)** — operational visibility once the above add moving parts.
+8. **Change I (Audio)** & **Change K (Weekly digest)** — polish features, ship last.
