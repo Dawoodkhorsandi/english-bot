@@ -116,7 +116,8 @@ func (s *Store) DrillText(term string) (string, bool, error) {
 // For vocabulary words it also seeds the spaced-repetition schedule (Change D),
 // so every word a user receives is enrolled for future review.
 func (s *Store) recordSentFor(kind string, chatID int64, term string) error {
-	if kind == kindWord {
+	switch kind {
+	case kindWord:
 		if err := s.RecordSentVocab(chatID, term); err != nil {
 			return err
 		}
@@ -124,16 +125,23 @@ func (s *Store) recordSentFor(kind string, chatID int64, term string) error {
 			log.Printf("⚠️  [SRS] Could not seed review for %q (chat %d): %v", term, chatID, err)
 		}
 		return nil
+	case kindIdiom:
+		return s.RecordSentIdiom(chatID, term)
+	default:
+		return s.RecordSentWord(chatID, term)
 	}
-	return s.RecordSentWord(chatID, term)
 }
 
 // sentTableFor maps a content kind to its per-user history table name.
 func sentTableFor(kind string) string {
-	if kind == kindWord {
+	switch kind {
+	case kindWord:
 		return "sent_vocab"
+	case kindIdiom:
+		return "sent_idioms"
+	default:
+		return "sent_words"
 	}
-	return "sent_words"
 }
 
 // WordsSentBetween returns the distinct vocabulary words sent to a chat within

@@ -1070,6 +1070,13 @@ func openStore(path string) (*Store, error) {
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_sent_vocab_chat ON sent_vocab(chat_id);
+	CREATE TABLE IF NOT EXISTS sent_idioms (
+		chat_id INTEGER NOT NULL,
+		word    TEXT    NOT NULL,
+		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, word)
+	);
+	CREATE INDEX IF NOT EXISTS idx_sent_idioms_chat ON sent_idioms(chat_id);
 	CREATE TABLE IF NOT EXISTS changelog_delivery (
 		chat_id INTEGER NOT NULL,
 		version TEXT    NOT NULL,
@@ -1334,6 +1341,25 @@ func (s *Store) RecordSentVocab(chatID int64, word string) error {
 // number of records removed.
 func (s *Store) ResetSentVocab(chatID int64) (int64, error) {
 	res, err := s.db.Exec("DELETE FROM sent_vocab WHERE chat_id = ?", chatID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// RecordSentIdiom stores an idiom as having been sent to a chat (idempotent).
+func (s *Store) RecordSentIdiom(chatID int64, idiom string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO sent_idioms (chat_id, word) VALUES (?, ?)",
+		chatID, strings.ToLower(strings.TrimSpace(idiom)),
+	)
+	return err
+}
+
+// ResetSentIdiom deletes all sent idiom history for a chat and returns the number
+// of records removed.
+func (s *Store) ResetSentIdiom(chatID int64) (int64, error) {
+	res, err := s.db.Exec("DELETE FROM sent_idioms WHERE chat_id = ?", chatID)
 	if err != nil {
 		return 0, err
 	}
