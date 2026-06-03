@@ -47,16 +47,30 @@ func isQuietHours(t time.Time) bool {
 	return now >= start || now < end
 }
 
-// slotKind derives whether the current 30-minute slot is a drill or a word from
-// the wall-clock, so restarts and quiet-hour skips never desync the alternation.
-// Even slots (00, 01, …) → drill; odd → word. A "slot" is a 30-minute block.
-func slotKind(t time.Time) string {
+// minutesSinceMidnight returns t's wall-clock position (in appLocation) as
+// minutes since local midnight.
+func minutesSinceMidnight(t time.Time) int {
 	local := t.In(appLocation)
-	slot := (local.Hour()*60 + local.Minute()) / 30
-	if slot%2 == 0 {
-		return kindDrill
+	return local.Hour()*60 + local.Minute()
+}
+
+// dueAndKind reports whether a user with the given send interval (minutes) should
+// receive content at time t, and which kind. Due-ness is wall-clock aligned
+// (minutesSinceMidnight % interval == 0) so restarts and quiet-hour skips never
+// desync delivery. The drill/word alternation is per-user: even interval-slots
+// send a drill, odd send a word.
+func dueAndKind(t time.Time, interval int) (due bool, kind string) {
+	if interval <= 0 {
+		interval = defaultInterval
 	}
-	return kindWord
+	m := minutesSinceMidnight(t)
+	if m%interval != 0 {
+		return false, ""
+	}
+	if (m/interval)%2 == 0 {
+		return true, kindDrill
+	}
+	return true, kindWord
 }
 
 // nextHalfHour returns the next :00 or :30 boundary after t.
@@ -85,10 +99,11 @@ func nextMidnight(t time.Time) time.Time {
 // Broadcast scheduler (Changes B + C)
 // ---------------------------------------------------------------------------
 
-// runBroadcastScheduler fires every half hour, skipping quiet hours, and
-// broadcasts the slot's content kind (alternating drill/word by wall clock).
+// runBroadcastScheduler fires every half hour (the base slot), skipping quiet
+// hours, and runs a per-user delivery sweep: each subscriber receives content
+// only on slots aligned to their chosen interval, alternating drill/word.
 func runBroadcastScheduler(ctx context.Context, chain *ProviderChain, store *Store) {
-	log.Println("⏰ [SCHED] Broadcast scheduler started (half-hourly, quiet-hour aware).")
+	log.Println("⏰ [SCHED] Broadcast scheduler started (half-hourly base, per-user interval, quiet-hour aware).")
 	for {
 		next := nextHalfHour(time.Now())
 		wait := time.Until(next)
@@ -107,32 +122,37 @@ func runBroadcastScheduler(ctx context.Context, chain *ProviderChain, store *Sto
 			continue
 		}
 
-		kind := slotKind(now)
-		broadcastContent(ctx, chain, store, kind)
+		broadcastSweep(ctx, chain, store, now)
 	}
 }
 
-// broadcastContent delivers one pooled item of kind to every subscriber. It never
-// triggers inline generation (pool-only); the poolFiller keeps the pool stocked.
-func broadcastContent(ctx context.Context, chain *ProviderChain, store *Store, kind string) {
+// broadcastSweep delivers, for the current slot, one pooled item to every
+// subscriber who is (a) not paused and (b) due this slot per their interval. The
+// content kind is chosen per user (drill/word alternation by interval-slot). It
+// never triggers inline generation (pool-only); the poolFiller keeps the pool stocked.
+func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, now time.Time) {
 	chats, err := store.Subscribers()
 	if err != nil {
 		log.Printf("❌ [BROADCAST] Could not read subscribers: %v", err)
 		return
 	}
 	if len(chats) == 0 {
-		log.Printf("📢 [BROADCAST] No subscribers; skipping %s broadcast.", kind)
+		log.Printf("📢 [BROADCAST] No subscribers; nothing to do this slot.")
 		return
 	}
 
-	log.Printf("📢 [BROADCAST] Distributing %s to %d subscriber(s).", kind, len(chats))
-	for i, chatID := range chats {
+	sent := 0
+	for _, chatID := range chats {
 		prefs, err := store.GetPrefs(chatID)
 		if err != nil {
 			log.Printf("⚠️  [BROADCAST] Could not load prefs for chat %d: %v (using defaults)", chatID, err)
 		}
 		if prefs.Paused {
-			log.Printf("⏸️  [BROADCAST] Chat %d is paused; skipping %s.", chatID, kind)
+			continue
+		}
+
+		due, kind := dueAndKind(now, prefs.Interval)
+		if !due {
 			continue
 		}
 
@@ -140,14 +160,16 @@ func broadcastContent(ctx context.Context, chain *ProviderChain, store *Store, k
 
 		text, err := serveContent(ctx, chain, store, chatID, kind, prefs.Level, false)
 		if err != nil {
-			log.Printf("❌ [BROADCAST] [%d/%d] %s for chat %d failed: %v", i+1, len(chats), kind, chatID, err)
+			log.Printf("❌ [BROADCAST] %s for chat %d failed: %v", kind, chatID, err)
 			continue
 		}
 		if err := sendToTelegram(chatID, text); err != nil {
 			log.Printf("❌ [BROADCAST] Send to chat %d failed: %v", chatID, err)
+			continue
 		}
+		sent++
 	}
-	log.Printf("✅ [BROADCAST] %s sweep complete.", kind)
+	log.Printf("✅ [BROADCAST] Slot sweep complete: delivered to %d/%d subscriber(s).", sent, len(chats))
 }
 
 // ---------------------------------------------------------------------------

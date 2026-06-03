@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strings"
 )
@@ -18,10 +19,19 @@ const (
 // allLevels is the ordered set of selectable levels.
 var allLevels = []string{levelBeginner, levelIntermediate, levelAdvanced}
 
+// Send interval (Change L). Users choose how often scheduled drills/words arrive.
+// Values are kept as multiples of the 30-minute base scheduler tick so the
+// wall-clock alignment math stays exact.
+const defaultInterval = 30
+
+// allIntervals is the ordered set of selectable send intervals, in minutes.
+var allIntervals = []int{30, 60, 120, 180, 240, 360, 480, 720}
+
 // UserPrefs holds the per-user settings stored in the user_prefs table.
 type UserPrefs struct {
-	Level  string
-	Paused bool
+	Level    string
+	Paused   bool
+	Interval int // minutes between scheduled sends
 }
 
 // normalizeLevel lowercases/trims a level string and validates it, falling back
@@ -48,18 +58,44 @@ func levelLabel(level string) string {
 	}
 }
 
+// normalizeInterval validates a requested interval (in minutes), falling back to
+// the default when the value is not one of the allowed options.
+func normalizeInterval(minutes int) (int, bool) {
+	for _, m := range allIntervals {
+		if m == minutes {
+			return minutes, true
+		}
+	}
+	return defaultInterval, false
+}
+
+// intervalLabel returns a human-friendly label for an interval in minutes.
+func intervalLabel(minutes int) string {
+	switch {
+	case minutes%60 == 0 && minutes >= 60:
+		h := minutes / 60
+		if h == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", h)
+	default:
+		return fmt.Sprintf("%d minutes", minutes)
+	}
+}
+
 // ---------------------------------------------------------------------------
-// user_prefs store methods (Changes F + H)
+// user_prefs store methods (Changes F + H + L)
 // ---------------------------------------------------------------------------
 
 // GetPrefs returns the user's preferences, applying defaults when no row exists.
 func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
-	prefs := UserPrefs{Level: defaultLevel, Paused: false}
+	prefs := UserPrefs{Level: defaultLevel, Paused: false, Interval: defaultInterval}
 	var level string
 	var paused int
+	var interval int
 	err := s.db.QueryRow(
-		"SELECT level, paused FROM user_prefs WHERE chat_id = ?", chatID,
-	).Scan(&level, &paused)
+		"SELECT level, paused, interval_minutes FROM user_prefs WHERE chat_id = ?", chatID,
+	).Scan(&level, &paused, &interval)
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
 			return prefs, nil
@@ -70,6 +106,9 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 		prefs.Level = l
 	}
 	prefs.Paused = paused != 0
+	if iv, ok := normalizeInterval(interval); ok {
+		prefs.Interval = iv
+	}
 	return prefs, nil
 }
 
@@ -116,6 +155,27 @@ func (s *Store) IsPaused(chatID int64) bool {
 		return false
 	}
 	return prefs.Paused
+}
+
+// GetInterval returns the user's send interval in minutes (default when unset).
+func (s *Store) GetInterval(chatID int64) int {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load interval for chat %d: %v (using default)", chatID, err)
+		return defaultInterval
+	}
+	return prefs.Interval
+}
+
+// SetInterval upserts the user's send interval (in minutes).
+func (s *Store) SetInterval(chatID int64, minutes int) error {
+	minutes, _ = normalizeInterval(minutes)
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, interval_minutes) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET interval_minutes = excluded.interval_minutes, updated_at = CURRENT_TIMESTAMP`,
+		chatID, minutes,
+	)
+	return err
 }
 
 // ActiveLevels returns the distinct set of levels the pool should keep stocked:

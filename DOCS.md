@@ -244,6 +244,7 @@ All messages use `parse_mode: HTML`.
 | `/stats` | Sends a read-only progress summary: drills practised, words learned, active days, current & longest daily streak, level (`UserStats` / `formatStats`). (v1.5.0) |
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
+| `/interval [min]` | With a numeric argument, sets the send interval directly; without, shows the current interval + an inline keyboard of options (`handleInterval`). Allowed: 30/60/120/180/240/360/480/720 min. (v1.6.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
 | *(anything else)* | Replies with a prompt to use /drill, /word, /level or /help. |
 | *(empty text)* | Silently ignored. |
@@ -950,7 +951,7 @@ A Sunday-evening recap, natural extension of the daily review.
 
 ---
 
-## Change L — `/interval` (per-user send frequency)
+## Change L — `/interval` (per-user send frequency) — IMPLEMENTED in v1.6.0
 
 Let each learner choose how often scheduled drills/words arrive, instead of the
 fixed 30-minute cadence.
@@ -976,6 +977,14 @@ fixed 30-minute cadence.
 **Planned implementation:** `interval_minutes` on `user_prefs` + migration in
 `prefs.go`/`main.go`; due-check + per-user kind in `schedule.go`; `/interval`
 handler, keyboard and callback branch in `main.go`.
+
+**Implementation (v1.6.0):** `interval_minutes` column on `user_prefs` (default
+30) + additive `migrate()` ALTER; `defaultInterval`, `allIntervals`,
+`normalizeInterval`, `intervalLabel`, `Store.GetInterval`/`SetInterval` and
+`UserPrefs.Interval` in `prefs.go`; `minutesSinceMidnight` + `dueAndKind`
+(alignment-based due-check & per-user drill/word alternation) feeding the new
+`broadcastSweep` in `schedule.go`; `handleInterval`, `intervalKeyboard` and the
+`interval:` callback branch in `main.go`.
 
 | Command | Behaviour |
 |---|---|
@@ -1048,8 +1057,8 @@ and get back a vocabulary card formatted exactly like `/word`.
    (both built on the new `user_prefs` table; `callback_query` handling landed here too).
 2. ~~**Change G (`/stats`)**~~ — ✅ **DONE in v1.5.0** (read-only over `sent_words`/
    `sent_vocab`/`subscribers`; streak derived from `sent_at` dates).
-3. **Change L (`/interval`)** — per-user send frequency; small `user_prefs` column +
-   per-user due-check in the broadcast sweep; reuses `callback_query` infra.
+3. ~~**Change L (`/interval`)**~~ — ✅ **DONE in v1.6.0** (per-user send frequency;
+   `user_prefs.interval_minutes` + per-user due-check sweep; reused `callback_query` infra).
 4. **Change M (Word lookup)** — type any word to get a `/word`-style card; small
    generation variant + replaces the `default` message branch; pairs naturally with L.
 5. **Change D (Spaced Repetition)** — the core learning upgrade; reuses existing history.

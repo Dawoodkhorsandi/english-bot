@@ -77,6 +77,12 @@ var Changelogs = []ChangelogEntry{
 			"• 📊 <b>/stats</b> shows your progress: grammar drills practised, words learned, active days, and your current & longest <b>daily streak</b> 🔥\n" +
 			"• Keep your streak alive by practising a little every day!",
 	},
+	{
+		Version: "1.6.0",
+		Text: "📣 <b>What's New in v1.6.0</b>\n\n" +
+			"• ⏱️ <b>/interval</b> lets you choose how often you get practice — anywhere from every 30 minutes to every 12 hours\n" +
+			"• Tap the buttons or send e.g. <code>/interval 60</code> to set it",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -295,6 +301,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
 			"/level — Choose your difficulty (beginner/intermediate/advanced)\n" +
+			"/interval — Choose how often you get practice\n" +
 			"/stats — See your progress and streak\n" +
 			"/pause — Pause scheduled sends\n" +
 			"/resume — Resume scheduled sends\n" +
@@ -312,6 +319,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"/drill — generate a grammar drill on demand\n" +
 			"/word — generate a vocabulary word on demand\n" +
 			"/level — set difficulty: beginner, intermediate or advanced\n" +
+			"/interval — set how often scheduled practice arrives\n" +
 			"/stats — see your progress, streak and totals\n" +
 			"/pause — stop scheduled sends (on-demand still works)\n" +
 			"/resume — re-enable scheduled sends\n" +
@@ -348,6 +356,9 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 
 	case "/level":
 		handleLevel(store, chatID, args)
+
+	case "/interval":
+		handleInterval(store, chatID, args)
 
 	case "/stats":
 		log.Printf("📊 [STATS] requested by ChatID %d.", chatID)
@@ -448,6 +459,73 @@ func levelKeyboard(current string) [][]inlineButton {
 	return [][]inlineButton{row}
 }
 
+// handleInterval handles the /interval command. With a valid numeric argument it
+// sets the send interval directly; otherwise it shows the current interval with
+// an inline keyboard of the allowed options.
+func handleInterval(store *Store, chatID int64, args []string) {
+	current := store.GetInterval(chatID)
+
+	if len(args) > 0 {
+		minutes, perr := strconv.Atoi(strings.TrimSpace(args[0]))
+		if perr != nil {
+			_ = sendToTelegram(chatID, "🤔 Please give the interval in minutes, e.g. <code>/interval 60</code>.")
+			return
+		}
+		iv, ok := normalizeInterval(minutes)
+		if !ok {
+			_ = sendToTelegram(chatID, "🤔 That's not one of the options. Choose one of: "+intervalOptionsText()+".")
+			return
+		}
+		if err := store.SetInterval(chatID, iv); err != nil {
+			log.Printf("❌ [INTERVAL_ERR] Could not set interval for ChatID %d: %v", chatID, err)
+			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't change your interval right now. Please try again.")
+			return
+		}
+		log.Printf("⏱️  [INTERVAL] ChatID %d set interval to %d min.", chatID, iv)
+		_ = sendToTelegram(chatID, fmt.Sprintf("✅ Send interval set to <b>%s</b>. You'll get practice that often (quiet hours aside).", intervalLabel(iv)))
+		return
+	}
+
+	text := fmt.Sprintf(
+		"⏱️ <b>Send interval</b>\n\nYou currently receive practice every <b>%s</b>.\nTap a button to change how often:",
+		intervalLabel(current),
+	)
+	if err := sendToTelegramWithKeyboard(chatID, text, intervalKeyboard(current)); err != nil {
+		log.Printf("❌ [INTERVAL_ERR] Could not send interval keyboard to ChatID %d: %v", chatID, err)
+	}
+}
+
+// intervalKeyboard builds an inline keyboard (rows of two) of the allowed send
+// intervals, marking the current one with a check.
+func intervalKeyboard(current int) [][]inlineButton {
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, iv := range allIntervals {
+		label := intervalLabel(iv)
+		if iv == current {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("interval:%d", iv)})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// intervalOptionsText renders the allowed intervals as a human-readable list.
+func intervalOptionsText() string {
+	labels := make([]string, len(allIntervals))
+	for i, iv := range allIntervals {
+		labels[i] = intervalLabel(iv)
+	}
+	return strings.Join(labels, ", ")
+}
+
 // handleCallback processes inline-keyboard taps (currently level selection).
 func handleCallback(store *Store, cb *TelegramCallbackQuery) {
 	if cb.Message == nil {
@@ -472,6 +550,31 @@ func handleCallback(store *Store, cb *TelegramCallbackQuery) {
 		_ = editMessageText(chatID, cb.Message.MessageID,
 			fmt.Sprintf("🎚️ <b>Difficulty level</b>\n\nDifficulty set to <b>%s</b>. New drills and words will match it.", levelLabel(level)),
 			levelKeyboard(level),
+		)
+		return
+	}
+
+	if strings.HasPrefix(cb.Data, "interval:") {
+		minutes, perr := strconv.Atoi(strings.TrimPrefix(cb.Data, "interval:"))
+		if perr != nil {
+			_ = answerCallbackQuery(cb.ID, "Unknown interval")
+			return
+		}
+		iv, ok := normalizeInterval(minutes)
+		if !ok {
+			_ = answerCallbackQuery(cb.ID, "Unknown interval")
+			return
+		}
+		if err := store.SetInterval(chatID, iv); err != nil {
+			log.Printf("❌ [INTERVAL_ERR] Could not set interval for ChatID %d: %v", chatID, err)
+			_ = answerCallbackQuery(cb.ID, "Could not save, try again")
+			return
+		}
+		log.Printf("⏱️  [INTERVAL] ChatID %d set interval to %d min (via button).", chatID, iv)
+		_ = answerCallbackQuery(cb.ID, "Interval set to "+intervalLabel(iv))
+		_ = editMessageText(chatID, cb.Message.MessageID,
+			fmt.Sprintf("⏱️ <b>Send interval</b>\n\nYou'll now receive practice every <b>%s</b> (quiet hours aside).", intervalLabel(iv)),
+			intervalKeyboard(iv),
 		)
 		return
 	}
@@ -631,10 +734,11 @@ func openStore(path string) (*Store, error) {
 		PRIMARY KEY (chat_id, review_date)
 	);
 	CREATE TABLE IF NOT EXISTS user_prefs (
-		chat_id    INTEGER PRIMARY KEY,
-		level      TEXT    NOT NULL DEFAULT 'intermediate',
-		paused     INTEGER NOT NULL DEFAULT 0,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		chat_id          INTEGER PRIMARY KEY,
+		level            TEXT    NOT NULL DEFAULT 'intermediate',
+		paused           INTEGER NOT NULL DEFAULT 0,
+		interval_minutes INTEGER NOT NULL DEFAULT 30,
+		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`
 	if _, err := db.Exec(schema); err != nil {
@@ -673,6 +777,15 @@ func (s *Store) migrate() error {
 		"CREATE INDEX IF NOT EXISTS idx_content_pool_kind ON content_pool(kind, level, created_at)",
 	); err != nil {
 		return err
+	}
+	// user_prefs.interval_minutes was added in v1.6.0 (Change L).
+	if !s.columnExists("user_prefs", "interval_minutes") {
+		log.Println("💾 [DB_MIGRATE] Adding user_prefs.interval_minutes column...")
+		if _, err := s.db.Exec(
+			"ALTER TABLE user_prefs ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 30",
+		); err != nil {
+			return err
+		}
 	}
 	return nil
 }
