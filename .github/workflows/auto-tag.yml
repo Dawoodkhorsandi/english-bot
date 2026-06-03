@@ -19,6 +19,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # need full history + tags to check for an existing tag
+          # Persist the PAT (not the default GITHUB_TOKEN) as the git credential so
+          # the tag push below is authored by the PAT and therefore triggers
+          # release.yml. A GITHUB_TOKEN-authored push does not trigger workflows.
+          token: ${{ secrets.GHCR_TOKEN }}
 
       - name: Determine version from changelog
         id: ver
@@ -34,7 +38,6 @@ jobs:
 
       - name: Create and push tag if missing
         env:
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
@@ -44,7 +47,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "Release $TAG"
-          # Push with the PAT so the tag push triggers release.yml (GITHUB_TOKEN
-          # pushes would not, due to GitHub's workflow-recursion prevention).
-          git push "https://x-access-token:${GHCR_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$TAG"
+          # Uses the PAT credential persisted by checkout above, so this push
+          # triggers release.yml (build + GitHub Release + deploy to the VPS).
+          git push origin "$TAG"
           echo "Pushed $TAG — release + deploy will follow."
