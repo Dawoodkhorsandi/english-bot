@@ -116,23 +116,13 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    environment: production
+    # This job is skipped entirely if SSH_HOST is not set.
+    # Add SSH_HOST, SSH_USER, SSH_KEY secrets to enable VPS deployment.
+    if: ${{ secrets.SSH_HOST != '' }}
     steps:
-      - name: Check SSH config
-        id: check
-        run: |
-          if [ -z "${{ secrets.SSH_HOST }}" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "SSH_HOST not configured, skipping deploy"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: actions/checkout@v4
-        if: steps.check.outputs.skip != 'true'
 
       - name: Deploy to VPS
-        if: steps.check.outputs.skip != 'true'
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
