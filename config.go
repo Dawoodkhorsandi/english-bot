@@ -26,6 +26,10 @@ var (
 	// Spaced-repetition review tuning (Change D).
 	reviewCheckInterval = getEnvDuration("REVIEW_CHECK_INTERVAL", time.Hour)
 	reviewBatchMax      = getEnvInt("REVIEW_BATCH_MAX", 3)
+
+	// Quiz / active-recall tuning (Change E). Set QUIZ_INTERVAL=0 to disable
+	// scheduled quizzes (the /quiz command still works).
+	quizInterval = getEnvDuration("QUIZ_INTERVAL", 6*time.Hour)
 )
 
 // appLocation is the time.Location used for all scheduling decisions.

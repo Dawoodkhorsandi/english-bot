@@ -241,7 +241,8 @@ All messages use `parse_mode: HTML`.
 | `/drill` | Sends a "Generating…" ack, calls `serveContent(kind=drill, level, allowGenerate=true)` (pool-first, inline-gen on miss), returns the result. |
 | `/word` | Sends a "Finding a fresh word…" ack, calls `serveContent(kind=word, level, allowGenerate=true)`, returns the vocabulary card. |
 | `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query` and are handled by `handleCallback`. (v1.4.0) |
-| `/stats` | Sends a read-only progress summary: drills practised, words learned, active days, current & longest daily streak, level (`UserStats` / `formatStats`). (v1.5.0) |
+| `/stats` | Sends a read-only progress summary: drills practised, words learned, mastered, active days, current & longest daily streak, quiz accuracy, level (`UserStats` / `formatStats`). (v1.5.0; mastered v1.8.0; quiz accuracy v1.9.0) |
+| `/quiz` | Sends one multiple-choice quiz on a learned word (biased to due reviews); the tapped answer is recorded and feeds spaced repetition. (v1.9.0) |
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
 | `/interval [min]` | With a numeric argument, sets the send interval directly; without, shows the current interval + an inline keyboard of options (`handleInterval`). Allowed: 30/60/120/180/240/360/480/720 min. (v1.6.0) |
@@ -810,7 +811,7 @@ response. Timestamps are stored as UTC strings (`2006-01-02 15:04:05`) so lexico
 
 ---
 
-## Change E — Quiz / Active Recall
+## Change E — Quiz / Active Recall — IMPLEMENTED in v1.9.0
 
 Turns passive reading into testing, which is what actually builds recall.
 
@@ -842,6 +843,40 @@ Turns passive reading into testing, which is what actually builds recall.
 | Command | Behaviour |
 |---|---|
 | `/quiz` | Send one quiz question on demand (pulled from the user's seen words). |
+
+**Implementation (v1.9.0):** `quiz.go` builds a multiple-choice question entirely
+from pooled data — no AI call. Two question types are rotated: **word → meaning**
+("What does WORD mean?") and **meaning → word** ("Which word means …?").
+`makeQuiz` picks a subject from the user's learned words (`SeenWordsWithMeaning`,
+i.e. `sent_vocab` joined with pooled meanings), **biased toward words currently due**
+for spaced-repetition review (`DueReviews`); `buildQuiz` fills three distractors from
+`PoolWordMeanings` (random pooled words), shuffles, and records the correct index.
+The inline keyboard tags the correct option `quiz:c:<word>` and wrong ones
+`quiz:x:<word>` (so a tap always grades the subject word, and option text — which can
+be a long meaning — never bloats the callback payload). `handleQuizCallback` records
+the answer in `quiz_results`, feeds the spaced-repetition schedule
+(`ApplyReviewKnown`/`ApplyReviewForgot`), reveals the answer + meaning, and removes the
+keyboard. `runQuizScheduler` sends one quiz per eligible (non-paused, quiet-hour-clear)
+subscriber every `QUIZ_INTERVAL` (default `6h`; set `0` to disable — `/quiz` still
+works). `/stats` gained a **Quiz accuracy** line (`QuizStats`). Words with too little
+material are skipped gracefully. Tests: `quiz_smoke_test.go`.
+
+#### `quiz_results` table
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `INTEGER PK AUTOINCREMENT` | Row id |
+| `chat_id` | `INTEGER` | FK → subscriber |
+| `word` | `TEXT` | Subject word graded |
+| `correct` | `INTEGER` | `1` correct, `0` wrong |
+| `answered_at` | `DATETIME` | When answered |
+
+Index `idx_quiz_chat` on `chat_id`. Append-only history (no uniqueness) feeding
+`/stats` accuracy and the spaced-repetition ease/interval updates.
+
+| Config | Default | Description |
+|---|---|---|
+| `QUIZ_INTERVAL` | `6h` | How often scheduled quizzes fire (`0` disables; `/quiz` still works) |
 
 ---
 
@@ -877,8 +912,9 @@ Lets users tune content difficulty instead of the hard-coded "intermediate".
 
 Engagement driver: show the user their progress.
 
-- Reads existing tables only: `sent_words`, `sent_vocab`, `subscribers`. Quiz
-  accuracy and "mastered" counts are deferred until Changes D/E land those tables.
+- Reads existing tables only: `sent_words`, `sent_vocab`, `subscribers`. Since
+  v1.8.0/v1.9.0 it also surfaces **words mastered** (from `review_schedule`,
+  Change D) and **quiz accuracy** (from `quiz_results`, Change E).
 - Reports: total verbs practised, total words learned, distinct active days,
   current **streak** and longest streak (consecutive active days), level, and
   member-since date.
@@ -1085,7 +1121,8 @@ and get back a vocabulary card formatted exactly like `/word`.
 5. ~~**Change D (Spaced Repetition)**~~ — ✅ **DONE in v1.8.0** (`review_schedule` +
    SM-2-lite `srs.go`; seeded on every word send; hourly reminder sweep with
    Knew-it/Forgot buttons; `/stats` mastered count).
-6. **Change E (Quiz / Active Recall)** — adds `callback_query` handling; pairs with D to
-   feed difficulty signals.
+6. ~~**Change E (Quiz / Active Recall)**~~ — ✅ **DONE in v1.9.0** (`quiz_results` +
+   `quiz.go`; multiple-choice from pooled words, biased to due reviews; `/quiz` +
+   6h scheduler; feeds D and /stats accuracy).
 7. **Change J (Admin metrics)** — operational visibility once the above add moving parts.
 8. **Change I (Audio)** & **Change K (Weekly digest)** — polish features, ship last.

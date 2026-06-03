@@ -96,6 +96,12 @@ var Changelogs = []ChangelogEntry{
 			"• Tap <b>✅ Knew it</b> or <b>❌ Forgot</b> and I'll fine-tune when you see each word next\n" +
 			"• 📊 /stats now shows how many words you've <b>mastered</b>",
 	},
+	{
+		Version: "1.9.0",
+		Text: "📣 <b>What's New in v1.9.0</b>\n\n" +
+			"• 🧩 <b>Quizzes!</b> Test yourself with multiple-choice questions on words you've learned — send /quiz anytime, and I'll also pop one in now and then\n" +
+			"• Your answers tune your spaced-repetition schedule and show up as <b>quiz accuracy</b> in /stats",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -168,10 +174,12 @@ func main() {
 	//   2. broadcast scheduler fans pooled content out every 30 min (quiet-hour aware).
 	//   3. daily review scheduler sends a bedtime word recap at local midnight.
 	//   4. spaced-repetition scheduler resurfaces due words for review (Change D).
+	//   5. quiz scheduler periodically tests learned words (Change E).
 	go poolFiller(ctx, chain, store)
 	go runBroadcastScheduler(ctx, chain, store)
 	go runDailyReviewScheduler(ctx, store)
 	go runReviewScheduler(ctx, store)
+	go runQuizScheduler(ctx, store)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store)
@@ -316,6 +324,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"📚 <b>Commands:</b>\n" +
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
+			"/quiz — Test yourself on a word you've learned\n" +
 			"/level — Choose your difficulty (beginner/intermediate/advanced)\n" +
 			"/interval — Choose how often you get practice\n" +
 			"/stats — See your progress and streak\n" +
@@ -332,10 +341,12 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"Simple, Continuous, Perfect, Perfect Continuous — across past, present and future — plus the First Conditional.\n\n" +
 			"📘 <b>Vocabulary words</b> give you the meaning, pronunciation, synonyms, opposites and real examples for a useful new word.\n\n" +
 			"🧠 <b>Spaced repetition:</b> words you've learned come back as quick <b>memory checks</b> at growing intervals — tap ✅ Knew it / ❌ Forgot and I'll tune when you see each one next.\n\n" +
+			"🧩 <b>Quizzes:</b> multiple-choice questions test your recall — send /quiz anytime, and one pops up now and then. Your answers also tune your review schedule.\n\n" +
 			"💬 <b>Look up any word:</b> just type it (English or Persian) and I'll send a full card for it.\n\n" +
 			"You get one of each per hour, about 30 minutes apart (quiet overnight).\n\n" +
 			"/drill — generate a grammar drill on demand\n" +
 			"/word — generate a vocabulary word on demand\n" +
+			"/quiz — test yourself on a word you've already learned\n" +
 			"/level — set difficulty: beginner, intermediate or advanced\n" +
 			"/interval — set how often scheduled practice arrives\n" +
 			"/stats — see your progress, streak and totals\n" +
@@ -388,6 +399,10 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 		}
 		_ = sendToTelegram(chatID, formatStats(stats))
 
+	case "/quiz":
+		log.Printf("🧩 [QUIZ] requested by ChatID %d.", chatID)
+		handleQuiz(store, chatID)
+
 	case "/pause":
 		if err := store.SetPaused(chatID, true); err != nil {
 			log.Printf("❌ [PAUSE_ERR] Could not pause ChatID %d: %v", chatID, err)
@@ -429,7 +444,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 	default:
 		if strings.HasPrefix(command, "/") {
 			log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
-			_ = sendToTelegram(chatID, "🤖 I don't know that command. Try /drill, /word, /stats or /help — or just send me any word to look it up!")
+			_ = sendToTelegram(chatID, "🤖 I don't know that command. Try /drill, /word, /quiz, /stats or /help — or just send me any word to look it up!")
 			return
 		}
 		// Plain text (no leading slash) is treated as a word lookup (Change M).
@@ -643,6 +658,11 @@ func handleCallback(store *Store, cb *TelegramCallbackQuery) {
 
 	if strings.HasPrefix(cb.Data, "srs:") {
 		handleReviewCallback(store, cb, chatID)
+		return
+	}
+
+	if strings.HasPrefix(cb.Data, "quiz:") {
+		handleQuizCallback(store, cb, chatID)
 		return
 	}
 
@@ -865,6 +885,14 @@ func openStore(path string) (*Store, error) {
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_review_due ON review_schedule(chat_id, due_at);
+	CREATE TABLE IF NOT EXISTS quiz_results (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		chat_id     INTEGER NOT NULL,
+		word        TEXT    NOT NULL,
+		correct     INTEGER NOT NULL,
+		answered_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_quiz_chat ON quiz_results(chat_id);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
