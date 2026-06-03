@@ -44,6 +44,9 @@ var (
 	// time. Set IDIOM_TIME to "off" to disable the scheduled send (the /idiom
 	// command still works).
 	idiomTime = getEnv("IDIOM_TIME", "09:00")
+
+	// Audio pronunciation (Change I). Set TTS_ENABLED=false to disable globally.
+	ttsEnabled = getEnvBool("TTS_ENABLED", true)
 )
 
 // appLocation is the time.Location used for all scheduling decisions.
@@ -79,6 +82,22 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		log.Printf("⚠️  [CONFIG] %s=%q is not a duration; using default %s.", key, v, fallback)
 	}
 	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	v, ok := lookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		log.Printf("⚠️  [CONFIG] %s=%q is not a boolean; using default %t.", key, v, fallback)
+		return fallback
+	}
 }
 
 // getEnvWeekday parses a weekday name (or abbreviation) from an env var.

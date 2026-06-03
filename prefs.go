@@ -31,9 +31,10 @@ var allIntervals = []int{30, 60, 120, 180, 240, 360, 480, 720}
 
 // UserPrefs holds the per-user settings stored in the user_prefs table.
 type UserPrefs struct {
-	Level    string
-	Paused   bool
-	Interval int // minutes between scheduled sends
+	Level      string
+	Paused     bool
+	Interval   int  // minutes between scheduled sends
+	TTSEnabled bool // whether pronunciation voice messages are enabled
 }
 
 // normalizeLevel lowercases/trims a level string and validates it, falling back
@@ -86,18 +87,19 @@ func intervalLabel(minutes int) string {
 }
 
 // ---------------------------------------------------------------------------
-// user_prefs store methods (Changes F + H + L)
+// user_prefs store methods (Changes F + H + I + L)
 // ---------------------------------------------------------------------------
 
 // GetPrefs returns the user's preferences, applying defaults when no row exists.
 func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
-	prefs := UserPrefs{Level: defaultLevel, Paused: false, Interval: defaultInterval}
+	prefs := UserPrefs{Level: defaultLevel, Paused: false, Interval: defaultInterval, TTSEnabled: true}
 	var level string
 	var paused int
 	var interval int
+	var ttsEnabled int
 	err := s.db.QueryRow(
-		"SELECT level, paused, interval_minutes FROM user_prefs WHERE chat_id = ?", chatID,
-	).Scan(&level, &paused, &interval)
+		"SELECT level, paused, interval_minutes, tts_enabled FROM user_prefs WHERE chat_id = ?", chatID,
+	).Scan(&level, &paused, &interval, &ttsEnabled)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return prefs, nil
@@ -111,6 +113,7 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 	if iv, ok := normalizeInterval(interval); ok {
 		prefs.Interval = iv
 	}
+	prefs.TTSEnabled = ttsEnabled != 0
 	return prefs, nil
 }
 
@@ -176,6 +179,31 @@ func (s *Store) SetInterval(chatID int64, minutes int) error {
 		INSERT INTO user_prefs (chat_id, interval_minutes) VALUES (?, ?)
 		ON CONFLICT(chat_id) DO UPDATE SET interval_minutes = excluded.interval_minutes, updated_at = CURRENT_TIMESTAMP`,
 		chatID, minutes,
+	)
+	return err
+}
+
+// GetTTSEnabled reports whether pronunciation voice messages are enabled for the
+// user (default true when unset).
+func (s *Store) GetTTSEnabled(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load TTS flag for chat %d: %v (using default true)", chatID, err)
+		return true
+	}
+	return prefs.TTSEnabled
+}
+
+// SetTTSEnabled upserts the user's TTS preference.
+func (s *Store) SetTTSEnabled(chatID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, tts_enabled) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET tts_enabled = excluded.tts_enabled, updated_at = CURRENT_TIMESTAMP`,
+		chatID, v,
 	)
 	return err
 }

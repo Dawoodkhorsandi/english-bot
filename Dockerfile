@@ -21,7 +21,8 @@ FROM alpine:3.20
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # Run as a non-root user; /data holds the SQLite database (mounted volume).
-RUN adduser -D -H -u 10001 appuser \
+RUN apk add --no-cache espeak-ng \
+    && adduser -D -H -u 10001 appuser \
     && mkdir -p /data \
     && chown appuser:appuser /data
 

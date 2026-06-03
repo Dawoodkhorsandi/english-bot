@@ -168,7 +168,7 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 		if kind == kindDrill {
 			sendErr = sendDrill(notifier, chatID, text)
 		} else {
-			sendErr = notifier.Send(chatID, text)
+			sendErr = sendWordCardWithTTS(ctx, store, notifier, chatID, text)
 		}
 		if sendErr != nil {
 			log.Printf("❌ [BROADCAST] Send to chat %d failed: %v", chatID, sendErr)

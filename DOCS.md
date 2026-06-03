@@ -28,6 +28,7 @@ Go application (multi-file, single package main)
 ├── pool.go           — content_pool Store methods, serveContent, poolFiller goroutine
 ├── schedule.go       — quiet hours, broadcast scheduler, daily review scheduler, weekly digest scheduler
 ├── prefs.go          — user_prefs Store methods, level/interval/pause helpers
+├── tts.go            — pronunciation TTS generation (Gemini + espeak-ng fallback) and sendVoice helper
 ├── srs.go            — spaced-repetition SM-2-lite logic, review_schedule Store methods, review scheduler
 ├── quiz.go           — quiz building, quiz_results Store methods, quiz scheduler
 └── stats.go          — /stats computation (streaks, activity days, formatStats), admin metrics (SubscriberStats, TotalQuizStats, TotalMasteredCount)
@@ -57,6 +58,7 @@ All configuration is read from environment variables at startup. There are no co
 | `TIMEZONE` | `Asia/Tehran` | IANA timezone for quiet hours, daily review, and digest scheduling |
 | `QUIET_START` | `00:00` | Start of the quiet window (no scheduled sends) |
 | `QUIET_END` | `09:00` | End of the quiet window |
+| `TTS_ENABLED` | `true` | Global kill-switch for pronunciation audio (`sendVoice`) |
 | `POOL_TARGET` | `300` | Target number of pre-generated items per (kind, level) in `content_pool` |
 | `POOL_MIN` | `100` | Low-water mark that triggers refill |
 | `REFILL_INTERVAL` | `20s` | How often the pool filler goroutine wakes |
@@ -225,6 +227,7 @@ per user per day (Change Q).
 | `level` | `TEXT` | Difficulty, default `intermediate` (Change F) |
 | `paused` | `INTEGER` | `1` = scheduled sends paused, default `0` (Change H) |
 | `interval_minutes` | `INTEGER` | Minutes between scheduled sends, default `30` (Change L) |
+| `tts_enabled` | `INTEGER` | `1` = pronunciation audio enabled, default `1` (Change I) |
 | `updated_at` | `DATETIME` | Last change time |
 
 Rows are created lazily via upsert (`INSERT … ON CONFLICT`) the first time a user sets
@@ -382,21 +385,22 @@ All messages use `parse_mode: HTML`.
 | Command | Behaviour |
 |---|---|
 | `/start` | Subscribes user (idempotent). If new: baselines all changelogs as seen, notifies maintainer, sends welcome. If returning: delivers any unseen changelogs first. Always sends welcome message. |
-| `/help` | Sends usage instructions covering grammar drills (21 paged forms), vocabulary words, level and pause/resume. |
+| `/help` | Sends usage instructions covering grammar drills (21 paged forms), vocabulary words, level/interval, TTS toggle, and pause/resume. |
 | `/drill` | Sends a "Generating…" ack, calls `serveContent(kind=drill, level, allowGenerate=true)` (pool-first, inline-gen on miss), returns the result. |
-| `/word` | Sends a "Finding a fresh word…" ack, calls `serveContent(kind=word, level, allowGenerate=true)`, returns the vocabulary card. |
-| `/idiom` | Sends a "Finding an idiom…" ack, calls `serveContent(kind=idiom, level, allowGenerate=true)`, returns the idiom card. (v1.12.0) |
+| `/word` | Sends a "Finding a fresh word…" ack, calls `serveContent(kind=word, level, allowGenerate=true)`, returns the vocabulary card, then best-effort sends a pronunciation voice note replying to the card. |
+| `/idiom` | Sends a "Finding an idiom…" ack, calls `serveContent(kind=idiom, level, allowGenerate=true)`, returns the idiom card, then best-effort sends a pronunciation voice note replying to it. (v1.12.0) |
 | `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query` and are handled by `handleCallback`. (v1.4.0) |
 | `/stats` | Sends a read-only progress summary: drills practised, words learned, mastered, active days, current & longest daily streak, quiz accuracy, level (`UserStats` / `formatStats`). (v1.5.0; mastered v1.8.0; quiz accuracy v1.9.0) |
 | `/quiz` | Sends one multiple-choice quiz on a learned word (biased to due reviews); the tapped answer is recorded and feeds spaced repetition. (v1.9.0) |
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
 | `/interval [min]` | With a numeric argument, sets the send interval directly; without, shows the current interval + an inline keyboard of options (`handleInterval`). Allowed: 30/60/120/180/240/360/480/720 min. (v1.6.0) |
+| `/tts [on/off]` | With `on`/`off`, toggles pronunciation audio in `user_prefs.tts_enabled`; without an argument, shows current TTS status. (v1.12.0) |
 | `/metrics` | *(Admin only)* Subscriber stats (total/active/paused), pool depth per kind+level, quiz volume, mastered count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
-| *(unknown command)* | Replies with a prompt to use /drill, /word, /quiz, /stats or /help — or to send any word to look it up. |
+| *(unknown command)* | Replies with a prompt to use /drill, /word, /quiz, /tts, /stats or /help — or to send any word to look it up. |
 | *(empty text)* | Silently ignored. |
 
 ---
@@ -978,7 +982,7 @@ double-send. `review_date` is the Tehran calendar date being recapped.
 > **Status: mostly implemented.** Changes **F (`/level`)** and **H (`/pause` /
 > `/resume`)** shipped in **v1.4.0**; **J (Admin)** and **K (Weekly digest)** shipped
 > in **v1.10.0** along with two additional quiz types (synonym + fill-in-the-blank).
-> The remaining change below (**I — Audio**) is still planned. Each Change is
+> All v2 roadmap changes listed below are now implemented. Each Change is
 > independent and can ship on its own; suggested order is given at the end. Schema
 > additions are all additive (`CREATE TABLE IF NOT EXISTS`).
 
@@ -1189,25 +1193,25 @@ Soft opt-out of broadcasts without deleting history (you opted against full unsu
 
 ---
 
-## Change I — `/audio` Pronunciation
+## Change I — Audio Pronunciation — IMPLEMENTED in v1.12.0
 
 Let learners *hear* a word, not just read its IPA.
 
-- Send a Telegram **voice note** (`sendVoice`) or audio of the word (and optionally an
-  example sentence).
-- Source options (all have free tiers / are free):
-  - Google Translate TTS endpoint (unofficial, free, simple GET)
-  - A free/open TTS (e.g. Piper) run locally and uploaded as OGG/Opus
-  - Provider TTS where available
-- Cache generated audio by word (new `audio_cache(word, file_id)` table storing the
-  Telegram `file_id` after first upload) so each word's audio is produced **once** and
-  re-sent by `file_id` thereafter — zero repeat cost.
+- After each delivered vocabulary card (`/word`, lookup, scheduled word slot), the bot
+  best-effort sends a Telegram **voice note** (`sendVoice`) pronouncing the target word.
+- TTS generation is provider-first with fallback:
+  - Primary: Gemini (`gemini-2.5-flash:generateContent` with audio modality) using the
+    existing `GEMINI_API_KEY`
+  - Fallback: local `espeak-ng` (`espeak-ng -w ...`) for zero-cost offline synthesis
+- Audio is best-effort only: any TTS/send failure is logged and never blocks card delivery.
+- TTS is skipped during quiet hours and for paused users.
+- Global config: `TTS_ENABLED` (default `true`); per-user opt-out: `user_prefs.tts_enabled`.
 
 | Command | Behaviour |
 |---|---|
-| `/audio` | Send the pronunciation of the most recent word (or a `/audio <word>`). |
-
-Each vocabulary card can also carry a "🔊 Hear it" inline button that triggers the same flow.
+| `/tts` | Show current pronunciation-audio status and usage. |
+| `/tts on` | Enable pronunciation audio for this user. |
+| `/tts off` | Disable pronunciation audio for this user. |
 
 ---
 
@@ -1361,7 +1365,7 @@ and get back a vocabulary card formatted exactly like `/word`.
 | Need | API |
 |---|---|
 | Quiz answer buttons | inline keyboards + `callback_query` handling in the poller |
-| Audio pronunciation | `sendVoice` (+ caching by `file_id`) |
+| Audio pronunciation | `sendVoice` (Gemini TTS with `espeak-ng` fallback, per-user `/tts` toggle) |
 | "Hear it" / "Knew it / Forgot" buttons | inline keyboards on cards |
 
 ## Suggested implementation order (v3+)
@@ -1383,7 +1387,7 @@ and get back a vocabulary card formatted exactly like `/word`.
 7. ~~**Change J (Admin metrics)**~~ — ✅ **DONE in v1.10.0** (`/metrics`, `/announce`,
    `/health` gated by `MAINTAINER_CHAT_ID`; `SubscriberStats`, `TotalQuizStats`,
    `TotalMasteredCount` in `stats.go`).
-8. **Change I (Audio)** — polish feature, ship last.
+8. ~~**Change I (Audio)**~~ — ✅ **DONE in v1.12.0** (best-effort post-word `sendVoice`, Gemini-first with `espeak-ng` fallback, `/tts on|off`, `user_prefs.tts_enabled`).
 9. ~~**Change K (Weekly digest)**~~ — ✅ **DONE in v1.10.0** (`runWeeklyDigestScheduler`
    in `schedule.go`; `weekly_digest_delivery` table; `DIGEST_DAY`/`DIGEST_TIME` config;
    two new quiz types — synonym + fill-in-the-blank — also shipped in v1.10.0).
@@ -1571,12 +1575,12 @@ XP system to drive daily engagement.
 
 ---
 
-### Change I — Audio Pronunciation (existing, still planned)
+### Change I — Audio Pronunciation (implemented in v1.12.0)
 
 **Priority: LOW** | **Effort: Medium**
 
-Already documented above. Send voice notes via TTS. Cache by `file_id`.
-Ship last as a polish feature.
+Shipped as documented above: post-word `sendVoice` pronunciation using Gemini TTS
+with `espeak-ng` fallback, plus per-user `/tts` opt-out.
 
 ---
 
@@ -1592,4 +1596,4 @@ Ship last as a polish feature.
 | 6 | **T (Custom words)** | v1.13.0 | User-driven content, extends existing pool infra |
 | 7 | **S (Sentence rearrangement)** | v1.13.0 | New quiz type, needs button-sequence UX |
 | 8 | **U (XP/Gamification)** | v1.14.0 | Cross-cutting -- add after core features stabilize |
-| 9 | **I (Audio)** | v1.15.0 | Polish feature, needs TTS integration |
+| 9 | **I (Audio)** | v1.12.0 | ✅ Implemented (Gemini + `espeak-ng` fallback, `/tts`) |
