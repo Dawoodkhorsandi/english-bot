@@ -168,6 +168,94 @@ func TestHandleMessageDrill(t *testing.T) {
 	}
 }
 
+func TestHandleMessageDrillPaged(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+	store.AddToPool(kindDrill, defaultLevel, "walk", "", sampleDrill(21))
+
+	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/drill"}
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+
+	// A multi-page drill is delivered with an inline keyboard, not a plain send.
+	if len(mock.keyboard) != 1 {
+		t.Fatalf("expected 1 keyboard send for paged drill, got %d", len(mock.keyboard))
+	}
+	kb := mock.keyboard[0]
+	if !strings.Contains(kb.text, "Page 1/5") || !strings.Contains(kb.text, "Verb of the Hour: walk") {
+		t.Errorf("first page text wrong: %q", kb.text)
+	}
+	if len(kb.keyboard) == 0 {
+		t.Fatal("expected a navigation keyboard")
+	}
+	last := kb.keyboard[0][len(kb.keyboard[0])-1]
+	if last.CallbackData != "drill:2:walk" {
+		t.Errorf("expected Next button to page 2, got %q", last.CallbackData)
+	}
+}
+
+func TestHandleDrillCallbackPaging(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	store.AddToPool(kindDrill, defaultLevel, "walk", "", sampleDrill(21))
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb1",
+		Data:    "drill:3:walk",
+		Message: &TelegramMessage{MessageID: 5, Chat: TelegramChat{ID: 100}},
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.edits) != 1 {
+		t.Fatalf("expected 1 edit, got %d", len(mock.edits))
+	}
+	if !strings.Contains(mock.edits[0].text, "Page 3/5") || !strings.Contains(mock.edits[0].text, "Future Tenses") {
+		t.Errorf("edit should render page 3, got %q", mock.edits[0].text)
+	}
+	if len(mock.edits[0].keyboard) == 0 {
+		t.Error("paged edit should keep a navigation keyboard")
+	}
+}
+
+func TestHandleDrillCallbackUnknownVerb(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb1",
+		Data:    "drill:2:zzz",
+		Message: &TelegramMessage{MessageID: 5, Chat: TelegramChat{ID: 100}},
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.edits) != 0 {
+		t.Errorf("expected no edit for unknown verb, got %d", len(mock.edits))
+	}
+	if len(mock.answers) != 1 || mock.answers[0].text != "That drill is no longer available" {
+		t.Errorf("expected an 'expired' answer, got %+v", mock.answers)
+	}
+}
+
+func TestHandleDrillCallbackNoop(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb1",
+		Data:    "drill:noop",
+		Message: &TelegramMessage{MessageID: 5, Chat: TelegramChat{ID: 100}},
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.edits) != 0 {
+		t.Errorf("noop should not edit, got %d edits", len(mock.edits))
+	}
+	if len(mock.answers) != 1 || mock.answers[0].text != "" {
+		t.Errorf("noop should be acknowledged silently, got %+v", mock.answers)
+	}
+}
+
 func TestHandleMessageWord(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}

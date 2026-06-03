@@ -332,7 +332,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 
 		welcome := "👋 <b>Welcome to English Muscle Memory Bot!</b>\n\n" +
 			"Every 30 minutes I send you something to practice — alternating between:\n" +
-			"• 🎯 a <b>grammar drill</b> (one verb across 14 tenses)\n" +
+			"• 🎯 a <b>grammar drill</b> (one verb across 21 forms — tap ▶️ to page through tenses, conditionals & more)\n" +
 			"• 📘 a <b>vocabulary word</b> (meaning, pronunciation, synonyms, opposites & examples)\n\n" +
 			"💬 <b>Tip:</b> send me <b>any word</b> (English or Persian) and I'll explain it like a vocabulary card!\n\n" +
 			"📚 <b>Commands:</b>\n" +
@@ -351,8 +351,8 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 	case "/help":
 		helpText := "💡 <b>How Muscle Memory Practice Works</b>\n\n" +
 			"Don't just read — <b>say everything out loud!</b> Repeating correct sentences and new words fast builds the subconscious instincts you need for natural speech.\n\n" +
-			"🎯 <b>Grammar drills</b> take one everyday verb through <b>14 tenses</b>:\n" +
-			"Simple, Continuous, Perfect, Perfect Continuous — across past, present and future — plus the First Conditional.\n\n" +
+			"🎯 <b>Grammar drills</b> take one everyday verb through <b>21 forms</b>, split into easy pages — tap <b>◀️ Back</b> / <b>Next ▶️</b> to move between them:\n" +
+			"present, past & future tenses (Simple, Continuous, Perfect, Perfect Continuous), all four conditionals, plus modals, passive, imperative and <i>used to</i>.\n\n" +
 			"📘 <b>Vocabulary words</b> give you the meaning, pronunciation, synonyms, opposites and real examples for a useful new word.\n\n" +
 			"🧠 <b>Spaced repetition:</b> words you've learned come back as quick <b>memory checks</b> at growing intervals — tap ✅ Knew it / ❌ Forgot and I'll tune when you see each one next.\n\n" +
 			"🧩 <b>Quizzes:</b> multiple-choice questions test your recall — send /quiz anytime, and one pops up now and then. Your answers also tune your review schedule.\n\n" +
@@ -381,7 +381,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Drill delivered to ChatID %d.", chatID)
-		_ = notifier.Send(chatID, drill)
+		_ = sendDrill(notifier, chatID, drill)
 
 	case "/word":
 		log.Printf("🤖 [AI_FLOW] /word requested by ChatID %d.", chatID)
@@ -817,6 +817,11 @@ func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) 
 		return
 	}
 
+	if strings.HasPrefix(cb.Data, "drill:") {
+		handleDrillCallback(store, notifier, cb, chatID)
+		return
+	}
+
 	log.Printf("ℹ️  [CALLBACK_UNHANDLED] Unknown callback data %q from ChatID %d.", cb.Data, chatID)
 	_ = notifier.AnswerCallback(cb.ID, "")
 }
@@ -866,6 +871,53 @@ func handleReviewCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 	_ = notifier.AnswerCallback(cb.ID, toast)
 	if cb.Message != nil {
 		_ = notifier.EditMessage(chatID, cb.Message.MessageID, confirm, [][]inlineButton{})
+	}
+}
+
+// sendDrill delivers a drill as page 1 of a paged message with prev/next
+// navigation buttons (Change N). When the drill is a single page (e.g. legacy
+// content that can't be parsed into forms) it falls back to a plain send.
+func sendDrill(notifier Notifier, chatID int64, fullText string) error {
+	text, total := renderDrillPage(fullText, 1)
+	kb := drillNavKeyboard(parseVerb(fullText), 1, total)
+	if len(kb) == 0 {
+		return notifier.Send(chatID, text)
+	}
+	return notifier.SendKeyboard(chatID, text, kb)
+}
+
+// handleDrillCallback turns the page of a paged drill in place. Callback data is
+// "drill:<page>:<verb>"; the full drill is reloaded from the pool by verb and the
+// requested page is re-rendered via editMessageText. "drill:noop" (the page
+// indicator button) is acknowledged silently.
+func handleDrillCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+	rest := strings.TrimPrefix(cb.Data, "drill:")
+	if rest == "noop" {
+		_ = notifier.AnswerCallback(cb.ID, "")
+		return
+	}
+	pageStr, term, found := strings.Cut(rest, ":")
+	page, perr := strconv.Atoi(pageStr)
+	if !found || term == "" || perr != nil {
+		_ = notifier.AnswerCallback(cb.ID, "")
+		return
+	}
+
+	fullText, ok, err := store.DrillText(term)
+	if err != nil {
+		log.Printf("❌ [DRILL] Could not load drill %q for chat %d: %v", term, chatID, err)
+		_ = notifier.AnswerCallback(cb.ID, "Could not load, try again")
+		return
+	}
+	if !ok {
+		_ = notifier.AnswerCallback(cb.ID, "That drill is no longer available")
+		return
+	}
+
+	text, total := renderDrillPage(fullText, page)
+	_ = notifier.AnswerCallback(cb.ID, "")
+	if cb.Message != nil {
+		_ = notifier.EditMessage(chatID, cb.Message.MessageID, text, drillNavKeyboard(term, page, total))
 	}
 }
 

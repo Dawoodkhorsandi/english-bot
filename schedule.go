@@ -163,8 +163,15 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 			log.Printf("❌ [BROADCAST] %s for chat %d failed: %v", kind, chatID, err)
 			continue
 		}
-		if err := notifier.Send(chatID, text); err != nil {
-			log.Printf("❌ [BROADCAST] Send to chat %d failed: %v", chatID, err)
+		// Drills go out paged (page 1 + navigation); words are a single message.
+		var sendErr error
+		if kind == kindDrill {
+			sendErr = sendDrill(notifier, chatID, text)
+		} else {
+			sendErr = notifier.Send(chatID, text)
+		}
+		if sendErr != nil {
+			log.Printf("❌ [BROADCAST] Send to chat %d failed: %v", chatID, sendErr)
 			continue
 		}
 		sent++
