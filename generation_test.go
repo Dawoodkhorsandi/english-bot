@@ -372,9 +372,9 @@ func TestPaginateDrillItems(t *testing.T) {
 		wantPages  int
 		wantTitles []string
 	}{
-		{21, 5, []string{"Present Tenses", "Past Tenses", "Future Tenses", "Conditionals", "Modals & More"}},
-		{8, 2, []string{"Present Tenses", "Past Tenses"}},
-		{3, 1, []string{"Present Tenses"}},
+		{21, 5, []string{"Everyday Essentials", "Perfect Tenses", "More Past and Future", "Conditionals", "Modals and More"}},
+		{8, 2, []string{"Everyday Essentials", "Perfect Tenses"}},
+		{3, 1, []string{"Everyday Essentials"}},
 	}
 	for _, tt := range tests {
 		items := make([]string, tt.n)
@@ -423,7 +423,7 @@ func TestRenderDrillPage(t *testing.T) {
 	if total != 5 {
 		t.Errorf("total pages = %d, want 5", total)
 	}
-	if !strings.Contains(page1, "Page 1/5") || !strings.Contains(page1, "Present Tenses") {
+	if !strings.Contains(page1, "Page 1/5") || !strings.Contains(page1, "Everyday Essentials") {
 		t.Errorf("page 1 missing indicator/title, got %q", page1)
 	}
 	if !strings.Contains(page1, "Verb of the Hour") {
@@ -437,7 +437,7 @@ func TestRenderDrillPage(t *testing.T) {
 	}
 
 	page3, _ := renderDrillPage(drill, 3)
-	if !strings.Contains(page3, "Future Tenses") || !strings.Contains(page3, "9. Form 9") {
+	if !strings.Contains(page3, "More Past and Future") || !strings.Contains(page3, "9. Form 9") {
 		t.Errorf("page 3 wrong, got %q", page3)
 	}
 

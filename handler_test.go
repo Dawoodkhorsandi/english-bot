@@ -210,7 +210,7 @@ func TestHandleDrillCallbackPaging(t *testing.T) {
 	if len(mock.edits) != 1 {
 		t.Fatalf("expected 1 edit, got %d", len(mock.edits))
 	}
-	if !strings.Contains(mock.edits[0].text, "Page 3/5") || !strings.Contains(mock.edits[0].text, "Future Tenses") {
+	if !strings.Contains(mock.edits[0].text, "Page 3/5") || !strings.Contains(mock.edits[0].text, "More Past and Future") {
 		t.Errorf("edit should render page 3, got %q", mock.edits[0].text)
 	}
 	if len(mock.edits[0].keyboard) == 0 {

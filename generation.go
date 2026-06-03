@@ -19,11 +19,11 @@ var drillPageGroups = []struct {
 	Title string
 	Size  int
 }{
-	{"Present Tenses", 4},
-	{"Past Tenses", 4},
-	{"Future Tenses", 5},
+	{"Everyday Essentials", 4},
+	{"Perfect Tenses", 4},
+	{"More Past and Future", 5},
 	{"Conditionals", 4},
-	{"Modals & More", 4},
+	{"Modals and More", 4},
 }
 
 // drillItemStart matches the first line of a numbered drill form, e.g. "<b>3. …".
@@ -51,16 +51,16 @@ Use this exact HTML format (for Telegram). Replace each {sentence} with a short,
 <b>2. Present Continuous</b> · Right Now / Temporary
 → {sentence}
 
-<b>3. Present Perfect</b> · Experience / Recent Result
+<b>3. Simple Past</b> · Finished Action
 → {sentence}
 
-<b>4. Present Perfect Continuous</b> · Ongoing Until Now
+<b>4. Future: will</b> · Prediction / Spontaneous Decision
 → {sentence}
 
-<b>5. Simple Past</b> · Finished Action
+<b>5. Present Perfect</b> · Experience / Recent Result
 → {sentence}
 
-<b>6. Past Continuous</b> · Was in Progress
+<b>6. Present Perfect Continuous</b> · Ongoing Until Now
 → {sentence}
 
 <b>7. Past Perfect</b> · Before Another Past Event
@@ -69,10 +69,10 @@ Use this exact HTML format (for Telegram). Replace each {sentence} with a short,
 <b>8. Past Perfect Continuous</b> · Duration Before a Past Event
 → {sentence}
 
-<b>9. Future: be going to</b> · Plan / Intention
+<b>9. Past Continuous</b> · Was in Progress
 → {sentence}
 
-<b>10. Future: will</b> · Prediction / Spontaneous Decision
+<b>10. Future: be going to</b> · Plan / Intention
 → {sentence}
 
 <b>11. Future Continuous</b> · In Progress at a Future Moment
