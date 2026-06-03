@@ -42,6 +42,32 @@ func TestStorePoolCount(t *testing.T) {
 	}
 }
 
+func TestStoreDrillText(t *testing.T) {
+	s := testStore(t)
+
+	// Miss when the verb is not pooled.
+	if _, ok, err := s.DrillText("walk"); err != nil || ok {
+		t.Fatalf("expected miss, got ok=%v err=%v", ok, err)
+	}
+
+	s.AddToPool(kindDrill, defaultLevel, "Walk", "", "full drill for walk")
+	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "word card")
+
+	// Hit is case-insensitive (terms are normalized to lowercase).
+	text, ok, err := s.DrillText("WALK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || text != "full drill for walk" {
+		t.Fatalf("got ok=%v text=%q, want hit with drill text", ok, text)
+	}
+
+	// A word with the same spelling must not be returned as a drill.
+	if _, ok, _ := s.DrillText("apple"); ok {
+		t.Error("DrillText should only match kind=drill rows")
+	}
+}
+
 func TestStorePoolTerms(t *testing.T) {
 	s := testStore(t)
 

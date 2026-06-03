@@ -94,6 +94,24 @@ func (s *Store) PooledOldest(kind, level string) (term, meaning, text string, ok
 	return term, meaning, text, true, nil
 }
 
+// DrillText returns the full stored drill text for a verb (kind=drill). It is used
+// to re-render a different page when a user taps a drill navigation button, so the
+// whole drill never has to travel in the button's callback data.
+func (s *Store) DrillText(term string) (string, bool, error) {
+	var text string
+	err := s.db.QueryRow(
+		"SELECT text FROM content_pool WHERE kind = ? AND term = ? LIMIT 1",
+		kindDrill, strings.ToLower(strings.TrimSpace(term)),
+	).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return text, true, nil
+}
+
 // recordSentFor records a sent term in the appropriate per-user history table.
 // For vocabulary words it also seeds the spaced-repetition schedule (Change D),
 // so every word a user receives is enrolled for future review.
