@@ -116,9 +116,6 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    # This job is skipped entirely if SSH_HOST is not set.
-    # Add SSH_HOST, SSH_USER, SSH_KEY secrets to enable VPS deployment.
-    if: ${{ secrets.SSH_HOST != '' }}
     steps:
       - uses: actions/checkout@v4
 
