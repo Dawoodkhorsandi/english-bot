@@ -1,0 +1,57 @@
+name: Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  IMAGE_NAME: english-bot
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./... -count=1 -race
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+
+            # Navigate to project directory (clone if first deploy)
+            if [ ! -d ~/english-bot ]; then
+              git clone https://github.com/${{ github.repository }}.git ~/english-bot
+            fi
+
+            cd ~/english-bot
+            git fetch --all --tags
+            git checkout ${{ github.ref_name }}
+
+            # Build and restart
+            docker compose down
+            docker compose build --no-cache
+            docker compose up -d
+
+            # Clean up dangling images
+            docker image prune -f
+
+            echo "Deployed ${{ github.ref_name }} successfully"
