@@ -1,5 +1,10 @@
 # English Muscle Memory Bot
 
+[![CI](https://github.com/Dawoodkhorsandi/english-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/Dawoodkhorsandi/english-bot/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-62.8%25-yellow)](https://github.com/Dawoodkhorsandi/english-bot/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 A Telegram bot that sends subscribers AI-generated English practice every 30 minutes, alternating between grammar drills and vocabulary cards. Built with Go and SQLite.
 
 ## Features
@@ -28,7 +33,7 @@ A Telegram bot that sends subscribers AI-generated English practice every 30 min
 
 ```bash
 # Clone the repo
-git clone https://github.com/your-org/english-bot.git
+git clone https://github.com/Dawoodkhorsandi/english-bot.git
 cd english-bot
 
 # Configure

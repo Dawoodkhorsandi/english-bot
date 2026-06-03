@@ -925,3 +925,88 @@ func TestRunQuizSweepQuietHours(t *testing.T) {
 		t.Error("expected no messages during quiet hours")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// broadcastChangelogsOnStartup tests
+// ---------------------------------------------------------------------------
+
+func TestBroadcastChangelogsOnStartup_DeliversToAll(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	// Two subscribers, neither has seen any changelogs.
+	store.AddSubscriber(100)
+	store.AddSubscriber(200)
+
+	broadcastChangelogsOnStartup(store, mock)
+
+	// Each subscriber should have received len(Changelogs) messages.
+	expectedTotal := len(Changelogs) * 2
+	if got := mock.sentCount(); got != expectedTotal {
+		t.Errorf("expected %d sends, got %d", expectedTotal, got)
+	}
+
+	// Verify both chat IDs received messages.
+	gotChats := map[int64]int{}
+	for _, s := range mock.sent {
+		gotChats[s.chatID]++
+	}
+	for _, id := range []int64{100, 200} {
+		if gotChats[id] != len(Changelogs) {
+			t.Errorf("chat %d: expected %d sends, got %d", id, len(Changelogs), gotChats[id])
+		}
+	}
+}
+
+func TestBroadcastChangelogsOnStartup_Idempotent(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	broadcastChangelogsOnStartup(store, mock)
+	count1 := mock.sentCount()
+	if count1 == 0 {
+		t.Fatal("expected at least one changelog sent")
+	}
+
+	// Second call: all changelogs already marked seen, so no new sends.
+	broadcastChangelogsOnStartup(store, mock)
+	if got := mock.sentCount(); got != count1 {
+		t.Errorf("expected idempotent (no new sends), before=%d after=%d", count1, got)
+	}
+}
+
+func TestBroadcastChangelogsOnStartup_SkipsAlreadySeen(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	// Mark all but the last changelog as seen.
+	for i := 0; i < len(Changelogs)-1; i++ {
+		store.MarkChangelogSeen(100, Changelogs[i].Version)
+	}
+
+	broadcastChangelogsOnStartup(store, mock)
+
+	// Should send only the last changelog entry.
+	if got := mock.sentCount(); got != 1 {
+		t.Errorf("expected 1 send (only latest unseen), got %d", got)
+	}
+	if got := mock.lastSentText(); !strings.Contains(got, "What's New") {
+		t.Error("expected changelog text containing \"What's New\"")
+	}
+}
+
+func TestBroadcastChangelogsOnStartup_NoSubscribers(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	// No subscribers — should not panic or send anything.
+	broadcastChangelogsOnStartup(store, mock)
+
+	if got := mock.sentCount(); got != 0 {
+		t.Errorf("expected 0 sends with no subscribers, got %d", got)
+	}
+}

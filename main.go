@@ -178,6 +178,9 @@ func main() {
 
 	notifier := &telegramNotifier{}
 
+	// On deploy: immediately broadcast unseen changelogs to all subscribers.
+	broadcastChangelogsOnStartup(store, notifier)
+
 	// Background workers (v2):
 	//   1. poolFiller keeps the pre-generated content pool stocked.
 	//   2. broadcast scheduler fans pooled content out every 30 min (quiet-hour aware).

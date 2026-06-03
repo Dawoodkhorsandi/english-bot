@@ -173,6 +173,49 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 }
 
 // ---------------------------------------------------------------------------
+// Startup changelog broadcast
+// ---------------------------------------------------------------------------
+
+// broadcastChangelogsOnStartup delivers unseen changelog entries to every
+// subscriber immediately on boot. This ensures that when a new version is
+// deployed (with a new entry in the Changelogs slice), all users receive the
+// release notes right away rather than waiting for their next broadcast slot.
+func broadcastChangelogsOnStartup(store *Store, notifier Notifier) {
+	chats, err := store.Subscribers()
+	if err != nil {
+		log.Printf("❌ [CHANGELOG-BOOT] Could not read subscribers: %v", err)
+		return
+	}
+	if len(chats) == 0 {
+		log.Println("📣 [CHANGELOG-BOOT] No subscribers; skipping startup changelog broadcast.")
+		return
+	}
+
+	delivered := 0
+	for _, chatID := range chats {
+		unseen, err := store.UnseenChangelogs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [CHANGELOG-BOOT] Could not fetch unseen changelogs for ChatID %d: %v", chatID, err)
+			continue
+		}
+		if len(unseen) == 0 {
+			continue
+		}
+		for _, entry := range unseen {
+			if err := notifier.Send(chatID, entry.Text); err != nil {
+				log.Printf("❌ [CHANGELOG-BOOT] Failed to deliver v%s to ChatID %d: %v", entry.Version, chatID, err)
+				continue
+			}
+			if err := store.MarkChangelogSeen(chatID, entry.Version); err != nil {
+				log.Printf("⚠️  [CHANGELOG-BOOT] Could not mark v%s seen for ChatID %d: %v", entry.Version, chatID, err)
+			}
+			delivered++
+		}
+	}
+	log.Printf("📣 [CHANGELOG-BOOT] Startup changelog broadcast complete: %d message(s) to %d subscriber(s).", delivered, len(chats))
+}
+
+// ---------------------------------------------------------------------------
 // Daily review scheduler (Change C)
 // ---------------------------------------------------------------------------
 
