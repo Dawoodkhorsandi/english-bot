@@ -1,18 +1,26 @@
 name: Deploy
 
 on:
+  # Manual trigger — deploy any tag on demand.
   workflow_dispatch:
     inputs:
       tag:
         description: 'Image tag to deploy (e.g. v1.10.0, latest)'
         required: true
         default: 'latest'
+  # Reusable trigger — called by release.yml to auto-deploy a version tag.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Image tag to deploy'
+        required: true
+        type: string
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      IMAGE: ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag }}
+      IMAGE: ghcr.io/${{ github.repository }}:${{ inputs.tag }}
     steps:
       - name: Lowercase image name
         run: echo "IMAGE=${IMAGE,,}" >> "$GITHUB_ENV"
