@@ -80,18 +80,20 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          export RELEASE_VERSION="$VERSION"
 
           python3 <<'PYEOF' > release-notes.md
-          import re
-          version = "$VERSION"
+          import re, os
+          version = os.environ["RELEASE_VERSION"]
           with open("main.go") as f:
               content = f.read()
-          pattern = r'Version:\s*"' + re.escape(version) + r'".*?Text:\s*((?:"[^"]*"\s*\+?\s*)*)'
+          pattern = r'Version:\s*"' + re.escape(version) + r'".*?Text:\s*((?:"(?:[^"\\]|\\.)*"\s*\+?\s*)*)'
           m = re.search(pattern, content, re.DOTALL)
           if m:
               raw = m.group(1).strip()
-              parts = re.findall(r'"([^"]*)"', raw)
+              parts = re.findall(r'"((?:[^"\\]|\\.)*)"', raw)
               text = "".join(parts)
+              text = text.replace('\\"', '"')
               text = text.replace("<b>", "**").replace("</b>", "**")
               text = text.replace("<code>", "`").replace("</code>", "`")
               text = text.replace("\\n", "\n")
