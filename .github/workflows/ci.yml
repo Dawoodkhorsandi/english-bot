@@ -23,14 +23,32 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./... -count=1 -race -coverprofile=coverage.out
+        run: |
+          go test ./... -count=1 -race -coverprofile=coverage.out | tee test-output.txt
+          # Extract coverage percentage for badge
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
+          echo "Coverage: ${COVERAGE}%"
 
       - name: Build
         run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o english-bot .
 
-      - name: Upload coverage
+      - name: Upload coverage artifact
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage.out
+
+      - name: Update coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: ${{ secrets.COVERAGE_GIST_ID }}
+          filename: coverage-badge.json
+          label: coverage
+          message: "${{ env.COVERAGE }}%"
+          valColorRange: ${{ env.COVERAGE }}
+          minColorRange: 40
+          maxColorRange: 90
