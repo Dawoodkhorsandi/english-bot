@@ -317,6 +317,87 @@ func formatReview(items []reviewItem) string {
 }
 
 // ---------------------------------------------------------------------------
+// Idiom of the day scheduler (Change Q)
+// ---------------------------------------------------------------------------
+
+// nextDailyTime returns the next occurrence of hh:mm (in appLocation) after t.
+func nextDailyTime(t time.Time, hh, mm int) time.Time {
+	local := t.In(appLocation)
+	target := time.Date(local.Year(), local.Month(), local.Day(), hh, mm, 0, 0, appLocation)
+	for !target.After(local) {
+		target = target.AddDate(0, 0, 1)
+	}
+	return target
+}
+
+// runIdiomScheduler fires once a day at idiomTime (local) and broadcasts one
+// idiom of the day to every active subscriber. Set IDIOM_TIME=off to disable.
+func runIdiomScheduler(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
+	if strings.EqualFold(strings.TrimSpace(idiomTime), "off") {
+		log.Println("🗣️  [IDIOM] Idiom-of-the-day scheduler disabled (IDIOM_TIME=off).")
+		return
+	}
+	hh, mm := parseHourMinute(idiomTime)
+	log.Printf("🗣️  [IDIOM] Idiom-of-the-day scheduler started (fires daily at %02d:%02d local).", hh, mm)
+	for {
+		next := nextDailyTime(time.Now(), hh, mm)
+		wait := time.Until(next)
+		log.Printf("🗣️  [IDIOM] Next idiom at %s (in %s).", next.Format("2006-01-02 15:04 MST"), wait.Truncate(time.Second))
+
+		select {
+		case <-ctx.Done():
+			log.Println("🗣️  [IDIOM] Idiom scheduler stopped.")
+			return
+		case <-time.After(wait):
+		}
+
+		sendIdiomOfDay(ctx, chain, store, notifier, time.Now())
+	}
+}
+
+// sendIdiomOfDay sends each non-paused subscriber one pooled idiom, idempotent
+// per (chat, local date). Pool-only (never generates inline) so the daily
+// fan-out never hammers the AI; the pool filler keeps idioms stocked.
+func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, now time.Time) {
+	idiomDate := now.In(appLocation).Format("2006-01-02")
+	chats, err := store.Subscribers()
+	if err != nil {
+		log.Printf("❌ [IDIOM] Could not read subscribers: %v", err)
+		return
+	}
+	log.Printf("🗣️  [IDIOM] Sending idiom of the day %s to %d subscriber(s).", idiomDate, len(chats))
+
+	sent := 0
+	for _, chatID := range chats {
+		if store.IsPaused(chatID) {
+			continue
+		}
+		delivered, err := store.IdiomDelivered(chatID, idiomDate)
+		if err != nil {
+			log.Printf("⚠️  [IDIOM] Delivery check failed for chat %d: %v", chatID, err)
+			continue
+		}
+		if delivered {
+			continue
+		}
+		text, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), false)
+		if err != nil {
+			log.Printf("⚠️  [IDIOM] No idiom available for chat %d: %v", chatID, err)
+			continue
+		}
+		if err := notifier.Send(chatID, text); err != nil {
+			log.Printf("❌ [IDIOM] Send to chat %d failed: %v", chatID, err)
+			continue
+		}
+		if err := store.MarkIdiomDelivered(chatID, idiomDate); err != nil {
+			log.Printf("⚠️  [IDIOM] Mark delivered failed for chat %d: %v", chatID, err)
+		}
+		sent++
+	}
+	log.Printf("✅ [IDIOM] Idiom of the day delivered to %d/%d subscriber(s).", sent, len(chats))
+}
+
+// ---------------------------------------------------------------------------
 // Weekly digest scheduler (Change K)
 // ---------------------------------------------------------------------------
 

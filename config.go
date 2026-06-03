@@ -36,6 +36,11 @@ var (
 	// the scheduled weekly recap; the default fires Sunday at 20:00 local.
 	digestDay  = getEnvWeekday("DIGEST_DAY", int(time.Sunday))
 	digestTime = getEnv("DIGEST_TIME", "20:00")
+
+	// Idiom of the day (Change Q). One idiom is broadcast daily at this local
+	// time. Set IDIOM_TIME to "off" to disable the scheduled send (the /idiom
+	// command still works).
+	idiomTime = getEnv("IDIOM_TIME", "09:00")
 )
 
 // appLocation is the time.Location used for all scheduling decisions.

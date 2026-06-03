@@ -10,6 +10,7 @@ import (
 const (
 	kindDrill = "drill"
 	kindWord  = "word"
+	kindIdiom = "idiom"
 )
 
 // drillPageGroups defines how a drill's numbered forms are split across paged
@@ -19,11 +20,11 @@ var drillPageGroups = []struct {
 	Title string
 	Size  int
 }{
-	{"Present Tenses", 4},
-	{"Past Tenses", 4},
-	{"Future Tenses", 5},
+	{"Everyday Essentials", 4},
+	{"Perfect Tenses", 4},
+	{"More Past and Future", 5},
 	{"Conditionals", 4},
-	{"Modals & More", 4},
+	{"Modals and More", 4},
 }
 
 // drillItemStart matches the first line of a numbered drill form, e.g. "<b>3. …".
@@ -51,16 +52,16 @@ Use this exact HTML format (for Telegram). Replace each {sentence} with a short,
 <b>2. Present Continuous</b> · Right Now / Temporary
 → {sentence}
 
-<b>3. Present Perfect</b> · Experience / Recent Result
+<b>3. Simple Past</b> · Finished Action
 → {sentence}
 
-<b>4. Present Perfect Continuous</b> · Ongoing Until Now
+<b>4. Future: will</b> · Prediction / Spontaneous Decision
 → {sentence}
 
-<b>5. Simple Past</b> · Finished Action
+<b>5. Present Perfect</b> · Experience / Recent Result
 → {sentence}
 
-<b>6. Past Continuous</b> · Was in Progress
+<b>6. Present Perfect Continuous</b> · Ongoing Until Now
 → {sentence}
 
 <b>7. Past Perfect</b> · Before Another Past Event
@@ -69,10 +70,10 @@ Use this exact HTML format (for Telegram). Replace each {sentence} with a short,
 <b>8. Past Perfect Continuous</b> · Duration Before a Past Event
 → {sentence}
 
-<b>9. Future: be going to</b> · Plan / Intention
+<b>9. Past Continuous</b> · Was in Progress
 → {sentence}
 
-<b>10. Future: will</b> · Prediction / Spontaneous Decision
+<b>10. Future: be going to</b> · Plan / Intention
 → {sentence}
 
 <b>11. Future Continuous</b> · In Progress at a Future Moment
@@ -150,6 +151,34 @@ Rules:
 - Keep example sentences short (max 14 words) and natural.
 - Output the card only — no preamble, no explanation.`
 
+// idiomPromptBase is the idiom-card prompt without the per-user exclusion clause.
+const idiomPromptBase = `Choose ONE common, useful English idiom or fixed expression that a learner would hear in everyday conversation, and produce an Idiom Card.
+
+Use this EXACT HTML format (for Telegram). Replace each {…} placeholder with real content. Keep it concise and easy to read.
+
+🗣️ <b>Idiom of the Day: {IDIOM}</b>
+————————————————————
+
+💬 <b>Meaning</b>
+{one clear, simple sentence explaining what the idiom means}
+
+📝 <b>Examples</b>
+• {natural everyday sentence using the idiom}
+• {a second example in a different context}
+
+🌍 <b>When to use</b>
+{one short sentence on tone/context — e.g. casual, work, encouraging}
+
+💡 <i>Try slipping it into a conversation today!</i>
+
+Rules:
+- Replace {IDIOM} with the idiom in its normal lowercase form (e.g. break the ice).
+- Pick a real, widely-used idiom — not a literal phrase or a single word.
+- Bold the idiom using <b>…</b> inside each example sentence.
+- Use only <b> and <i> HTML tags — no other tags or Markdown.
+- Keep example sentences short (max 14 words) and natural.
+- Output the card only — no preamble, no explanation.`
+
 func buildDrillPrompt(level string, exclude []string) string {
 	prompt := drillPromptBase + "\n\n" + levelInstruction(level)
 	if len(exclude) == 0 {
@@ -168,6 +197,19 @@ func buildWordPrompt(level string, exclude []string) string {
 	}
 	return prompt + fmt.Sprintf(
 		"\n\nIMPORTANT: Do NOT use any of these words (already sent): %s.\nChoose a completely different word not in that list.",
+		strings.Join(exclude, ", "),
+	)
+}
+
+// buildIdiomPrompt builds the idiom-card prompt for the given level, appending the
+// per-user exclusion clause when the learner has already seen some idioms.
+func buildIdiomPrompt(level string, exclude []string) string {
+	prompt := idiomPromptBase + "\n\n" + levelInstruction(level)
+	if len(exclude) == 0 {
+		return prompt
+	}
+	return prompt + fmt.Sprintf(
+		"\n\nIMPORTANT: Do NOT use any of these idioms (already sent): %s.\nChoose a completely different idiom not in that list.",
 		strings.Join(exclude, ", "),
 	)
 }
@@ -202,9 +244,12 @@ func levelInstruction(level string) string {
 // parses the term (and meaning, for words). Returns (text, term, meaning, provider, err).
 func generateContent(ctx context.Context, chain *ProviderChain, kind, level string, exclude []string) (text, term, meaning, provider string, err error) {
 	var prompt string
-	if kind == kindWord {
+	switch kind {
+	case kindWord:
 		prompt = buildWordPrompt(level, exclude)
-	} else {
+	case kindIdiom:
+		prompt = buildIdiomPrompt(level, exclude)
+	default:
 		prompt = buildDrillPrompt(level, exclude)
 	}
 
@@ -213,10 +258,14 @@ func generateContent(ctx context.Context, chain *ProviderChain, kind, level stri
 		return "", "", "", "", err
 	}
 
-	if kind == kindWord {
+	switch kind {
+	case kindWord:
 		term = parseWord(text)
 		meaning = parseMeaning(text)
-	} else {
+	case kindIdiom:
+		term = parseIdiom(text)
+		meaning = parseMeaning(text)
+	default:
 		term = parseVerb(text)
 	}
 	return text, term, meaning, provider, nil
@@ -241,6 +290,31 @@ func parseVerb(drill string) string {
 // parseWord extracts the word from the "Word of the Hour:" line of a vocab card.
 func parseWord(card string) string {
 	return parseLabeledTerm(card, "word of the hour")
+}
+
+// parseIdiom extracts the full idiom phrase from the "Idiom of the Day:" line.
+// Unlike parseLabeledTerm it keeps the whole multi-word phrase (idioms aren't
+// single tokens), stripping any trailing HTML tag and surrounding punctuation.
+func parseIdiom(card string) string {
+	for _, line := range strings.Split(card, "\n") {
+		if !strings.Contains(strings.ToLower(line), "idiom of the day") {
+			continue
+		}
+		idx := strings.Index(line, ":")
+		if idx == -1 {
+			continue
+		}
+		term := line[idx+1:]
+		if lt := strings.Index(term, "<"); lt != -1 {
+			term = term[:lt]
+		}
+		term = strings.Trim(term, " *_`[]()\t\r")
+		term = strings.TrimSpace(term)
+		if term != "" {
+			return strings.ToLower(term)
+		}
+	}
+	return ""
 }
 
 // parseLabeledTerm scans text for a line containing label (case-insensitive),

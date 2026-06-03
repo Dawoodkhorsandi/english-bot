@@ -68,6 +68,35 @@ func TestStoreDrillText(t *testing.T) {
 	}
 }
 
+func TestStoreSentIdioms(t *testing.T) {
+	s := testStore(t)
+
+	// Recording is case-insensitive (normalized to lowercase).
+	if err := s.RecordSentIdiom(100, "Break The Ice"); err != nil {
+		t.Fatal(err)
+	}
+
+	s.AddToPool(kindIdiom, defaultLevel, "break the ice", "m1", "card1")
+	s.AddToPool(kindIdiom, defaultLevel, "piece of cake", "m2", "card2")
+
+	// PooledUnseen must skip the already-sent idiom via the sent_idioms table.
+	term, _, _, ok, err := s.PooledUnseen(kindIdiom, defaultLevel, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || term != "piece of cake" {
+		t.Fatalf("expected unseen 'piece of cake', got ok=%v term=%q", ok, term)
+	}
+
+	n, err := s.ResetSentIdiom(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("ResetSentIdiom removed %d, want 1", n)
+	}
+}
+
 func TestStorePoolTerms(t *testing.T) {
 	s := testStore(t)
 

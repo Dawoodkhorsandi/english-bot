@@ -303,6 +303,72 @@ func TestBuildWordPrompt(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// buildIdiomPrompt / parseIdiom
+// ---------------------------------------------------------------------------
+
+func TestBuildIdiomPrompt(t *testing.T) {
+	t.Run("no exclusions", func(t *testing.T) {
+		prompt := buildIdiomPrompt(levelIntermediate, nil)
+		if strings.Contains(prompt, "Do NOT use any of these idioms") {
+			t.Error("should not contain exclusion clause when exclude list is empty")
+		}
+		if !strings.Contains(prompt, "Idiom of the Day") {
+			t.Error("prompt should contain the idiom card header")
+		}
+	})
+
+	t.Run("with exclusions", func(t *testing.T) {
+		prompt := buildIdiomPrompt(levelIntermediate, []string{"break the ice", "piece of cake"})
+		if !strings.Contains(prompt, "break the ice, piece of cake") {
+			t.Error("should contain the excluded idioms")
+		}
+		if !strings.Contains(prompt, "Do NOT use any of these idioms") {
+			t.Error("should contain exclusion clause")
+		}
+	})
+}
+
+func TestParseIdiom(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "real idiom card keeps full phrase",
+			input: `🗣️ <b>Idiom of the Day: break the ice</b>
+————————————————————
+
+💬 <b>Meaning</b>
+To start a conversation in a relaxed way.`,
+			want: "break the ice",
+		},
+		{
+			name:  "phrase with closing tag and no newline",
+			input: "🗣️ <b>Idiom of the Day: under the weather</b>",
+			want:  "under the weather",
+		},
+		{
+			name:  "empty input",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "missing label",
+			input: "Word of the Hour: tedious",
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseIdiom(tt.input); got != tt.want {
+				t.Errorf("parseIdiom() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // buildWordLookupPrompt
 // ---------------------------------------------------------------------------
 
@@ -372,9 +438,9 @@ func TestPaginateDrillItems(t *testing.T) {
 		wantPages  int
 		wantTitles []string
 	}{
-		{21, 5, []string{"Present Tenses", "Past Tenses", "Future Tenses", "Conditionals", "Modals & More"}},
-		{8, 2, []string{"Present Tenses", "Past Tenses"}},
-		{3, 1, []string{"Present Tenses"}},
+		{21, 5, []string{"Everyday Essentials", "Perfect Tenses", "More Past and Future", "Conditionals", "Modals and More"}},
+		{8, 2, []string{"Everyday Essentials", "Perfect Tenses"}},
+		{3, 1, []string{"Everyday Essentials"}},
 	}
 	for _, tt := range tests {
 		items := make([]string, tt.n)
@@ -423,7 +489,7 @@ func TestRenderDrillPage(t *testing.T) {
 	if total != 5 {
 		t.Errorf("total pages = %d, want 5", total)
 	}
-	if !strings.Contains(page1, "Page 1/5") || !strings.Contains(page1, "Present Tenses") {
+	if !strings.Contains(page1, "Page 1/5") || !strings.Contains(page1, "Everyday Essentials") {
 		t.Errorf("page 1 missing indicator/title, got %q", page1)
 	}
 	if !strings.Contains(page1, "Verb of the Hour") {
@@ -437,7 +503,7 @@ func TestRenderDrillPage(t *testing.T) {
 	}
 
 	page3, _ := renderDrillPage(drill, 3)
-	if !strings.Contains(page3, "Future Tenses") || !strings.Contains(page3, "9. Form 9") {
+	if !strings.Contains(page3, "More Past and Future") || !strings.Contains(page3, "9. Form 9") {
 		t.Errorf("page 3 wrong, got %q", page3)
 	}
 
