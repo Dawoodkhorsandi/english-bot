@@ -192,10 +192,10 @@ func buildProviders(ctx context.Context) map[string]Provider {
 			model:   getEnv("MISTRAL_MODEL", "mistral-small-latest"),
 			client:  httpClient,
 		},
-		"together": &OpenAICompatProvider{
-			name: "together", apiKey: getEnv("TOGETHER_API_KEY", ""),
-			baseURL: getEnv("TOGETHER_BASE_URL", "https://api.together.xyz/v1"),
-			model:   getEnv("TOGETHER_MODEL", "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free"),
+		"gemini2": &OpenAICompatProvider{
+			name: "gemini2", apiKey: getEnv("GEMINI_API_KEY", ""),
+			baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+			model:   getEnv("GEMINI2_MODEL", "gemini-2.0-flash"),
 			client:  httpClient,
 		},
 		"sambanova": &OpenAICompatProvider{

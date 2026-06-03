@@ -22,7 +22,7 @@ var (
 
 	// Provider chain order (Change A). Comma-separated provider names; any
 	// provider whose key/config is unset at runtime is skipped automatically.
-	providerOrder = getEnv("AI_PROVIDER_ORDER", "gemini,groq,cerebras,openrouter,github,cloudflare,mistral,together,sambanova,cohere")
+	providerOrder = getEnv("AI_PROVIDER_ORDER", "gemini,groq,cerebras,openrouter,github,cloudflare,mistral,gemini2,sambanova,cohere")
 
 	// Spaced-repetition review tuning (Change D).
 	reviewCheckInterval = getEnvDuration("REVIEW_CHECK_INTERVAL", time.Hour)
