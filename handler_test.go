@@ -1010,3 +1010,384 @@ func TestBroadcastChangelogsOnStartup_NoSubscribers(t *testing.T) {
 		t.Errorf("expected 0 sends with no subscribers, got %d", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// handleCallback: level, interval, srs, unknown
+// ---------------------------------------------------------------------------
+
+func TestHandleCallbackLevelButton(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-level-1",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 20,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "level:advanced",
+	}
+	handleCallback(store, mock, cb)
+
+	// Should answer callback.
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery for level")
+	}
+	if !strings.Contains(mock.answers[0].text, "Advanced") {
+		t.Errorf("expected 'Advanced' in toast, got %q", mock.answers[0].text)
+	}
+	// Should edit message.
+	if len(mock.edits) == 0 {
+		t.Fatal("expected editMessage for level")
+	}
+	if !strings.Contains(mock.edits[0].text, "Advanced") {
+		t.Errorf("expected 'Advanced' in edited message, got %q", mock.edits[0].text)
+	}
+	// Verify persisted.
+	if got := store.GetLevel(100); got != levelAdvanced {
+		t.Errorf("level = %q, want %q", got, levelAdvanced)
+	}
+}
+
+func TestHandleCallbackLevelInvalid(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-level-bad",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 20,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "level:expert",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery")
+	}
+	if mock.answers[0].text != "Unknown level" {
+		t.Errorf("expected 'Unknown level' toast, got %q", mock.answers[0].text)
+	}
+}
+
+func TestHandleCallbackIntervalButton(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-int-1",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 21,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "interval:120",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery for interval")
+	}
+	// Verify persisted.
+	prefs, _ := store.GetPrefs(100)
+	if prefs.Interval != 120 {
+		t.Errorf("interval = %d, want 120", prefs.Interval)
+	}
+}
+
+func TestHandleCallbackIntervalInvalid(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-int-bad",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 21,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "interval:45",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery")
+	}
+	if mock.answers[0].text != "Unknown interval" {
+		t.Errorf("expected 'Unknown interval' toast, got %q", mock.answers[0].text)
+	}
+}
+
+func TestHandleCallbackIntervalNonNumeric(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-int-nan",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 21,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "interval:abc",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery")
+	}
+	if mock.answers[0].text != "Unknown interval" {
+		t.Errorf("expected 'Unknown interval', got %q", mock.answers[0].text)
+	}
+}
+
+func TestHandleCallbackSrsKnownViaHandleReview(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+	now := time.Now()
+	store.SeedReview(100, "ephemeral", now.AddDate(0, 0, -2))
+
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-srs-1",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 30,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "srs:known:ephemeral",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery for SRS known")
+	}
+	if !strings.Contains(mock.answers[0].text, "pushed further") {
+		t.Errorf("expected 'pushed further' toast, got %q", mock.answers[0].text)
+	}
+	if len(mock.edits) == 0 {
+		t.Fatal("expected editMessage confirmation")
+	}
+}
+
+func TestHandleCallbackSrsForgotViaHandleReview(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+	now := time.Now()
+	store.SeedReview(100, "ephemeral", now.AddDate(0, 0, -2))
+
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-srs-2",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 31,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "srs:forgot:ephemeral",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery for SRS forgot")
+	}
+	if !strings.Contains(mock.answers[0].text, "see it again") {
+		t.Errorf("expected 'see it again' toast, got %q", mock.answers[0].text)
+	}
+}
+
+func TestHandleCallbackSrsInvalidAction(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-srs-bad",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 32,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "srs:snooze:ephemeral",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery")
+	}
+}
+
+func TestHandleCallbackSrsExpired(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+	// Don't seed any review -- "ghost" word should report expired.
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-srs-exp",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 33,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "srs:known:ghostword",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery")
+	}
+	if !strings.Contains(mock.answers[0].text, "expired") {
+		t.Errorf("expected 'expired' toast, got %q", mock.answers[0].text)
+	}
+}
+
+func TestHandleCallbackUnknownPrefix(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-unknown",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 40,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "unknown:data",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery for unknown prefix")
+	}
+	if mock.answers[0].text != "" {
+		t.Errorf("expected empty toast for unknown prefix, got %q", mock.answers[0].text)
+	}
+}
+
+func TestHandleCallbackNilMessage(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb-nil",
+		From:    &TelegramUser{ID: 100},
+		Message: nil,
+		Data:    "level:beginner",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery even with nil message")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleReviewCallback edge cases
+// ---------------------------------------------------------------------------
+
+func TestHandleReviewCallbackMalformedData(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	// Missing word part (just "srs:known" with no second colon)
+	cb := &TelegramCallbackQuery{
+		ID:   "cb-srs-mal",
+		From: &TelegramUser{ID: 100},
+		Message: &TelegramMessage{
+			MessageID: 50,
+			Chat:      TelegramChat{ID: 100},
+		},
+		Data: "srs:known",
+	}
+	// The Data prefix "srs:" is stripped by handleCallback before calling handleReviewCallback
+	handleReviewCallback(store, mock, cb, 100)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery for malformed data")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Config function tests
+// ---------------------------------------------------------------------------
+
+func TestGetEnvInt(t *testing.T) {
+	// Valid int.
+	t.Setenv("TEST_INT_VALID", "42")
+	if got := getEnvInt("TEST_INT_VALID", 10); got != 42 {
+		t.Errorf("got %d, want 42", got)
+	}
+
+	// Invalid int falls back.
+	t.Setenv("TEST_INT_INVALID", "abc")
+	if got := getEnvInt("TEST_INT_INVALID", 10); got != 10 {
+		t.Errorf("got %d, want fallback 10", got)
+	}
+
+	// Missing key falls back.
+	if got := getEnvInt("TEST_INT_MISSING_KEY_XYZ", 99); got != 99 {
+		t.Errorf("got %d, want fallback 99", got)
+	}
+}
+
+func TestGetEnvDuration(t *testing.T) {
+	// Valid duration.
+	t.Setenv("TEST_DUR_VALID", "5m")
+	if got := getEnvDuration("TEST_DUR_VALID", time.Second); got != 5*time.Minute {
+		t.Errorf("got %v, want 5m", got)
+	}
+
+	// Invalid duration falls back.
+	t.Setenv("TEST_DUR_INVALID", "not-a-duration")
+	if got := getEnvDuration("TEST_DUR_INVALID", 30*time.Second); got != 30*time.Second {
+		t.Errorf("got %v, want fallback 30s", got)
+	}
+
+	// Missing key falls back.
+	if got := getEnvDuration("TEST_DUR_MISSING_KEY_XYZ", time.Hour); got != time.Hour {
+		t.Errorf("got %v, want fallback 1h", got)
+	}
+}
+
+func TestLoadLocation(t *testing.T) {
+	saveAppLocation(t)
+
+	// Save and restore the global timezone string.
+	origTZ := appTimezone
+	t.Cleanup(func() { appTimezone = origTZ })
+
+	// Valid timezone.
+	appTimezone = "America/New_York"
+	loadLocation()
+	if appLocation.String() != "America/New_York" {
+		t.Errorf("appLocation = %q, want America/New_York", appLocation.String())
+	}
+
+	// Invalid timezone falls back to UTC.
+	appTimezone = "Invalid/Nonexistent"
+	loadLocation()
+	if appLocation != time.UTC {
+		t.Errorf("appLocation = %q, want UTC for invalid timezone", appLocation.String())
+	}
+}

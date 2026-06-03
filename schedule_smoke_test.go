@@ -329,3 +329,265 @@ func TestFormatReviewReminder(t *testing.T) {
 		t.Error("meaning icon should not appear when meaning is empty")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// reviewKeyboard test
+// ---------------------------------------------------------------------------
+
+func TestReviewKeyboard(t *testing.T) {
+	kb := reviewKeyboard("ephemeral")
+	if len(kb) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(kb))
+	}
+	if len(kb[0]) != 2 {
+		t.Fatalf("expected 2 buttons, got %d", len(kb[0]))
+	}
+	if kb[0][0].CallbackData != "srs:known:ephemeral" {
+		t.Errorf("known button data = %q, want srs:known:ephemeral", kb[0][0].CallbackData)
+	}
+	if kb[0][1].CallbackData != "srs:forgot:ephemeral" {
+		t.Errorf("forgot button data = %q, want srs:forgot:ephemeral", kb[0][1].CallbackData)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// runReviewSweep tests
+// ---------------------------------------------------------------------------
+
+func TestRunReviewSweep_DeliversDueReviews(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveQuietHours(t)
+	saveAppLocation(t)
+	appLocation = time.UTC
+	quietStart = "00:00"
+	quietEnd = "00:00" // no quiet hours
+
+	store.AddSubscriber(100)
+	now := time.Date(2026, 6, 3, 14, 0, 0, 0, time.UTC)
+
+	// Seed a review that's already due (seed time 2 days ago).
+	store.SeedReview(100, "ephemeral", now.AddDate(0, 0, -2))
+
+	runReviewSweep(store, mock, now)
+
+	if len(mock.keyboard) == 0 {
+		t.Fatal("expected at least one review reminder sent")
+	}
+	if !strings.Contains(mock.keyboard[0].text, "ephemeral") {
+		t.Error("expected review text to contain the term")
+	}
+}
+
+func TestRunReviewSweep_SkipsQuietHours(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveQuietHours(t)
+	saveAppLocation(t)
+	appLocation = time.UTC
+	quietStart = "00:00"
+	quietEnd = "23:59"
+
+	store.AddSubscriber(100)
+	store.SeedReview(100, "ephemeral", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+	now := time.Date(2026, 6, 3, 14, 0, 0, 0, time.UTC)
+
+	runReviewSweep(store, mock, now)
+
+	if len(mock.keyboard) != 0 {
+		t.Error("expected no reviews during quiet hours")
+	}
+}
+
+func TestRunReviewSweep_SkipsPausedUsers(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveQuietHours(t)
+	saveAppLocation(t)
+	appLocation = time.UTC
+	quietStart = "00:00"
+	quietEnd = "00:00"
+
+	store.AddSubscriber(100)
+	store.SetPaused(100, true)
+	store.SeedReview(100, "ephemeral", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+	now := time.Date(2026, 6, 3, 14, 0, 0, 0, time.UTC)
+
+	runReviewSweep(store, mock, now)
+
+	if len(mock.keyboard) != 0 {
+		t.Error("expected no reviews for paused users")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sendDailyReview tests
+// ---------------------------------------------------------------------------
+
+func TestSendDailyReview_DeliversReview(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+
+	// Seed sent_vocab from yesterday so there's content for the review.
+	yesterday := "2026-06-02 14:00:00"
+	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "ephemeral", yesterday)
+	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "lucid", yesterday)
+
+	// Fire at midnight of June 3 — reviews "yesterday" (June 2).
+	midnight := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	sendDailyReview(store, mock, midnight)
+
+	if mock.sentCount() == 0 {
+		t.Fatal("expected a daily review to be sent")
+	}
+	text := mock.lastSentText()
+	if !strings.Contains(text, "Today's Words") {
+		t.Error("expected review header in message")
+	}
+	if !strings.Contains(text, "ephemeral") || !strings.Contains(text, "lucid") {
+		t.Error("expected reviewed words in message")
+	}
+}
+
+func TestSendDailyReview_SkipsPausedUsers(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+	store.SetPaused(100, true)
+
+	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "word", "2026-06-02 14:00:00")
+
+	midnight := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	sendDailyReview(store, mock, midnight)
+
+	if mock.sentCount() != 0 {
+		t.Error("expected no review for paused user")
+	}
+}
+
+func TestSendDailyReview_Idempotent(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "word", "2026-06-02 14:00:00")
+
+	midnight := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	sendDailyReview(store, mock, midnight)
+	count1 := mock.sentCount()
+
+	sendDailyReview(store, mock, midnight)
+	if mock.sentCount() != count1 {
+		t.Error("expected idempotent: second call should not re-send")
+	}
+}
+
+func TestSendDailyReview_NoWords(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+	// No words sent yesterday.
+
+	midnight := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	sendDailyReview(store, mock, midnight)
+
+	if mock.sentCount() != 0 {
+		t.Error("expected no message when there are no words to review")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sendWeeklyDigest tests
+// ---------------------------------------------------------------------------
+
+func TestSendWeeklyDigest_DeliversDigest(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+
+	// Seed words across the past week.
+	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "lucid", "2026-05-28 10:00:00")
+	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "vivid", "2026-05-29 10:00:00")
+
+	// Fire at Sunday evening June 3.
+	digestTime := time.Date(2026, 6, 3, 20, 0, 0, 0, time.UTC)
+	sendWeeklyDigest(store, mock, digestTime)
+
+	if mock.sentCount() == 0 {
+		t.Fatal("expected a weekly digest to be sent")
+	}
+	text := mock.lastSentText()
+	if !strings.Contains(text, "Weekly Recap") {
+		t.Error("expected 'Weekly Recap' header")
+	}
+}
+
+func TestSendWeeklyDigest_SkipsPausedUsers(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+	store.SetPaused(100, true)
+
+	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "word", "2026-05-28 10:00:00")
+
+	digestTime := time.Date(2026, 6, 3, 20, 0, 0, 0, time.UTC)
+	sendWeeklyDigest(store, mock, digestTime)
+
+	if mock.sentCount() != 0 {
+		t.Error("expected no digest for paused user")
+	}
+}
+
+func TestSendWeeklyDigest_Idempotent(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "word", "2026-05-28 10:00:00")
+
+	digestTime := time.Date(2026, 6, 3, 20, 0, 0, 0, time.UTC)
+	sendWeeklyDigest(store, mock, digestTime)
+	count1 := mock.sentCount()
+
+	sendWeeklyDigest(store, mock, digestTime)
+	if mock.sentCount() != count1 {
+		t.Error("expected idempotent: second call should not re-send")
+	}
+}
+
+func TestSendWeeklyDigest_NoActivity(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveAppLocation(t)
+	appLocation = time.UTC
+
+	store.AddSubscriber(100)
+	// No words or quizzes this week.
+
+	digestTime := time.Date(2026, 6, 3, 20, 0, 0, 0, time.UTC)
+	sendWeeklyDigest(store, mock, digestTime)
+
+	if mock.sentCount() != 0 {
+		t.Error("expected no digest when there's no activity")
+	}
+}

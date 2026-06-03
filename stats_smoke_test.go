@@ -92,3 +92,31 @@ func TestUserStatsDB(t *testing.T) {
 		t.Errorf("formatStats returned empty")
 	}
 }
+
+func TestParseStoredUTC(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  any
+		wantOK bool
+		wantTS string // expected UTC time formatted as "2006-01-02 15:04:05"
+	}{
+		{"standard datetime string", "2026-06-03 14:30:00", true, "2026-06-03 14:30:00"},
+		{"ISO 8601 Z", "2026-06-03T14:30:00Z", true, "2026-06-03 14:30:00"},
+		{"RFC3339", "2026-06-03T14:30:00+00:00", true, "2026-06-03 14:30:00"},
+		{"byte slice", []byte("2026-06-03 14:30:00"), true, "2026-06-03 14:30:00"},
+		{"time.Time value", time.Date(2026, 6, 3, 14, 30, 0, 0, time.UTC), true, "2026-06-03 14:30:00"},
+		{"empty string", "", false, ""},
+		{"garbage string", "not-a-date", false, ""},
+		{"nil int", 42, false, ""},
+	}
+	for _, c := range cases {
+		ts, ok := parseStoredUTC(c.input)
+		if ok != c.wantOK {
+			t.Errorf("%s: ok = %v, want %v", c.name, ok, c.wantOK)
+			continue
+		}
+		if ok && ts.Format("2006-01-02 15:04:05") != c.wantTS {
+			t.Errorf("%s: ts = %s, want %s", c.name, ts.Format("2006-01-02 15:04:05"), c.wantTS)
+		}
+	}
+}
