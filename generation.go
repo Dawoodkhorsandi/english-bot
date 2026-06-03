@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -11,7 +12,32 @@ const (
 	kindWord  = "word"
 )
 
+// drillPageGroups defines how a drill's numbered forms are split across paged
+// Telegram messages. The sizes sum to the 21 forms drillPromptBase emits; the
+// last group absorbs any extra forms if the model returns more.
+var drillPageGroups = []struct {
+	Title string
+	Size  int
+}{
+	{"Present Tenses", 4},
+	{"Past Tenses", 4},
+	{"Future Tenses", 5},
+	{"Conditionals", 4},
+	{"Modals & More", 4},
+}
+
+// drillItemStart matches the first line of a numbered drill form, e.g. "<b>3. …".
+var drillItemStart = regexp.MustCompile(`^\s*<b>\d+\.`)
+
+// drillPage is one rendered page of a drill: a themed title and its forms.
+type drillPage struct {
+	title string
+	items []string
+}
+
 // drillPromptBase is the grammar-drill prompt without the per-user exclusion clause.
+// The 21 numbered forms are ordered to match drillPageGroups so the drill can be
+// paginated into themed pages (present / past / future / conditionals / modals).
 const drillPromptBase = `Choose ONE common, useful everyday English verb and produce a Grammar Muscle Memory Drill.
 
 Use this exact HTML format (for Telegram). Replace each {sentence} with a short, natural sentence (max 12 words). Wrap the target verb form inside <b>…</b> in every sentence.
@@ -58,13 +84,35 @@ Use this exact HTML format (for Telegram). Replace each {sentence} with a short,
 <b>13. Future Perfect Continuous</b> · Duration up to a Future Point
 → {sentence}
 
-<b>14. First Conditional</b> · Real Future Possibility
+<b>14. Zero Conditional</b> · General Truth / Always Result
+→ {sentence}
+
+<b>15. First Conditional</b> · Real Future Possibility
+→ {sentence}
+
+<b>16. Second Conditional</b> · Unreal / Hypothetical Present
+→ {sentence}
+
+<b>17. Third Conditional</b> · Unreal Past / Regret
+→ {sentence}
+
+<b>18. Modal Verb</b> · Advice / Obligation (should / must)
+→ {sentence}
+
+<b>19. Passive Voice</b> · Focus on the Receiver
+→ {sentence}
+
+<b>20. Imperative</b> · Command / Instruction
+→ {sentence}
+
+<b>21. Used to</b> · Past Habit (no longer true)
 → {sentence}
 
 💡 <i>Say each sentence out loud — build the muscle memory!</i>
 
 Rules:
 - Replace {VERB} with the base form of the chosen verb (e.g. walk).
+- Keep every numbered form (1–21) and keep them in this exact order.
 - Keep sentences short (max 12 words) and natural for daily conversation.
 - Bold only the verb form using <b>…</b>. Use no other HTML tags.
 - Output the drill only — no preamble, no explanation.`
@@ -242,6 +290,129 @@ func parseMeaning(card string) string {
 		}
 	}
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// Drill pagination (Change N) — split a drill into themed, navigable pages
+// ---------------------------------------------------------------------------
+
+// parseDrillBody splits a generated drill into its header (the title block before
+// the first numbered form), the individual numbered form blocks, and the footer
+// (the closing tip, identified by the 💡 line). Any of the three may be empty.
+func parseDrillBody(text string) (header string, items []string, footer string) {
+	lines := strings.Split(text, "\n")
+
+	// Footer = from the first 💡 line to the end (the "say it aloud" tip).
+	footerStart := len(lines)
+	for i, ln := range lines {
+		if strings.Contains(ln, "💡") {
+			footerStart = i
+			break
+		}
+	}
+	footer = strings.TrimSpace(strings.Join(lines[footerStart:], "\n"))
+	body := lines[:footerStart]
+
+	firstItem := -1
+	for i, ln := range body {
+		if drillItemStart.MatchString(ln) {
+			firstItem = i
+			break
+		}
+	}
+	if firstItem == -1 {
+		return strings.TrimSpace(strings.Join(body, "\n")), nil, footer
+	}
+	header = strings.TrimSpace(strings.Join(body[:firstItem], "\n"))
+
+	var cur []string
+	flush := func() {
+		if len(cur) > 0 {
+			items = append(items, strings.TrimSpace(strings.Join(cur, "\n")))
+			cur = nil
+		}
+	}
+	for _, ln := range body[firstItem:] {
+		if drillItemStart.MatchString(ln) {
+			flush()
+		}
+		cur = append(cur, ln)
+	}
+	flush()
+	return header, items, footer
+}
+
+// paginateDrillItems groups parsed drill forms into pages per drillPageGroups.
+// The final group absorbs any overflow so no form is ever dropped.
+func paginateDrillItems(items []string) []drillPage {
+	var pages []drillPage
+	idx := 0
+	for gi, g := range drillPageGroups {
+		if idx >= len(items) {
+			break
+		}
+		end := idx + g.Size
+		if gi == len(drillPageGroups)-1 || end > len(items) {
+			end = len(items)
+		}
+		pages = append(pages, drillPage{title: g.Title, items: items[idx:end]})
+		idx = end
+	}
+	if idx < len(items) {
+		pages = append(pages, drillPage{title: "More", items: items[idx:]})
+	}
+	return pages
+}
+
+// renderDrillPage builds the message text for the given 1-based page of a drill
+// and returns it along with the total page count. If the drill can't be parsed
+// into forms, it returns the full text as a single page so delivery degrades
+// gracefully. Out-of-range pages are clamped.
+func renderDrillPage(fullText string, page int) (text string, total int) {
+	header, items, footer := parseDrillBody(fullText)
+	if len(items) == 0 {
+		return fullText, 1
+	}
+
+	pages := paginateDrillItems(items)
+	total = len(pages)
+	if page < 1 {
+		page = 1
+	}
+	if page > total {
+		page = total
+	}
+
+	var b strings.Builder
+	if header != "" {
+		b.WriteString(header)
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "\n📄 <i>Page %d/%d · %s</i>\n\n", page, total, pages[page-1].title)
+	b.WriteString(strings.Join(pages[page-1].items, "\n\n"))
+	if footer != "" {
+		b.WriteString("\n\n")
+		b.WriteString(footer)
+	}
+	return b.String(), total
+}
+
+// drillNavKeyboard builds the prev/next navigation row for a paged drill. The
+// verb is embedded in the callback data so a tap can reload the full drill from
+// the pool. Returns nil when there is only one page (no navigation needed).
+func drillNavKeyboard(term string, page, total int) [][]inlineButton {
+	if total <= 1 {
+		return nil
+	}
+	var row []inlineButton
+	if page > 1 {
+		row = append(row, inlineButton{Text: "◀️ Back", CallbackData: fmt.Sprintf("drill:%d:%s", page-1, term)})
+	}
+	row = append(row, inlineButton{Text: fmt.Sprintf("%d/%d", page, total), CallbackData: "drill:noop"})
+	if page < total {
+		row = append(row, inlineButton{Text: "Next ▶️", CallbackData: fmt.Sprintf("drill:%d:%s", page+1, term)})
+	}
+	return [][]inlineButton{row}
 }
 
 // stripHTMLTags removes everything between '<' and '>' and trims the result.
