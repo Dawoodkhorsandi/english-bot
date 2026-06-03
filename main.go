@@ -176,6 +176,8 @@ func main() {
 	}
 	defer store.Close()
 
+	notifier := &telegramNotifier{}
+
 	// Background workers (v2):
 	//   1. poolFiller keeps the pre-generated content pool stocked.
 	//   2. broadcast scheduler fans pooled content out every 30 min (quiet-hour aware).
@@ -184,14 +186,14 @@ func main() {
 	//   5. quiz scheduler periodically tests learned words (Change E).
 	//   6. weekly digest scheduler sends a recap every DIGEST_DAY at DIGEST_TIME (Change K).
 	go poolFiller(ctx, chain, store)
-	go runBroadcastScheduler(ctx, chain, store)
-	go runDailyReviewScheduler(ctx, store)
-	go runReviewScheduler(ctx, store)
-	go runQuizScheduler(ctx, store)
-	go runWeeklyDigestScheduler(ctx, store)
+	go runBroadcastScheduler(ctx, chain, store, notifier)
+	go runDailyReviewScheduler(ctx, store, notifier)
+	go runReviewScheduler(ctx, store, notifier)
+	go runQuizScheduler(ctx, store, notifier)
+	go runWeeklyDigestScheduler(ctx, store, notifier)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
-	go pollTelegramUpdates(ctx, chain, store)
+	go pollTelegramUpdates(ctx, chain, store, notifier)
 
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
@@ -201,7 +203,7 @@ func main() {
 	log.Printf("🛑 [SYSTEM] Shutdown intercept caught OS Signal: %v. Cleaning tasks...", sig)
 }
 
-func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store) {
+func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
 	var offset int64 = 0
 	client := &http.Client{Timeout: 35 * time.Second}
 
@@ -258,10 +260,10 @@ func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store
 				switch {
 				case update.Message != nil:
 					log.Printf("📩 [MESSAGE_DISPATCH] Update %d | Chat %d | Text: %q", update.UpdateID, update.Message.Chat.ID, update.Message.Text)
-					handleMessage(ctx, chain, store, update.Message)
+					handleMessage(ctx, chain, store, notifier, update.Message)
 				case update.CallbackQuery != nil:
 					log.Printf("🔘 [CALLBACK_DISPATCH] Update %d | Data: %q", update.UpdateID, update.CallbackQuery.Data)
-					handleCallback(store, update.CallbackQuery)
+					handleCallback(store, notifier, update.CallbackQuery)
 				default:
 					log.Printf("📝 [POLLER_SKIP] Non-message update %d. Skipping.", update.UpdateID)
 				}
@@ -270,7 +272,7 @@ func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store
 	}
 }
 
-func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg *TelegramMessage) {
+func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, msg *TelegramMessage) {
 	if msg.Text == "" {
 		log.Printf("ℹ️  [ROUTER] Ignoring empty message ID %d.", msg.MessageID)
 		return
@@ -318,11 +320,11 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			if parseErr != nil {
 				log.Printf("❌ [PARSE_ERR] Invalid MaintainerChatID %q: %v", MaintainerChatID, parseErr)
 			} else {
-				_ = sendToTelegram(mID, maintainerMsg)
+				_ = notifier.Send(mID, maintainerMsg)
 			}
 		} else {
 			// Returning user — deliver any changelogs they haven't seen yet.
-			sendPendingChangelogs(store, chatID)
+			sendPendingChangelogs(store, notifier, chatID)
 		}
 
 		welcome := "👋 <b>Welcome to English Muscle Memory Bot!</b>\n\n" +
@@ -341,7 +343,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"/resume — Resume scheduled sends\n" +
 			"/reset — Clear your practiced history\n" +
 			"/help — How it works"
-		_ = sendToTelegram(chatID, welcome)
+		_ = notifier.Send(chatID, welcome)
 
 	case "/help":
 		helpText := "💡 <b>How Muscle Memory Practice Works</b>\n\n" +
@@ -362,148 +364,148 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, msg 
 			"/pause — stop scheduled sends (on-demand still works)\n" +
 			"/resume — re-enable scheduled sends\n" +
 			"/reset — clear history and see old verbs & words again"
-		_ = sendToTelegram(chatID, helpText)
+		_ = notifier.Send(chatID, helpText)
 
 	case "/drill":
 		log.Printf("🤖 [AI_FLOW] /drill requested by ChatID %d.", chatID)
-		_ = sendToTelegram(chatID, "🔄 <b>Generating your drill...</b>")
+		_ = notifier.Send(chatID, "🔄 <b>Generating your drill...</b>")
 
 		drill, err := serveContent(ctx, chain, store, chatID, kindDrill, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Generation failed for ChatID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
 			return
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Drill delivered to ChatID %d.", chatID)
-		_ = sendToTelegram(chatID, drill)
+		_ = notifier.Send(chatID, drill)
 
 	case "/word":
 		log.Printf("🤖 [AI_FLOW] /word requested by ChatID %d.", chatID)
-		_ = sendToTelegram(chatID, "🔄 <b>Finding a fresh word for you...</b>")
+		_ = notifier.Send(chatID, "🔄 <b>Finding a fresh word for you...</b>")
 
 		card, err := serveContent(ctx, chain, store, chatID, kindWord, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Word generation failed for ChatID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
 			return
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Word delivered to ChatID %d.", chatID)
-		_ = sendToTelegram(chatID, card)
+		_ = notifier.Send(chatID, card)
 
 	case "/level":
-		handleLevel(store, chatID, args)
+		handleLevel(store, notifier, chatID, args)
 
 	case "/interval":
-		handleInterval(store, chatID, args)
+		handleInterval(store, notifier, chatID, args)
 
 	case "/stats":
 		log.Printf("📊 [STATS] requested by ChatID %d.", chatID)
 		stats, err := store.UserStats(chatID)
 		if err != nil {
 			log.Printf("❌ [STATS_ERR] Could not build stats for ChatID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't pull your stats right now. Please try again.")
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't pull your stats right now. Please try again.")
 			return
 		}
-		_ = sendToTelegram(chatID, formatStats(stats))
+		_ = notifier.Send(chatID, formatStats(stats))
 
 	case "/quiz":
 		log.Printf("🧩 [QUIZ] requested by ChatID %d.", chatID)
-		handleQuiz(store, chatID)
+		handleQuiz(store, notifier, chatID)
 
 	case "/pause":
 		if err := store.SetPaused(chatID, true); err != nil {
 			log.Printf("❌ [PAUSE_ERR] Could not pause ChatID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't pause right now. Please try again.")
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't pause right now. Please try again.")
 			return
 		}
 		log.Printf("⏸️  [PAUSE] ChatID %d paused scheduled sends.", chatID)
-		_ = sendToTelegram(chatID, "⏸️ <b>Paused.</b>\n\nYou won't receive scheduled drills or words until you send /resume. You can still use /drill and /word anytime.")
+		_ = notifier.Send(chatID, "⏸️ <b>Paused.</b>\n\nYou won't receive scheduled drills or words until you send /resume. You can still use /drill and /word anytime.")
 
 	case "/resume":
 		if err := store.SetPaused(chatID, false); err != nil {
 			log.Printf("❌ [RESUME_ERR] Could not resume ChatID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't resume right now. Please try again.")
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't resume right now. Please try again.")
 			return
 		}
 		log.Printf("▶️  [RESUME] ChatID %d resumed scheduled sends.", chatID)
-		_ = sendToTelegram(chatID, "▶️ <b>Resumed!</b>\n\nScheduled practice is back on — see you every 30 minutes (quiet hours aside).")
+		_ = notifier.Send(chatID, "▶️ <b>Resumed!</b>\n\nScheduled practice is back on — see you every 30 minutes (quiet hours aside).")
 
 	case "/reset":
 		log.Printf("♻️  [RESET] ChatID %d requested history wipe.", chatID)
 		clearedVerbs, err := store.ResetSentWords(chatID)
 		if err != nil {
 			log.Printf("❌ [RESET_ERR] Failed to clear verb history for ChatID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reset your history right now. Please try again.")
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reset your history right now. Please try again.")
 			return
 		}
 		clearedWords, err := store.ResetSentVocab(chatID)
 		if err != nil {
 			log.Printf("❌ [RESET_ERR] Failed to clear vocab history for ChatID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't reset your history right now. Please try again.")
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reset your history right now. Please try again.")
 			return
 		}
 
 		log.Printf("✅ [RESET] Cleared %d verbs and %d words for ChatID %d.", clearedVerbs, clearedWords, chatID)
-		_ = sendToTelegram(chatID, fmt.Sprintf(
+		_ = notifier.Send(chatID, fmt.Sprintf(
 			"♻️ <b>History reset!</b>\n\nCleared <b>%d</b> practiced verbs and <b>%d</b> vocabulary words. You may see them again in future sends.", clearedVerbs, clearedWords,
 		))
 
 	case "/metrics":
 		if !isMaintainer(chatID) {
-			_ = sendToTelegram(chatID, "🔒 This command is only available to the bot maintainer.")
+			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
 			return
 		}
-		handleMetrics(store, chain, chatID)
+		handleMetrics(store, chain, notifier, chatID)
 
 	case "/announce":
 		if !isMaintainer(chatID) {
-			_ = sendToTelegram(chatID, "🔒 This command is only available to the bot maintainer.")
+			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
 			return
 		}
 		announceText := ""
 		if spaceIdx := strings.Index(msg.Text, " "); spaceIdx != -1 {
 			announceText = strings.TrimSpace(msg.Text[spaceIdx+1:])
 		}
-		handleAnnounce(store, chatID, announceText)
+		handleAnnounce(store, notifier, chatID, announceText)
 
 	case "/health":
 		if !isMaintainer(chatID) {
-			_ = sendToTelegram(chatID, "🔒 This command is only available to the bot maintainer.")
+			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
 			return
 		}
-		handleHealth(store, chain, chatID)
+		handleHealth(store, chain, notifier, chatID)
 
 	default:
 		if strings.HasPrefix(command, "/") {
 			log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
-			_ = sendToTelegram(chatID, "🤖 I don't know that command. Try /drill, /word, /quiz, /stats or /help — or just send me any word to look it up!")
+			_ = notifier.Send(chatID, "🤖 I don't know that command. Try /drill, /word, /quiz, /stats or /help — or just send me any word to look it up!")
 			return
 		}
 		// Plain text (no leading slash) is treated as a word lookup (Change M).
-		handleWordLookup(ctx, chain, store, chatID, msg.Text)
+		handleWordLookup(ctx, chain, store, notifier, chatID, msg.Text)
 	}
 }
 
 // handleLevel handles the /level command. With a valid argument it sets the
 // level directly; otherwise it shows the current level with inline buttons.
-func handleLevel(store *Store, chatID int64, args []string) {
+func handleLevel(store *Store, notifier Notifier, chatID int64, args []string) {
 	current := store.GetLevel(chatID)
 
 	if len(args) > 0 {
 		level, ok := normalizeLevel(args[0])
 		if !ok {
-			_ = sendToTelegram(chatID, "🤔 I don't know that level. Choose <b>beginner</b>, <b>intermediate</b> or <b>advanced</b>.")
+			_ = notifier.Send(chatID, "🤔 I don't know that level. Choose <b>beginner</b>, <b>intermediate</b> or <b>advanced</b>.")
 			return
 		}
 		if err := store.SetLevel(chatID, level); err != nil {
 			log.Printf("❌ [LEVEL_ERR] Could not set level for ChatID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't change your level right now. Please try again.")
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't change your level right now. Please try again.")
 			return
 		}
 		log.Printf("🎚️  [LEVEL] ChatID %d set level to %s.", chatID, level)
-		_ = sendToTelegram(chatID, fmt.Sprintf("✅ Difficulty set to <b>%s</b>. New drills and words will match it.", levelLabel(level)))
+		_ = notifier.Send(chatID, fmt.Sprintf("✅ Difficulty set to <b>%s</b>. New drills and words will match it.", levelLabel(level)))
 		return
 	}
 
@@ -512,7 +514,7 @@ func handleLevel(store *Store, chatID int64, args []string) {
 		"🎚️ <b>Difficulty level</b>\n\nYour current level is <b>%s</b>.\nTap a button to change it:",
 		levelLabel(current),
 	)
-	if err := sendToTelegramWithKeyboard(chatID, text, keyboard); err != nil {
+	if err := notifier.SendKeyboard(chatID, text, keyboard); err != nil {
 		log.Printf("❌ [LEVEL_ERR] Could not send level keyboard to ChatID %d: %v", chatID, err)
 	}
 }
@@ -520,25 +522,25 @@ func handleLevel(store *Store, chatID int64, args []string) {
 // handleWordLookup treats a plain (non-command) message as a vocabulary lookup
 // (Change M): it generates a /word-style card for the user-supplied term at their
 // level, translating from another language when needed, then pools and records it.
-func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, chatID int64, text string) {
+func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, chatID int64, text string) {
 	term := strings.TrimSpace(text)
 	fields := strings.Fields(term)
 	if len(fields) == 0 {
 		return
 	}
 	if len(fields) > 4 || len([]rune(term)) > 40 {
-		_ = sendToTelegram(chatID, "🔎 Send me a single word (or a short phrase) and I'll explain it — that looked more like a sentence!")
+		_ = notifier.Send(chatID, "🔎 Send me a single word (or a short phrase) and I'll explain it — that looked more like a sentence!")
 		return
 	}
 
 	log.Printf("🔎 [LOOKUP] ChatID %d looked up %q.", chatID, term)
-	_ = sendToTelegram(chatID, "🔄 <b>Looking that up...</b>")
+	_ = notifier.Send(chatID, "🔄 <b>Looking that up...</b>")
 
 	level := store.GetLevel(chatID)
 	card, word, meaning, provider, err := generateWordFor(ctx, chain, level, term)
 	if err != nil {
 		log.Printf("❌ [LOOKUP_ERR] Generation failed for ChatID %d term %q: %v", chatID, term, err)
-		_ = sendToTelegram(chatID, "❌ Sorry, I couldn't look that up right now. Please try again.")
+		_ = notifier.Send(chatID, "❌ Sorry, I couldn't look that up right now. Please try again.")
 		return
 	}
 
@@ -553,7 +555,7 @@ func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, c
 		}
 	}
 	log.Printf("✅ [LOOKUP] Delivered %q (resolved %q) to chat %d via %s.", term, word, chatID, provider)
-	_ = sendToTelegram(chatID, card)
+	_ = notifier.Send(chatID, card)
 }
 
 // ---------------------------------------------------------------------------
@@ -570,7 +572,7 @@ func isMaintainer(chatID int64) bool {
 }
 
 // handleMetrics sends an operational summary to the maintainer (/metrics).
-func handleMetrics(store *Store, chain *ProviderChain, chatID int64) {
+func handleMetrics(store *Store, chain *ProviderChain, notifier Notifier, chatID int64) {
 	log.Printf("📊 [ADMIN] /metrics requested by ChatID %d.", chatID)
 
 	var b strings.Builder
@@ -606,13 +608,13 @@ func handleMetrics(store *Store, chain *ProviderChain, chatID int64) {
 		b.WriteString(fmt.Sprintf("  • %s\n", p.Name()))
 	}
 
-	_ = sendToTelegram(chatID, b.String())
+	_ = notifier.Send(chatID, b.String())
 }
 
 // handleAnnounce broadcasts an HTML message to all non-paused subscribers (/announce).
-func handleAnnounce(store *Store, chatID int64, text string) {
+func handleAnnounce(store *Store, notifier Notifier, chatID int64, text string) {
 	if text == "" {
-		_ = sendToTelegram(chatID, "Usage: <code>/announce &lt;HTML message&gt;</code>")
+		_ = notifier.Send(chatID, "Usage: <code>/announce &lt;HTML message&gt;</code>")
 		return
 	}
 	log.Printf("📣 [ADMIN] /announce by ChatID %d: %q", chatID, text)
@@ -620,7 +622,7 @@ func handleAnnounce(store *Store, chatID int64, text string) {
 	chats, err := store.Subscribers()
 	if err != nil {
 		log.Printf("❌ [ADMIN] Could not read subscribers: %v", err)
-		_ = sendToTelegram(chatID, "❌ Could not read subscribers.")
+		_ = notifier.Send(chatID, "❌ Could not read subscribers.")
 		return
 	}
 
@@ -629,18 +631,18 @@ func handleAnnounce(store *Store, chatID int64, text string) {
 		if store.IsPaused(id) {
 			continue
 		}
-		if err := sendToTelegram(id, text); err != nil {
+		if err := notifier.Send(id, text); err != nil {
 			failed++
 		} else {
 			sent++
 		}
 	}
 	log.Printf("📣 [ADMIN] Announcement delivered to %d, failed %d.", sent, failed)
-	_ = sendToTelegram(chatID, fmt.Sprintf("📣 Announcement delivered to <b>%d</b> subscriber(s) (%d failed).", sent, failed))
+	_ = notifier.Send(chatID, fmt.Sprintf("📣 Announcement delivered to <b>%d</b> subscriber(s) (%d failed).", sent, failed))
 }
 
 // handleHealth sends a quick system health check to the maintainer (/health).
-func handleHealth(store *Store, chain *ProviderChain, chatID int64) {
+func handleHealth(store *Store, chain *ProviderChain, notifier Notifier, chatID int64) {
 	log.Printf("🏥 [ADMIN] /health requested by ChatID %d.", chatID)
 
 	var b strings.Builder
@@ -665,7 +667,7 @@ func handleHealth(store *Store, chain *ProviderChain, chatID int64) {
 	}
 	b.WriteString("\n")
 
-	_ = sendToTelegram(chatID, b.String())
+	_ = notifier.Send(chatID, b.String())
 }
 
 // levelKeyboard builds a one-row inline keyboard of the three levels, marking the
@@ -685,27 +687,27 @@ func levelKeyboard(current string) [][]inlineButton {
 // handleInterval handles the /interval command. With a valid numeric argument it
 // sets the send interval directly; otherwise it shows the current interval with
 // an inline keyboard of the allowed options.
-func handleInterval(store *Store, chatID int64, args []string) {
+func handleInterval(store *Store, notifier Notifier, chatID int64, args []string) {
 	current := store.GetInterval(chatID)
 
 	if len(args) > 0 {
 		minutes, perr := strconv.Atoi(strings.TrimSpace(args[0]))
 		if perr != nil {
-			_ = sendToTelegram(chatID, "🤔 Please give the interval in minutes, e.g. <code>/interval 60</code>.")
+			_ = notifier.Send(chatID, "🤔 Please give the interval in minutes, e.g. <code>/interval 60</code>.")
 			return
 		}
 		iv, ok := normalizeInterval(minutes)
 		if !ok {
-			_ = sendToTelegram(chatID, "🤔 That's not one of the options. Choose one of: "+intervalOptionsText()+".")
+			_ = notifier.Send(chatID, "🤔 That's not one of the options. Choose one of: "+intervalOptionsText()+".")
 			return
 		}
 		if err := store.SetInterval(chatID, iv); err != nil {
 			log.Printf("❌ [INTERVAL_ERR] Could not set interval for ChatID %d: %v", chatID, err)
-			_ = sendToTelegram(chatID, "❌ Sorry, I couldn't change your interval right now. Please try again.")
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't change your interval right now. Please try again.")
 			return
 		}
 		log.Printf("⏱️  [INTERVAL] ChatID %d set interval to %d min.", chatID, iv)
-		_ = sendToTelegram(chatID, fmt.Sprintf("✅ Send interval set to <b>%s</b>. You'll get practice that often (quiet hours aside).", intervalLabel(iv)))
+		_ = notifier.Send(chatID, fmt.Sprintf("✅ Send interval set to <b>%s</b>. You'll get practice that often (quiet hours aside).", intervalLabel(iv)))
 		return
 	}
 
@@ -713,7 +715,7 @@ func handleInterval(store *Store, chatID int64, args []string) {
 		"⏱️ <b>Send interval</b>\n\nYou currently receive practice every <b>%s</b>.\nTap a button to change how often:",
 		intervalLabel(current),
 	)
-	if err := sendToTelegramWithKeyboard(chatID, text, intervalKeyboard(current)); err != nil {
+	if err := notifier.SendKeyboard(chatID, text, intervalKeyboard(current)); err != nil {
 		log.Printf("❌ [INTERVAL_ERR] Could not send interval keyboard to ChatID %d: %v", chatID, err)
 	}
 }
@@ -750,9 +752,9 @@ func intervalOptionsText() string {
 }
 
 // handleCallback processes inline-keyboard taps (currently level selection).
-func handleCallback(store *Store, cb *TelegramCallbackQuery) {
+func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) {
 	if cb.Message == nil {
-		_ = answerCallbackQuery(cb.ID, "")
+		_ = notifier.AnswerCallback(cb.ID, "")
 		return
 	}
 	chatID := cb.Message.Chat.ID
@@ -760,17 +762,17 @@ func handleCallback(store *Store, cb *TelegramCallbackQuery) {
 	if strings.HasPrefix(cb.Data, "level:") {
 		level, ok := normalizeLevel(strings.TrimPrefix(cb.Data, "level:"))
 		if !ok {
-			_ = answerCallbackQuery(cb.ID, "Unknown level")
+			_ = notifier.AnswerCallback(cb.ID, "Unknown level")
 			return
 		}
 		if err := store.SetLevel(chatID, level); err != nil {
 			log.Printf("❌ [LEVEL_ERR] Could not set level for ChatID %d: %v", chatID, err)
-			_ = answerCallbackQuery(cb.ID, "Could not save, try again")
+			_ = notifier.AnswerCallback(cb.ID, "Could not save, try again")
 			return
 		}
 		log.Printf("🎚️  [LEVEL] ChatID %d set level to %s (via button).", chatID, level)
-		_ = answerCallbackQuery(cb.ID, "Level set to "+levelLabel(level))
-		_ = editMessageText(chatID, cb.Message.MessageID,
+		_ = notifier.AnswerCallback(cb.ID, "Level set to "+levelLabel(level))
+		_ = notifier.EditMessage(chatID, cb.Message.MessageID,
 			fmt.Sprintf("🎚️ <b>Difficulty level</b>\n\nDifficulty set to <b>%s</b>. New drills and words will match it.", levelLabel(level)),
 			levelKeyboard(level),
 		)
@@ -780,22 +782,22 @@ func handleCallback(store *Store, cb *TelegramCallbackQuery) {
 	if strings.HasPrefix(cb.Data, "interval:") {
 		minutes, perr := strconv.Atoi(strings.TrimPrefix(cb.Data, "interval:"))
 		if perr != nil {
-			_ = answerCallbackQuery(cb.ID, "Unknown interval")
+			_ = notifier.AnswerCallback(cb.ID, "Unknown interval")
 			return
 		}
 		iv, ok := normalizeInterval(minutes)
 		if !ok {
-			_ = answerCallbackQuery(cb.ID, "Unknown interval")
+			_ = notifier.AnswerCallback(cb.ID, "Unknown interval")
 			return
 		}
 		if err := store.SetInterval(chatID, iv); err != nil {
 			log.Printf("❌ [INTERVAL_ERR] Could not set interval for ChatID %d: %v", chatID, err)
-			_ = answerCallbackQuery(cb.ID, "Could not save, try again")
+			_ = notifier.AnswerCallback(cb.ID, "Could not save, try again")
 			return
 		}
 		log.Printf("⏱️  [INTERVAL] ChatID %d set interval to %d min (via button).", chatID, iv)
-		_ = answerCallbackQuery(cb.ID, "Interval set to "+intervalLabel(iv))
-		_ = editMessageText(chatID, cb.Message.MessageID,
+		_ = notifier.AnswerCallback(cb.ID, "Interval set to "+intervalLabel(iv))
+		_ = notifier.EditMessage(chatID, cb.Message.MessageID,
 			fmt.Sprintf("⏱️ <b>Send interval</b>\n\nYou'll now receive practice every <b>%s</b> (quiet hours aside).", intervalLabel(iv)),
 			intervalKeyboard(iv),
 		)
@@ -803,27 +805,27 @@ func handleCallback(store *Store, cb *TelegramCallbackQuery) {
 	}
 
 	if strings.HasPrefix(cb.Data, "srs:") {
-		handleReviewCallback(store, cb, chatID)
+		handleReviewCallback(store, notifier, cb, chatID)
 		return
 	}
 
 	if strings.HasPrefix(cb.Data, "quiz:") {
-		handleQuizCallback(store, cb, chatID)
+		handleQuizCallback(store, notifier, cb, chatID)
 		return
 	}
 
 	log.Printf("ℹ️  [CALLBACK_UNHANDLED] Unknown callback data %q from ChatID %d.", cb.Data, chatID)
-	_ = answerCallbackQuery(cb.ID, "")
+	_ = notifier.AnswerCallback(cb.ID, "")
 }
 
 // handleReviewCallback applies a spaced-repetition self-grade ("Knew it" /
 // "Forgot") from a memory-check card tap (Change D). Callback data is of the
 // form "srs:known:<word>" or "srs:forgot:<word>".
-func handleReviewCallback(store *Store, cb *TelegramCallbackQuery, chatID int64) {
+func handleReviewCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
 	rest := strings.TrimPrefix(cb.Data, "srs:")
 	action, word, found := strings.Cut(rest, ":")
 	if !found || word == "" {
-		_ = answerCallbackQuery(cb.ID, "")
+		_ = notifier.AnswerCallback(cb.ID, "")
 		return
 	}
 
@@ -844,27 +846,44 @@ func handleReviewCallback(store *Store, cb *TelegramCallbackQuery, chatID int64)
 		toast = "No worries — you'll see it again soon"
 		confirm = fmt.Sprintf("❌ <b>%s</b> — no problem. I'll bring it back soon so it sticks.", word)
 	default:
-		_ = answerCallbackQuery(cb.ID, "")
+		_ = notifier.AnswerCallback(cb.ID, "")
 		return
 	}
 
 	if err != nil {
 		log.Printf("❌ [SRS] Could not apply %q for chat %d word %q: %v", action, chatID, word, err)
-		_ = answerCallbackQuery(cb.ID, "Could not save, try again")
+		_ = notifier.AnswerCallback(cb.ID, "Could not save, try again")
 		return
 	}
 	if !ok {
-		_ = answerCallbackQuery(cb.ID, "That review has expired")
+		_ = notifier.AnswerCallback(cb.ID, "That review has expired")
 		return
 	}
 	log.Printf("🧠 [SRS] ChatID %d graded %q as %q.", chatID, word, action)
-	_ = answerCallbackQuery(cb.ID, toast)
+	_ = notifier.AnswerCallback(cb.ID, toast)
 	if cb.Message != nil {
-		_ = editMessageText(chatID, cb.Message.MessageID, confirm, [][]inlineButton{})
+		_ = notifier.EditMessage(chatID, cb.Message.MessageID, confirm, [][]inlineButton{})
 	}
 }
 
-func sendToTelegram(chatID int64, text string) error {
+// ---------------------------------------------------------------------------
+// Notifier interface (strategy pattern for Telegram sends — testable via DI)
+// ---------------------------------------------------------------------------
+
+// Notifier abstracts the four Telegram Bot API send operations so handlers and
+// schedulers can be tested without HTTP calls. The production implementation is
+// telegramNotifier; tests inject a mockNotifier.
+type Notifier interface {
+	Send(chatID int64, text string) error
+	SendKeyboard(chatID int64, text string, keyboard [][]inlineButton) error
+	EditMessage(chatID, messageID int64, text string, keyboard [][]inlineButton) error
+	AnswerCallback(callbackID, text string) error
+}
+
+// telegramNotifier is the real Notifier that talks to the Telegram Bot API.
+type telegramNotifier struct{}
+
+func (n *telegramNotifier) Send(chatID int64, text string) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", TelegramBotToken)
 	payload := map[string]interface{}{
 		"chat_id":    chatID,
@@ -907,8 +926,7 @@ func telegramPost(method string, payload map[string]interface{}) error {
 	return nil
 }
 
-// sendToTelegramWithKeyboard sends an HTML message with an inline keyboard.
-func sendToTelegramWithKeyboard(chatID int64, text string, keyboard [][]inlineButton) error {
+func (n *telegramNotifier) SendKeyboard(chatID int64, text string, keyboard [][]inlineButton) error {
 	log.Printf("➔ [HTTP_POST] sendMessage(+keyboard) to ChatID %d", chatID)
 	return telegramPost("sendMessage", map[string]interface{}{
 		"chat_id":      chatID,
@@ -918,8 +936,7 @@ func sendToTelegramWithKeyboard(chatID int64, text string, keyboard [][]inlineBu
 	})
 }
 
-// editMessageText edits an existing message's text and inline keyboard in place.
-func editMessageText(chatID, messageID int64, text string, keyboard [][]inlineButton) error {
+func (n *telegramNotifier) EditMessage(chatID, messageID int64, text string, keyboard [][]inlineButton) error {
 	return telegramPost("editMessageText", map[string]interface{}{
 		"chat_id":      chatID,
 		"message_id":   messageID,
@@ -929,8 +946,7 @@ func editMessageText(chatID, messageID int64, text string, keyboard [][]inlineBu
 	})
 }
 
-// answerCallbackQuery acknowledges a button tap, optionally showing a toast.
-func answerCallbackQuery(callbackID, text string) error {
+func (n *telegramNotifier) AnswerCallback(callbackID, text string) error {
 	payload := map[string]interface{}{"callback_query_id": callbackID}
 	if text != "" {
 		payload["text"] = text
@@ -940,14 +956,14 @@ func answerCallbackQuery(callbackID, text string) error {
 
 // sendPendingChangelogs delivers any changelog entries the user has not yet
 // seen and marks them as delivered immediately after each successful send.
-func sendPendingChangelogs(store *Store, chatID int64) {
+func sendPendingChangelogs(store *Store, notifier Notifier, chatID int64) {
 	unseen, err := store.UnseenChangelogs(chatID)
 	if err != nil {
 		log.Printf("⚠️  [CHANGELOG] Could not fetch unseen changelogs for ChatID %d: %v", chatID, err)
 		return
 	}
 	for _, entry := range unseen {
-		if err := sendToTelegram(chatID, entry.Text); err != nil {
+		if err := notifier.Send(chatID, entry.Text); err != nil {
 			log.Printf("❌ [CHANGELOG] Failed to deliver v%s to ChatID %d: %v", entry.Version, chatID, err)
 			continue
 		}

@@ -206,7 +206,7 @@ func (s *Store) MasteredCount(chatID int64) (int, error) {
 // as a "memory check" card with Knew-it/Forgot buttons. It honours quiet hours
 // and the per-user paused flag, and snoozes each reminded word so it isn't
 // re-sent before the user responds.
-func runReviewScheduler(ctx context.Context, store *Store) {
+func runReviewScheduler(ctx context.Context, store *Store, notifier Notifier) {
 	log.Printf("🧠 [SRS] Spaced-repetition scheduler started (every %s, up to %d/user).", reviewCheckInterval, reviewBatchMax)
 	ticker := time.NewTicker(reviewCheckInterval)
 	defer ticker.Stop()
@@ -217,13 +217,13 @@ func runReviewScheduler(ctx context.Context, store *Store) {
 			log.Println("🧠 [SRS] Spaced-repetition scheduler stopped.")
 			return
 		case <-ticker.C:
-			runReviewSweep(store, time.Now())
+			runReviewSweep(store, notifier, time.Now())
 		}
 	}
 }
 
 // runReviewSweep delivers due review reminders for the current moment.
-func runReviewSweep(store *Store, now time.Time) {
+func runReviewSweep(store *Store, notifier Notifier, now time.Time) {
 	if isQuietHours(now) {
 		return
 	}
@@ -244,7 +244,7 @@ func runReviewSweep(store *Store, now time.Time) {
 			continue
 		}
 		for _, d := range due {
-			if err := sendToTelegramWithKeyboard(chatID, formatReviewReminder(d), reviewKeyboard(d.term)); err != nil {
+			if err := notifier.SendKeyboard(chatID, formatReviewReminder(d), reviewKeyboard(d.term)); err != nil {
 				log.Printf("❌ [SRS] Reminder send to chat %d failed: %v", chatID, err)
 				continue
 			}

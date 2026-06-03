@@ -461,18 +461,18 @@ func (s *Store) QuizStats(chatID int64) (answered, correct int, err error) {
 // ---------------------------------------------------------------------------
 
 // handleQuiz sends one quiz question on demand (/quiz).
-func handleQuiz(store *Store, chatID int64) {
+func handleQuiz(store *Store, notifier Notifier, chatID int64) {
 	q, ok, err := makeQuiz(store, chatID, time.Now(), newRand())
 	if err != nil {
 		log.Printf("❌ [QUIZ] Could not build quiz for chat %d: %v", chatID, err)
-		_ = sendToTelegram(chatID, "❌ Sorry, I couldn't make a quiz right now. Please try again.")
+		_ = notifier.Send(chatID, "❌ Sorry, I couldn't make a quiz right now. Please try again.")
 		return
 	}
 	if !ok {
-		_ = sendToTelegram(chatID, "🧩 Not enough learned words for a quiz yet — keep practising and I'll test you soon!")
+		_ = notifier.Send(chatID, "🧩 Not enough learned words for a quiz yet — keep practising and I'll test you soon!")
 		return
 	}
-	if err := sendToTelegramWithKeyboard(chatID, q.prompt, quizKeyboard(q)); err != nil {
+	if err := notifier.SendKeyboard(chatID, q.prompt, quizKeyboard(q)); err != nil {
 		log.Printf("❌ [QUIZ] Could not send quiz to chat %d: %v", chatID, err)
 	}
 }
@@ -480,11 +480,11 @@ func handleQuiz(store *Store, chatID int64) {
 // handleQuizCallback grades a quiz answer tap (Change E). Callback data is of the
 // form "quiz:c:<word>" (correct) or "quiz:x:<word>" (wrong); the result is
 // recorded and fed into the spaced-repetition schedule.
-func handleQuizCallback(store *Store, cb *TelegramCallbackQuery, chatID int64) {
+func handleQuizCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
 	rest := strings.TrimPrefix(cb.Data, "quiz:")
 	cx, word, found := strings.Cut(rest, ":")
 	if !found || word == "" {
-		_ = answerCallbackQuery(cb.ID, "")
+		_ = notifier.AnswerCallback(cb.ID, "")
 		return
 	}
 	correct := cx == "c"
@@ -516,9 +516,9 @@ func handleQuizCallback(store *Store, cb *TelegramCallbackQuery, chatID int64) {
 		reveal += fmt.Sprintf(" — %s", meaning)
 	}
 
-	_ = answerCallbackQuery(cb.ID, toast)
+	_ = notifier.AnswerCallback(cb.ID, toast)
 	if cb.Message != nil {
-		_ = editMessageText(chatID, cb.Message.MessageID, reveal, [][]inlineButton{})
+		_ = notifier.EditMessage(chatID, cb.Message.MessageID, reveal, [][]inlineButton{})
 	}
 }
 
@@ -528,7 +528,7 @@ func handleQuizCallback(store *Store, cb *TelegramCallbackQuery, chatID int64) {
 
 // runQuizScheduler periodically sends one quiz to each eligible active subscriber
 // (quiet-hour and paused aware). Disabled when QUIZ_INTERVAL <= 0.
-func runQuizScheduler(ctx context.Context, store *Store) {
+func runQuizScheduler(ctx context.Context, store *Store, notifier Notifier) {
 	if quizInterval <= 0 {
 		log.Println("🧩 [QUIZ] Quiz scheduler disabled (QUIZ_INTERVAL <= 0).")
 		return
@@ -543,13 +543,13 @@ func runQuizScheduler(ctx context.Context, store *Store) {
 			log.Println("🧩 [QUIZ] Quiz scheduler stopped.")
 			return
 		case <-ticker.C:
-			runQuizSweep(store, time.Now())
+			runQuizSweep(store, notifier, time.Now())
 		}
 	}
 }
 
 // runQuizSweep sends a quiz to every eligible subscriber for the current moment.
-func runQuizSweep(store *Store, now time.Time) {
+func runQuizSweep(store *Store, notifier Notifier, now time.Time) {
 	if isQuietHours(now) {
 		return
 	}
@@ -572,7 +572,7 @@ func runQuizSweep(store *Store, now time.Time) {
 		if !ok {
 			continue
 		}
-		if err := sendToTelegramWithKeyboard(chatID, q.prompt, quizKeyboard(q)); err != nil {
+		if err := notifier.SendKeyboard(chatID, q.prompt, quizKeyboard(q)); err != nil {
 			log.Printf("❌ [QUIZ] Send to chat %d failed: %v", chatID, err)
 			continue
 		}

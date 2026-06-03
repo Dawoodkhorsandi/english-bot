@@ -102,7 +102,7 @@ func nextMidnight(t time.Time) time.Time {
 // runBroadcastScheduler fires every half hour (the base slot), skipping quiet
 // hours, and runs a per-user delivery sweep: each subscriber receives content
 // only on slots aligned to their chosen interval, alternating drill/word.
-func runBroadcastScheduler(ctx context.Context, chain *ProviderChain, store *Store) {
+func runBroadcastScheduler(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
 	log.Println("⏰ [SCHED] Broadcast scheduler started (half-hourly base, per-user interval, quiet-hour aware).")
 	for {
 		next := nextHalfHour(time.Now())
@@ -122,7 +122,7 @@ func runBroadcastScheduler(ctx context.Context, chain *ProviderChain, store *Sto
 			continue
 		}
 
-		broadcastSweep(ctx, chain, store, now)
+		broadcastSweep(ctx, chain, store, notifier, now)
 	}
 }
 
@@ -130,7 +130,7 @@ func runBroadcastScheduler(ctx context.Context, chain *ProviderChain, store *Sto
 // subscriber who is (a) not paused and (b) due this slot per their interval. The
 // content kind is chosen per user (drill/word alternation by interval-slot). It
 // never triggers inline generation (pool-only); the poolFiller keeps the pool stocked.
-func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, now time.Time) {
+func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, now time.Time) {
 	chats, err := store.Subscribers()
 	if err != nil {
 		log.Printf("❌ [BROADCAST] Could not read subscribers: %v", err)
@@ -156,14 +156,14 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, now
 			continue
 		}
 
-		sendPendingChangelogs(store, chatID)
+		sendPendingChangelogs(store, notifier, chatID)
 
 		text, err := serveContent(ctx, chain, store, chatID, kind, prefs.Level, false)
 		if err != nil {
 			log.Printf("❌ [BROADCAST] %s for chat %d failed: %v", kind, chatID, err)
 			continue
 		}
-		if err := sendToTelegram(chatID, text); err != nil {
+		if err := notifier.Send(chatID, text); err != nil {
 			log.Printf("❌ [BROADCAST] Send to chat %d failed: %v", chatID, err)
 			continue
 		}
@@ -178,7 +178,7 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, now
 
 // runDailyReviewScheduler fires at local midnight and sends each subscriber a
 // review of the vocabulary words they received during the day that just ended.
-func runDailyReviewScheduler(ctx context.Context, store *Store) {
+func runDailyReviewScheduler(ctx context.Context, store *Store, notifier Notifier) {
 	log.Println("🌙 [REVIEW] Daily review scheduler started (fires at local midnight).")
 	for {
 		next := nextMidnight(time.Now())
@@ -192,13 +192,13 @@ func runDailyReviewScheduler(ctx context.Context, store *Store) {
 		case <-time.After(wait):
 		}
 
-		sendDailyReview(store, time.Now())
+		sendDailyReview(store, notifier, time.Now())
 	}
 }
 
 // sendDailyReview computes the just-ended local day window and sends each
 // subscriber the words they saw that day. Idempotent per (chat, day).
-func sendDailyReview(store *Store, now time.Time) {
+func sendDailyReview(store *Store, notifier Notifier, now time.Time) {
 	local := now.In(appLocation)
 	// The day that just ended is "yesterday" relative to the midnight boundary.
 	endLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, appLocation)
@@ -240,7 +240,7 @@ func sendDailyReview(store *Store, now time.Time) {
 			continue
 		}
 
-		if err := sendToTelegram(chatID, formatReview(items)); err != nil {
+		if err := notifier.Send(chatID, formatReview(items)); err != nil {
 			log.Printf("❌ [REVIEW] Send to chat %d failed: %v", chatID, err)
 			continue
 		}
@@ -273,7 +273,7 @@ func formatReview(items []reviewItem) string {
 // runWeeklyDigestScheduler fires once a week at the configured day+time and
 // sends each subscriber a recap of the week's words, quiz accuracy, streak,
 // and a "word of the week" highlight.
-func runWeeklyDigestScheduler(ctx context.Context, store *Store) {
+func runWeeklyDigestScheduler(ctx context.Context, store *Store, notifier Notifier) {
 	if digestDay < 0 {
 		log.Println("📅 [DIGEST] Weekly digest scheduler disabled.")
 		return
@@ -292,7 +292,7 @@ func runWeeklyDigestScheduler(ctx context.Context, store *Store) {
 		case <-time.After(wait):
 		}
 
-		sendWeeklyDigest(store, time.Now())
+		sendWeeklyDigest(store, notifier, time.Now())
 	}
 }
 
@@ -314,7 +314,7 @@ func nextWeekdayTime(t time.Time, weekday time.Weekday, timeStr string) time.Tim
 // sendWeeklyDigest computes the past-7-day window and sends each subscriber a
 // recap of the week's vocabulary, quiz accuracy, streak and a word highlight.
 // Idempotent per (chat, week_start) via weekly_digest_delivery.
-func sendWeeklyDigest(store *Store, now time.Time) {
+func sendWeeklyDigest(store *Store, notifier Notifier, now time.Time) {
 	local := now.In(appLocation)
 	weekStartLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, appLocation).AddDate(0, 0, -7)
 	weekStart := weekStartLocal.Format("2006-01-02")
@@ -365,7 +365,7 @@ func sendWeeklyDigest(store *Store, now time.Time) {
 			continue
 		}
 
-		if err := sendToTelegram(chatID, msg); err != nil {
+		if err := notifier.Send(chatID, msg); err != nil {
 			log.Printf("❌ [DIGEST] Send to chat %d failed: %v", chatID, err)
 			continue
 		}
