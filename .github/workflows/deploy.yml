@@ -29,11 +29,14 @@ jobs:
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          envs: ENV_FILE
           script: |
             set -e
 
@@ -44,6 +47,9 @@ jobs:
             cd ~/english-bot
             git fetch --all --tags
             git checkout ${{ github.event.inputs.ref }}
+
+            # Write .env from GitHub secret
+            echo "$ENV_FILE" > .env
 
             docker compose down
             docker compose build --no-cache
