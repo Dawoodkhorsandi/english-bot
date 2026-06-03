@@ -27,6 +27,19 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
+      - name: Debug connectivity
+        run: |
+          echo "Host length: ${#HOST}"
+          echo "User length: ${#USER}"
+          echo "Key length: ${#KEY}"
+          echo "Port: $PORT"
+          nc -zv -w 5 "$HOST" "$PORT" 2>&1 || echo "TCP connection failed"
+        env:
+          HOST: ${{ secrets.SSH_HOST }}
+          USER: ${{ secrets.SSH_USER }}
+          KEY: ${{ secrets.SSH_KEY }}
+          PORT: ${{ secrets.SSH_PORT || 22 }}
+
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1
         env:
