@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -276,4 +277,115 @@ func TestGetEnvWeekday(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// truncate (providers.go)
+// ---------------------------------------------------------------------------
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		s    string
+		n    int
+		want string
+	}{
+		{"hello", 10, "hello"},
+		{"hello world", 5, "hello…"},
+		{"hello", 5, "hello"},
+	}
+	for _, tt := range tests {
+		if got := truncate(tt.s, tt.n); got != tt.want {
+			t.Errorf("truncate(%q, %d) = %q, want %q", tt.s, tt.n, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sentTableFor (pool.go)
+// ---------------------------------------------------------------------------
+
+func TestSentTableFor(t *testing.T) {
+	if got := sentTableFor("word"); got != "sent_vocab" {
+		t.Errorf("sentTableFor(word) = %q, want sent_vocab", got)
+	}
+	if got := sentTableFor("drill"); got != "sent_words" {
+		t.Errorf("sentTableFor(drill) = %q, want sent_words", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// poolTargetFor (pool.go)
+// ---------------------------------------------------------------------------
+
+func TestPoolTargetFor(t *testing.T) {
+	if got := poolTargetFor(defaultLevel); got != poolTarget {
+		t.Errorf("poolTargetFor(%q) = %d, want %d", defaultLevel, got, poolTarget)
+	}
+	if got := poolTargetFor("beginner"); got != poolMin {
+		t.Errorf("poolTargetFor(beginner) = %d, want %d", got, poolMin)
+	}
+	if got := poolTargetFor("advanced"); got != poolMin {
+		t.Errorf("poolTargetFor(advanced) = %d, want %d", got, poolMin)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// plural (stats.go)
+// ---------------------------------------------------------------------------
+
+func TestPlural(t *testing.T) {
+	tests := []struct {
+		n    int
+		want string
+	}{
+		{0, "s"}, {1, ""}, {2, "s"}, {100, "s"},
+	}
+	for _, tt := range tests {
+		if got := plural(tt.n); got != tt.want {
+			t.Errorf("plural(%d) = %q, want %q", tt.n, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// formatStats (stats.go)
+// ---------------------------------------------------------------------------
+
+func TestFormatStatsVariants(t *testing.T) {
+	t.Run("base case", func(t *testing.T) {
+		msg := formatStats(UserStats{Level: defaultLevel})
+		if !strings.Contains(msg, "Your Progress") {
+			t.Error("missing 'Your Progress'")
+		}
+		if !strings.Contains(msg, "Grammar drills") {
+			t.Error("missing 'Grammar drills'")
+		}
+		if !strings.Contains(msg, "Vocabulary words") {
+			t.Error("missing 'Vocabulary words'")
+		}
+	})
+
+	t.Run("with quiz stats", func(t *testing.T) {
+		msg := formatStats(UserStats{Level: defaultLevel, QuizAnswered: 10, QuizCorrect: 7})
+		if !strings.Contains(msg, "Quiz accuracy") {
+			t.Error("missing 'Quiz accuracy'")
+		}
+		if !strings.Contains(msg, "70%") {
+			t.Error("missing correct percentage")
+		}
+	})
+
+	t.Run("paused", func(t *testing.T) {
+		msg := formatStats(UserStats{Level: defaultLevel, Paused: true})
+		if !strings.Contains(msg, "paused") {
+			t.Error("missing 'paused'")
+		}
+	})
+
+	t.Run("streak with flame", func(t *testing.T) {
+		msg := formatStats(UserStats{Level: defaultLevel, CurrentStreak: 5})
+		if !strings.Contains(msg, "🔥") {
+			t.Error("missing flame emoji for streak >= 3")
+		}
+	})
 }

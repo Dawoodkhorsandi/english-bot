@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 )
@@ -139,5 +140,192 @@ func TestNextWeekdayTimePast(t *testing.T) {
 	next := nextWeekdayTime(now, time.Sunday, "20:00")
 	if next.Day() != 14 {
 		t.Errorf("day = %d, want 14 (next Sunday)", next.Day())
+	}
+}
+
+func TestParseHourMinute(t *testing.T) {
+	cases := []struct {
+		input string
+		wantH int
+		wantM int
+	}{
+		{"09:30", 9, 30},
+		{"00:00", 0, 0},
+		{"23:59", 23, 59},
+		{"", 0, 0},
+		{"abc", 0, 0},
+		{"12", 0, 0},
+		{"9:5", 9, 5},
+	}
+	for _, c := range cases {
+		h, m := parseHourMinute(c.input)
+		if h != c.wantH || m != c.wantM {
+			t.Errorf("parseHourMinute(%q) = (%d,%d), want (%d,%d)",
+				c.input, h, m, c.wantH, c.wantM)
+		}
+	}
+}
+
+func TestIsQuietHours(t *testing.T) {
+	savedLoc := appLocation
+	savedStart := quietStart
+	savedEnd := quietEnd
+	defer func() {
+		appLocation = savedLoc
+		quietStart = savedStart
+		quietEnd = savedEnd
+	}()
+
+	appLocation = time.UTC
+
+	cases := []struct {
+		name  string
+		start string
+		end   string
+		hour  int
+		min   int
+		want  bool
+	}{
+		{"03:00 within 00:00-09:00", "00:00", "09:00", 3, 0, true},
+		{"10:00 outside 00:00-09:00", "00:00", "09:00", 10, 0, false},
+		{"00:00 boundary start", "00:00", "09:00", 0, 0, true},
+		{"09:00 exclusive end", "00:00", "09:00", 9, 0, false},
+		{"same start/end disabled", "05:00", "05:00", 5, 0, false},
+		{"wrap midnight 01:00 quiet", "23:00", "06:00", 1, 0, true},
+		{"wrap midnight 12:00 not quiet", "23:00", "06:00", 12, 0, false},
+		{"wrap midnight 23:30 quiet", "23:00", "06:00", 23, 30, true},
+	}
+	for _, c := range cases {
+		quietStart = c.start
+		quietEnd = c.end
+		tm := time.Date(2026, 6, 3, c.hour, c.min, 0, 0, time.UTC)
+		if got := isQuietHours(tm); got != c.want {
+			t.Errorf("%s: isQuietHours = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestNextHalfHour(t *testing.T) {
+	savedLoc := appLocation
+	defer func() { appLocation = savedLoc }()
+	appLocation = time.UTC
+
+	cases := []struct {
+		min      int
+		wantHour int
+		wantMin  int
+	}{
+		{0, 0, 30},
+		{15, 0, 30},
+		{29, 0, 30},
+		{30, 1, 0},
+		{45, 1, 0},
+		{59, 1, 0},
+	}
+	for _, c := range cases {
+		tm := time.Date(2026, 6, 3, 0, c.min, 0, 0, time.UTC)
+		got := nextHalfHour(tm)
+		if got.Hour() != c.wantHour || got.Minute() != c.wantMin {
+			t.Errorf("nextHalfHour(:%02d) = %02d:%02d, want %02d:%02d",
+				c.min, got.Hour(), got.Minute(), c.wantHour, c.wantMin)
+		}
+	}
+}
+
+func TestNextMidnight(t *testing.T) {
+	savedLoc := appLocation
+	defer func() { appLocation = savedLoc }()
+	appLocation = time.UTC
+
+	cases := []struct {
+		name     string
+		input    time.Time
+		wantDay  int
+		wantHour int
+	}{
+		{"14:00", time.Date(2026, 6, 3, 14, 0, 0, 0, time.UTC), 4, 0},
+		{"23:59", time.Date(2026, 6, 3, 23, 59, 0, 0, time.UTC), 4, 0},
+		{"00:00:01", time.Date(2026, 6, 3, 0, 0, 1, 0, time.UTC), 4, 0},
+	}
+	for _, c := range cases {
+		got := nextMidnight(c.input)
+		if got.Day() != c.wantDay || got.Hour() != c.wantHour {
+			t.Errorf("%s: nextMidnight = day %d %02d:00, want day %d %02d:00",
+				c.name, got.Day(), got.Hour(), c.wantDay, c.wantHour)
+		}
+	}
+}
+
+func TestMinutesSinceMidnight(t *testing.T) {
+	savedLoc := appLocation
+	defer func() { appLocation = savedLoc }()
+	appLocation = time.UTC
+
+	cases := []struct {
+		hour int
+		min  int
+		want int
+	}{
+		{14, 30, 870},
+		{0, 0, 0},
+	}
+	for _, c := range cases {
+		tm := time.Date(2026, 6, 3, c.hour, c.min, 0, 0, time.UTC)
+		if got := minutesSinceMidnight(tm); got != c.want {
+			t.Errorf("minutesSinceMidnight(%02d:%02d) = %d, want %d",
+				c.hour, c.min, got, c.want)
+		}
+	}
+}
+
+func TestFormatReview(t *testing.T) {
+	items := []reviewItem{
+		{term: "hello", meaning: "a greeting"},
+		{term: "ephemeral", meaning: ""},
+		{term: "ubiquitous", meaning: "present everywhere"},
+	}
+	got := formatReview(items)
+
+	if !strings.Contains(got, "Today's Words") {
+		t.Error("missing 'Today's Words' header")
+	}
+	for _, it := range items {
+		bold := "<b>" + it.term + "</b>"
+		if !strings.Contains(got, bold) {
+			t.Errorf("missing bolded term %q", it.term)
+		}
+	}
+	if !strings.Contains(got, "a greeting") {
+		t.Error("missing meaning for 'hello'")
+	}
+	if !strings.Contains(got, "present everywhere") {
+		t.Error("missing meaning for 'ubiquitous'")
+	}
+	// "ephemeral" has no meaning — should NOT have a dash after it
+	if strings.Contains(got, "ephemeral</b> —") {
+		t.Error("ephemeral should not have a meaning separator")
+	}
+}
+
+func TestFormatReviewReminder(t *testing.T) {
+	withMeaning := dueReview{term: "serendipity", meaning: "happy accident", intervalDays: 3, ease: 2.5}
+	got := formatReviewReminder(withMeaning)
+	if !strings.Contains(got, "Memory check") {
+		t.Error("missing 'Memory check' header")
+	}
+	if !strings.Contains(got, "<b>serendipity</b>") {
+		t.Error("missing bolded term")
+	}
+	if !strings.Contains(got, "happy accident") {
+		t.Error("missing meaning")
+	}
+
+	without := dueReview{term: "aplomb", meaning: "", intervalDays: 1, ease: 2.5}
+	got2 := formatReviewReminder(without)
+	if !strings.Contains(got2, "<b>aplomb</b>") {
+		t.Error("missing bolded term for no-meaning case")
+	}
+	if strings.Contains(got2, "💬") {
+		t.Error("meaning icon should not appear when meaning is empty")
 	}
 }

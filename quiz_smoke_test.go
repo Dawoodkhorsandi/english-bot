@@ -363,3 +363,95 @@ func TestFormatWeeklyDigestWithContent(t *testing.T) {
 		t.Error("missing word of the week")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// blankBoldedWords
+// ---------------------------------------------------------------------------
+
+func TestBlankBoldedWords(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"two bold words", "The <b>cat</b> sat on the <b>mat</b>.", "The ____ sat on the ____."},
+		{"no bold", "No bold here.", "No bold here."},
+		{"empty", "", ""},
+		{"only bold", "<b>only</b>", "____"},
+		{"unclosed", "<b>broken", "<b>broken"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := blankBoldedWords(tt.input); got != tt.want {
+				t.Errorf("blankBoldedWords(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// quizKeyboard
+// ---------------------------------------------------------------------------
+
+func TestQuizKeyboard(t *testing.T) {
+	q := quizQuestion{
+		word:       "tedious",
+		prompt:     "What does 'tedious' mean?",
+		options:    []string{"happy", "sad", "too long or dull", "fast"},
+		correctIdx: 2,
+	}
+	rows := quizKeyboard(q)
+	if len(rows) != 4 {
+		t.Fatalf("got %d rows, want 4", len(rows))
+	}
+	if !strings.HasPrefix(rows[2][0].CallbackData, "quiz:c:") {
+		t.Errorf("correct row callback = %q, want prefix quiz:c:", rows[2][0].CallbackData)
+	}
+	for i, row := range rows {
+		if i == 2 {
+			continue
+		}
+		if !strings.HasPrefix(row[0].CallbackData, "quiz:x:") {
+			t.Errorf("row %d callback = %q, want prefix quiz:x:", i, row[0].CallbackData)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildQuiz edge cases
+// ---------------------------------------------------------------------------
+
+func TestBuildQuizEmptyMeaning(t *testing.T) {
+	subject := reviewItem{term: "test", meaning: ""}
+	pool := []reviewItem{
+		{term: "a", meaning: "m1"},
+		{term: "b", meaning: "m2"},
+		{term: "c", meaning: "m3"},
+	}
+	_, ok := buildQuiz(subject, pool, quizTypeWordToMeaning, fixedRand())
+	if ok {
+		t.Error("expected ok=false when subject meaning is empty")
+	}
+}
+
+func TestBuildQuizDuplicateDistractors(t *testing.T) {
+	subject := reviewItem{term: "tedious", meaning: "too long or dull"}
+	pool := []reviewItem{
+		{term: "a", meaning: "same meaning"},
+		{term: "b", meaning: "same meaning"},
+		{term: "c", meaning: "same meaning"},
+		{term: "d", meaning: "unique meaning"},
+		{term: "e", meaning: "another meaning"},
+	}
+	q, ok := buildQuiz(subject, pool, quizTypeWordToMeaning, fixedRand())
+	if !ok {
+		t.Fatal("buildQuiz returned ok=false")
+	}
+	seen := map[string]bool{}
+	for _, o := range q.options {
+		if seen[o] {
+			t.Errorf("duplicate option %q", o)
+		}
+		seen[o] = true
+	}
+}

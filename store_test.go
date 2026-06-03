@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 )
 
 func testStore(t *testing.T) *Store {
@@ -372,5 +373,131 @@ func TestStoreChangelogs(t *testing.T) {
 	}
 	if len(unseen) != 0 {
 		t.Fatalf("expected 0 unseen, got %d", len(unseen))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MeaningForWord / PooledCardText
+// ---------------------------------------------------------------------------
+
+func TestStoreMeaningForWord(t *testing.T) {
+	s := testStore(t)
+	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card text")
+
+	if got := s.MeaningForWord("apple"); got != "a fruit" {
+		t.Errorf("MeaningForWord(apple) = %q, want %q", got, "a fruit")
+	}
+	if got := s.MeaningForWord("nonexistent"); got != "" {
+		t.Errorf("MeaningForWord(nonexistent) = %q, want empty", got)
+	}
+}
+
+func TestStorePooledCardText(t *testing.T) {
+	s := testStore(t)
+	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "full card text")
+
+	if got := s.PooledCardText("apple"); got != "full card text" {
+		t.Errorf("PooledCardText(apple) = %q, want %q", got, "full card text")
+	}
+	if got := s.PooledCardText("missing"); got != "" {
+		t.Errorf("PooledCardText(missing) = %q, want empty", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SnoozeReview
+// ---------------------------------------------------------------------------
+
+func TestStoreSnoozeReview(t *testing.T) {
+	s := testStore(t)
+	const chatID int64 = 800
+	now := time.Now().UTC()
+
+	s.AddSubscriber(chatID)
+	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card")
+	if err := s.recordSentFor(kindWord, chatID, "apple"); err != nil {
+		t.Fatalf("recordSentFor: %v", err)
+	}
+
+	// Snooze by 5 days
+	if err := s.SnoozeReview(chatID, "apple", 5, now); err != nil {
+		t.Fatalf("SnoozeReview: %v", err)
+	}
+
+	// Should not be due before the snooze period
+	due, err := s.DueReviews(chatID, now.AddDate(0, 0, 4), 10)
+	if err != nil {
+		t.Fatalf("DueReviews: %v", err)
+	}
+	for _, d := range due {
+		if d.term == "apple" {
+			t.Error("apple should not be due before snooze period ends")
+		}
+	}
+
+	// Test intervalDays < 1 floors to 1
+	if err := s.SnoozeReview(chatID, "apple", 0, now); err != nil {
+		t.Fatalf("SnoozeReview with 0: %v", err)
+	}
+	due, err = s.DueReviews(chatID, now.AddDate(0, 0, 2), 10)
+	if err != nil {
+		t.Fatalf("DueReviews: %v", err)
+	}
+	found := false
+	for _, d := range due {
+		if d.term == "apple" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("apple should be due after floor(1) snooze + 2 days")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TotalQuizStats / TotalMasteredCount
+// ---------------------------------------------------------------------------
+
+func TestStoreTotalQuizStats(t *testing.T) {
+	s := testStore(t)
+
+	s.RecordQuizResult(1, "a", true)
+	s.RecordQuizResult(1, "b", false)
+	s.RecordQuizResult(2, "c", true)
+
+	answered, correct, err := s.TotalQuizStats()
+	if err != nil {
+		t.Fatalf("TotalQuizStats: %v", err)
+	}
+	if answered != 3 || correct != 2 {
+		t.Errorf("TotalQuizStats = %d/%d, want 3/2", answered, correct)
+	}
+}
+
+func TestStoreTotalMasteredCount(t *testing.T) {
+	s := testStore(t)
+	now := time.Now().UTC()
+
+	// Seed reviews for 2 users
+	for _, chatID := range []int64{1, 2} {
+		s.AddSubscriber(chatID)
+		s.AddToPool(kindWord, defaultLevel, "word1", "m1", "t1")
+		s.AddToPool(kindWord, defaultLevel, "word2", "m2", "t2")
+		s.recordSentFor(kindWord, chatID, "word1")
+		s.recordSentFor(kindWord, chatID, "word2")
+	}
+
+	// Promote word1 for user 1 past mastery threshold (interval >= 21)
+	s.db.Exec("UPDATE review_schedule SET interval_days = 21 WHERE chat_id = 1 AND word = 'word1'")
+	// Promote word2 for user 2 past mastery
+	s.db.Exec("UPDATE review_schedule SET interval_days = 25 WHERE chat_id = 2 AND word = 'word2'")
+	_ = now
+
+	n, err := s.TotalMasteredCount()
+	if err != nil {
+		t.Fatalf("TotalMasteredCount: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("TotalMasteredCount = %d, want 2", n)
 	}
 }

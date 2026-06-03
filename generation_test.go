@@ -287,3 +287,24 @@ func TestBuildWordPrompt(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// buildWordLookupPrompt
+// ---------------------------------------------------------------------------
+
+func TestBuildWordLookupPrompt(t *testing.T) {
+	prompt := buildWordLookupPrompt(levelIntermediate, "apple")
+
+	if !strings.Contains(prompt, "apple") {
+		t.Error("prompt should contain the lookup term 'apple'")
+	}
+	if !strings.Contains(prompt, "LOOKUP MODE") {
+		t.Error("prompt should contain 'LOOKUP MODE'")
+	}
+	if !strings.Contains(prompt, levelInstruction(levelIntermediate)) {
+		t.Error("prompt should contain the level instruction text")
+	}
+	if !strings.Contains(prompt, wordPromptBase) {
+		t.Error("prompt should contain the word prompt base pattern")
+	}
+}
