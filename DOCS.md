@@ -67,6 +67,7 @@ All configuration is read from environment variables at startup. There are no co
 | `QUIZ_INTERVAL` | `6h` | Minimum spacing between quiz prompts per user |
 | `DIGEST_DAY` | `Sunday` | Weekday the weekly digest is sent |
 | `DIGEST_TIME` | `20:00` | Time of day the weekly digest is sent |
+| `IDIOM_TIME` | `09:00` | Local time the daily idiom of the day is sent; `off` disables it |
 
 Per-provider API keys, base-URL overrides, and model overrides (e.g. `GROQ_MODEL`,
 `CEREBRAS_BASE_URL`, `GEMINI2_MODEL`, `SAMBANOVA_API_KEY`, `COHERE_API_KEY`) are
@@ -148,6 +149,16 @@ Index: `idx_sent_words_chat` on `chat_id` for fast per-user lookups.
 Primary key is `(chat_id, word)` — inserts are idempotent (`INSERT OR IGNORE`).
 Index: `idx_sent_vocab_chat` on `chat_id`. Kept separate from `sent_words` so grammar-drill verbs and vocabulary words have independent exclusion lists.
 
+#### `sent_idioms` (v1.12.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `word` | `TEXT` | Lowercased idiom phrase already sent (column named `word` so the generic `PooledUnseen` query works across kinds) |
+| `sent_at` | `DATETIME` | When the idiom was sent |
+
+Primary key `(chat_id, word)`; index `idx_sent_idioms_chat` on `chat_id`. The
+per-user exclusion list for idioms (Change Q).
+
 #### `changelog_delivery`
 | Column | Type | Description |
 |---|---|---|
@@ -187,6 +198,16 @@ from here first, filtered by the user's level, and falls back to inline generati
 
 Primary key is `(chat_id, review_date)` — the midnight word review is sent at most
 once per user per day.
+
+#### `idiom_delivery` (v1.12.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `idiom_date` | `TEXT` | Local `YYYY-MM-DD` the idiom of the day was sent for |
+| `sent_at` | `DATETIME` | When the idiom was delivered |
+
+Primary key is `(chat_id, idiom_date)` — the idiom of the day is sent at most once
+per user per day (Change Q).
 
 #### `user_prefs` (v1.4.0)
 | Column | Type | Description |
@@ -352,6 +373,7 @@ All messages use `parse_mode: HTML`.
 | `/help` | Sends usage instructions covering grammar drills (21 paged forms), vocabulary words, level and pause/resume. |
 | `/drill` | Sends a "Generating…" ack, calls `serveContent(kind=drill, level, allowGenerate=true)` (pool-first, inline-gen on miss), returns the result. |
 | `/word` | Sends a "Finding a fresh word…" ack, calls `serveContent(kind=word, level, allowGenerate=true)`, returns the vocabulary card. |
+| `/idiom` | Sends a "Finding an idiom…" ack, calls `serveContent(kind=idiom, level, allowGenerate=true)`, returns the idiom card. (v1.12.0) |
 | `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query` and are handled by `handleCallback`. (v1.4.0) |
 | `/stats` | Sends a read-only progress summary: drills practised, words learned, mastered, active days, current & longest daily streak, quiz accuracy, level (`UserStats` / `formatStats`). (v1.5.0; mastered v1.8.0; quiz accuracy v1.9.0) |
 | `/quiz` | Sends one multiple-choice quiz on a learned word (biased to due reviews); the tapped answer is recorded and feeds spaced repetition. (v1.9.0) |
@@ -413,29 +435,31 @@ Queries `UnseenChangelogs` for the user, then for each unseen entry:
 
 **Forms covered (21 total):**
 
+Ordered so page 1 leads with the forms learners use most (v1.12.0):
+
 | # | Form | Use | Page |
 |---|---|---|---|
-| 1 | Simple Present | Routine / Habit | Present Tenses |
-| 2 | Present Continuous | Right Now / Temporary | Present Tenses |
-| 3 | Present Perfect | Experience / Recent Result | Present Tenses |
-| 4 | Present Perfect Continuous | Ongoing Until Now | Present Tenses |
-| 5 | Simple Past | Finished Action | Past Tenses |
-| 6 | Past Continuous | Was in Progress | Past Tenses |
-| 7 | Past Perfect | Before Another Past Event | Past Tenses |
-| 8 | Past Perfect Continuous | Duration Before a Past Event | Past Tenses |
-| 9 | Future: be going to | Plan / Intention | Future Tenses |
-| 10 | Future: will | Prediction / Spontaneous Decision | Future Tenses |
-| 11 | Future Continuous | In Progress at a Future Moment | Future Tenses |
-| 12 | Future Perfect | Completed by a Future Point | Future Tenses |
-| 13 | Future Perfect Continuous | Duration up to a Future Point | Future Tenses |
+| 1 | Simple Present | Routine / Habit | Everyday Essentials |
+| 2 | Present Continuous | Right Now / Temporary | Everyday Essentials |
+| 3 | Simple Past | Finished Action | Everyday Essentials |
+| 4 | Future: will | Prediction / Spontaneous Decision | Everyday Essentials |
+| 5 | Present Perfect | Experience / Recent Result | Perfect Tenses |
+| 6 | Present Perfect Continuous | Ongoing Until Now | Perfect Tenses |
+| 7 | Past Perfect | Before Another Past Event | Perfect Tenses |
+| 8 | Past Perfect Continuous | Duration Before a Past Event | Perfect Tenses |
+| 9 | Past Continuous | Was in Progress | More Past and Future |
+| 10 | Future: be going to | Plan / Intention | More Past and Future |
+| 11 | Future Continuous | In Progress at a Future Moment | More Past and Future |
+| 12 | Future Perfect | Completed by a Future Point | More Past and Future |
+| 13 | Future Perfect Continuous | Duration up to a Future Point | More Past and Future |
 | 14 | Zero Conditional | General Truth / Always Result | Conditionals |
 | 15 | First Conditional | Real Future Possibility | Conditionals |
 | 16 | Second Conditional | Unreal / Hypothetical Present | Conditionals |
 | 17 | Third Conditional | Unreal Past / Regret | Conditionals |
-| 18 | Modal Verb | Advice / Obligation (should / must) | Modals & More |
-| 19 | Passive Voice | Focus on the Receiver | Modals & More |
-| 20 | Imperative | Command / Instruction | Modals & More |
-| 21 | Used to | Past Habit (no longer true) | Modals & More |
+| 18 | Modal Verb | Advice / Obligation (should / must) | Modals and More |
+| 19 | Passive Voice | Focus on the Receiver | Modals and More |
+| 20 | Imperative | Command / Instruction | Modals and More |
+| 21 | Used to | Past Habit (no longer true) | Modals and More |
 
 **Paged delivery (v1.11.0):** A drill is too long for one comfortable message, so it is sent as **five themed pages** with `◀️ Back` / `Next ▶️` inline buttons. The full drill text is stored once in `content_pool`; the bot sends page 1 via `SendKeyboard`, and a button tap (callback data `drill:<page>:<verb>`) reloads the drill by verb with `Store.DrillText`, re-renders the requested page, and updates the message in place with `editMessageText`. Paging is therefore stateless — no per-message storage. The page split is driven by `drillPageGroups` (`generation.go`); `renderDrillPage` and `drillNavKeyboard` build each page and its buttons. Drills that can't be parsed into numbered forms (e.g. legacy pool rows) degrade to a single plain message.
 
@@ -469,6 +493,29 @@ Queries `UnseenChangelogs` for the user, then for each unseen entry:
 **Exclusion clause:** If the user has prior vocabulary history, the prompt appends an explicit list of already-sent words with an instruction to choose something different.
 
 **Return values:** `(text, term, meaning, provider string, err error)`.
+
+---
+
+### AI Idiom Generation — `generateContent(kind=idiom)` (v1.12.0)
+
+**Model / retry / difficulty:** same as the other kinds (provider fallback chain, 2 attempts with backoff, level-targeted).
+
+**Output format:** Telegram HTML (`<b>`/`<i>` only). The card structure is:
+
+```
+🗣️ Idiom of the Day: {IDIOM}
+————————————————————
+💬 Meaning        — one simple sentence
+📝 Examples       — two example sentences (idiom bolded)
+🌍 When to use    — tone/context note
+💡 (try-it nudge)
+```
+
+**Term parsing:** `parseIdiom` keeps the **whole phrase** after `Idiom of the Day:` (idioms are multi-word, unlike `parseVerb`/`parseWord`).
+
+**Exclusion clause:** appends already-sent idioms (per user) with an instruction to pick a different one.
+
+**Delivery:** on demand via `/idiom`, and once daily to all active subscribers via the idiom scheduler (below). Pooled like words/drills; sent history lives in `sent_idioms`. Idioms are not enrolled in spaced repetition.
 
 ---
 
@@ -563,9 +610,10 @@ later: user taps ◀️/▶️  →  callback "drill:<page>:<verb>"
 8. Start spaced-repetition review scheduler goroutine (hourly)
 9. Start quiz scheduler goroutine (every QUIZ_INTERVAL)
 10. Start weekly digest scheduler goroutine (fires weekly, default Sunday 20:00)
-11. Start Telegram long-poll goroutine
-12. Block on OS signal (SIGINT / SIGTERM)
-13. On signal: cancel context → goroutines exit, deferred store.Close() runs
+11. Start idiom-of-the-day scheduler goroutine (fires daily at IDIOM_TIME, default 09:00)
+12. Start Telegram long-poll goroutine
+13. Block on OS signal (SIGINT / SIGTERM)
+14. On signal: cancel context → goroutines exit, deferred store.Close() runs
 ```
 
 ---

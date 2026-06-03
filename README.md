@@ -11,6 +11,7 @@ A Telegram bot that sends subscribers AI-generated English practice every 30 min
 
 - **Grammar Drills** -- one verb across 21 forms (12 tenses, all 4 conditionals, modals, passive, imperative, *used to*), delivered as five navigable pages with ◀️/▶️ buttons
 - **Vocabulary Cards** -- meaning, pronunciation, synonyms, opposites, and examples
+- **Idiom of the Day** -- a common English idiom with meaning and examples, daily and on demand via `/idiom`
 - **Spaced Repetition** -- SM-2-style review scheduler resurfaces words at growing intervals
 - **Quizzes** -- four question types (word-to-meaning, meaning-to-word, synonym, fill-in-the-blank)
 - **Weekly Digest** -- Sunday evening recap of the week's words, quiz accuracy, and streaks
@@ -73,6 +74,7 @@ go test ./... -v
 | `/start` | Subscribe and receive a welcome message |
 | `/drill` | Get a grammar drill on demand |
 | `/word` | Get a vocabulary card on demand |
+| `/idiom` | Get an idiom with meaning and examples |
 | `/quiz` | Take a multiple-choice quiz |
 | `/stats` | View your progress (words learned, streak, quiz accuracy, mastered) |
 | `/level [beginner\|intermediate\|advanced]` | Set difficulty level |
@@ -121,6 +123,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `QUIZ_INTERVAL` | `6h` | Scheduled quiz frequency (`0` to disable) |
 | `DIGEST_DAY` | `Sunday` | Day of week for weekly digest (`off` to disable) |
 | `DIGEST_TIME` | `20:00` | Local time to send the weekly digest |
+| `IDIOM_TIME` | `09:00` | Local time to send the daily idiom (`off` to disable) |
 | `AI_PROVIDER_ORDER` | `gemini,groq,...` | Comma-separated provider priority |
 
 ## Architecture
@@ -139,7 +142,7 @@ Go application (single package main, 10 source files)
 +-- stats.go          -- /stats computation, admin metrics
 ```
 
-### Goroutines (8 concurrent)
+### Goroutines (9 concurrent)
 
 1. **Pool filler** -- background content generation
 2. **Broadcast scheduler** -- half-hourly, per-user interval-aware delivery
@@ -147,8 +150,9 @@ Go application (single package main, 10 source files)
 4. **Spaced-repetition scheduler** -- hourly scan for due reviews
 5. **Quiz scheduler** -- periodic multiple-choice quizzes
 6. **Weekly digest scheduler** -- weekly recap (default Sunday 20:00)
-7. **Telegram poller** -- long-polls for messages and callbacks
-8. **Main goroutine** -- blocks on OS signal for graceful shutdown
+7. **Idiom-of-the-day scheduler** -- daily idiom at `IDIOM_TIME` (default 09:00)
+8. **Telegram poller** -- long-polls for messages and callbacks
+9. **Main goroutine** -- blocks on OS signal for graceful shutdown
 
 ### Database
 
