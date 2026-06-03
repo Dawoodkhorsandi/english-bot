@@ -10,7 +10,7 @@
 
 A Telegram bot written in Go that sends subscribers AI-generated English practice every 30 minutes, alternating between two formats:
 
-- 🎯 a **grammar drill** — one verb conjugated across 14 tenses
+- 🎯 a **grammar drill** — one verb across 21 forms (12 tenses, 4 conditionals, modals, passive, imperative, *used to*), delivered as five navigable pages
 - 📘 a **vocabulary word** — meaning, pronunciation, synonyms, opposites and example sentences
 
 The bot uses Google Gemini 2.5 Flash to generate unique, personalized content and tracks which verbs and words have already been sent to each user, ensuring they always receive fresh material. When a new version is deployed, existing subscribers automatically receive a changelog message on their next broadcast or `/start`.
@@ -54,6 +54,23 @@ All configuration is read from environment variables at startup. There are no co
 | `TELEGRAM_BOT_TOKEN` | `YOUR_TELEGRAM_BOT_TOKEN` | Telegram Bot API token from @BotFather |
 | `GEMINI_API_KEY` | `YOUR_GEMINI_API_KEY` | Google Gemini API key |
 | `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/metrics`, `/announce`, `/health`) |
+| `TIMEZONE` | `Asia/Tehran` | IANA timezone for quiet hours, daily review, and digest scheduling |
+| `QUIET_START` | `00:00` | Start of the quiet window (no scheduled sends) |
+| `QUIET_END` | `09:00` | End of the quiet window |
+| `POOL_TARGET` | `30` | Target number of pre-generated items per (kind, level) in `content_pool` |
+| `POOL_MIN` | `10` | Low-water mark that triggers refill |
+| `REFILL_INTERVAL` | `20s` | How often the pool filler goroutine wakes |
+| `GEN_SPACING` | `3s` | Minimum spacing between AI generation calls |
+| `AI_PROVIDER_ORDER` | `gemini,groq,cerebras,openrouter,github,cloudflare,mistral,gemini2,sambanova,cohere` | Comma-separated provider fallback order |
+| `REVIEW_CHECK_INTERVAL` | `1h` | How often the SRS scheduler checks for due reviews |
+| `REVIEW_BATCH_MAX` | `3` | Max words sent per review batch |
+| `QUIZ_INTERVAL` | `6h` | Minimum spacing between quiz prompts per user |
+| `DIGEST_DAY` | `Sunday` | Weekday the weekly digest is sent |
+| `DIGEST_TIME` | `20:00` | Time of day the weekly digest is sent |
+
+Per-provider API keys, base-URL overrides, and model overrides (e.g. `GROQ_MODEL`,
+`CEREBRAS_BASE_URL`, `GEMINI2_MODEL`, `SAMBANOVA_API_KEY`, `COHERE_API_KEY`) are
+listed in [Change A — Provider configuration](#provider-configuration) and in `.env.example`.
 
 At startup the bot logs whether the Telegram token is loaded (true/false) and its length — it never logs the actual token value. The maintainer chat ID is logged as-is (it is not a secret).
 
@@ -184,6 +201,32 @@ Rows are created lazily via upsert (`INSERT … ON CONFLICT`) the first time a u
 a level or pauses; `GetPrefs` returns defaults when no row exists. Managed by the
 methods in `prefs.go`.
 
+#### `review_schedule` (v1.8.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `word` | `TEXT` | The term being scheduled for review |
+| `interval_days` | `INTEGER` | Current SM-2 interval in days, default `1` |
+| `ease` | `REAL` | SM-2 ease factor, default `2.5` |
+| `reps` | `INTEGER` | Number of successful repetitions so far, default `0` |
+| `due_at` | `DATETIME` | When this word is next due for review |
+
+Primary key is `(chat_id, word)`; index `idx_review_due on (chat_id, due_at)`
+drives the "what's due now" query. Backs the spaced-repetition review (Change D);
+managed by `srs.go`.
+
+#### `quiz_results` (v1.9.0)
+| Column | Type | Description |
+|---|---|---|
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | Surrogate key |
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `word` | `TEXT` | The term that was quizzed |
+| `correct` | `INTEGER` | `1` if answered correctly, `0` otherwise |
+| `answered_at` | `DATETIME` | When the quiz was answered |
+
+Index `idx_quiz_chat on chat_id`. Records each quiz answer for stats and SRS
+scheduling (Change E); managed by `quiz.go`.
+
 #### `weekly_digest_delivery` (v1.10.0)
 | Column | Type | Description |
 |---|---|---|
@@ -306,7 +349,7 @@ All messages use `parse_mode: HTML`.
 | Command | Behaviour |
 |---|---|
 | `/start` | Subscribes user (idempotent). If new: baselines all changelogs as seen, notifies maintainer, sends welcome. If returning: delivers any unseen changelogs first. Always sends welcome message. |
-| `/help` | Sends usage instructions covering grammar drills (14 tenses), vocabulary words, level and pause/resume. |
+| `/help` | Sends usage instructions covering grammar drills (21 paged forms), vocabulary words, level and pause/resume. |
 | `/drill` | Sends a "Generating…" ack, calls `serveContent(kind=drill, level, allowGenerate=true)` (pool-first, inline-gen on miss), returns the result. |
 | `/word` | Sends a "Finding a fresh word…" ack, calls `serveContent(kind=word, level, allowGenerate=true)`, returns the vocabulary card. |
 | `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query` and are handled by `handleCallback`. (v1.4.0) |
@@ -366,26 +409,35 @@ Queries `UnseenChangelogs` for the user, then for each unseen entry:
 
 **Retry policy:** 2 attempts per provider with exponential backoff (2 s → 4 s); rate-limit (429) causes immediate failover to the next provider. Respects context cancellation between retries.
 
-**Output format:** Telegram HTML (`parse_mode: HTML`). The prompt instructs the model to wrap label lines in `<b>` tags and bold the target verb form inside each example sentence.
+**Output format:** Telegram HTML (`parse_mode: HTML`). The prompt instructs the model to wrap label lines in `<b>` tags and bold the target verb form inside each example sentence. The 21 forms are emitted in a fixed order so the drill can be paginated (see **Paged delivery** below).
 
-**Tenses covered (14 total):**
+**Forms covered (21 total):**
 
-| # | Tense | Use |
-|---|---|---|
-| 1 | Simple Present | Routine / Habit |
-| 2 | Present Continuous | Right Now / Temporary |
-| 3 | Present Perfect | Experience / Recent Result |
-| 4 | Present Perfect Continuous | Ongoing Until Now |
-| 5 | Simple Past | Finished Action |
-| 6 | Past Continuous | Was in Progress |
-| 7 | Past Perfect | Before Another Past Event |
-| 8 | Past Perfect Continuous | Duration Before a Past Event |
-| 9 | Future: be going to | Plan / Intention |
-| 10 | Future: will | Prediction / Spontaneous Decision |
-| 11 | Future Continuous | In Progress at a Future Moment |
-| 12 | Future Perfect | Completed by a Future Point |
-| 13 | Future Perfect Continuous | Duration up to a Future Point |
-| 14 | First Conditional | Real Future Possibility |
+| # | Form | Use | Page |
+|---|---|---|---|
+| 1 | Simple Present | Routine / Habit | Present Tenses |
+| 2 | Present Continuous | Right Now / Temporary | Present Tenses |
+| 3 | Present Perfect | Experience / Recent Result | Present Tenses |
+| 4 | Present Perfect Continuous | Ongoing Until Now | Present Tenses |
+| 5 | Simple Past | Finished Action | Past Tenses |
+| 6 | Past Continuous | Was in Progress | Past Tenses |
+| 7 | Past Perfect | Before Another Past Event | Past Tenses |
+| 8 | Past Perfect Continuous | Duration Before a Past Event | Past Tenses |
+| 9 | Future: be going to | Plan / Intention | Future Tenses |
+| 10 | Future: will | Prediction / Spontaneous Decision | Future Tenses |
+| 11 | Future Continuous | In Progress at a Future Moment | Future Tenses |
+| 12 | Future Perfect | Completed by a Future Point | Future Tenses |
+| 13 | Future Perfect Continuous | Duration up to a Future Point | Future Tenses |
+| 14 | Zero Conditional | General Truth / Always Result | Conditionals |
+| 15 | First Conditional | Real Future Possibility | Conditionals |
+| 16 | Second Conditional | Unreal / Hypothetical Present | Conditionals |
+| 17 | Third Conditional | Unreal Past / Regret | Conditionals |
+| 18 | Modal Verb | Advice / Obligation (should / must) | Modals & More |
+| 19 | Passive Voice | Focus on the Receiver | Modals & More |
+| 20 | Imperative | Command / Instruction | Modals & More |
+| 21 | Used to | Past Habit (no longer true) | Modals & More |
+
+**Paged delivery (v1.11.0):** A drill is too long for one comfortable message, so it is sent as **five themed pages** with `◀️ Back` / `Next ▶️` inline buttons. The full drill text is stored once in `content_pool`; the bot sends page 1 via `SendKeyboard`, and a button tap (callback data `drill:<page>:<verb>`) reloads the drill by verb with `Store.DrillText`, re-renders the requested page, and updates the message in place with `editMessageText`. Paging is therefore stateless — no per-message storage. The page split is driven by `drillPageGroups` (`generation.go`); `renderDrillPage` and `drillNavKeyboard` build each page and its buttons. Drills that can't be parsed into numbered forms (e.g. legacy pool rows) degrade to a single plain message.
 
 **Exclusion clause:** If the user has prior verb history, the prompt appends an explicit list of already-practiced verbs with an instruction to choose something different.
 
@@ -485,7 +537,15 @@ user sends /drill                      user sends /word
   └─ sendToTelegram("Generating…")        └─ sendToTelegram("Finding a word…")
   └─ serveContent(drill, level, true)     └─ serveContent(word, level, true)
        └─ pool-first, inline-gen on miss       └─ pool-first, inline-gen on miss
-  └─ sendToTelegram(chatID, text)         └─ sendToTelegram(chatID, text)
+  └─ sendDrill(chatID, text)              └─ sendToTelegram(chatID, text)
+       └─ renderDrillPage(text, 1)
+       └─ SendKeyboard(page 1 + ◀️/▶️)
+
+later: user taps ◀️/▶️  →  callback "drill:<page>:<verb>"
+  └─ handleDrillCallback
+       └─ store.DrillText(verb) → full drill text
+       └─ renderDrillPage(text, page)
+       └─ editMessageText(page + updated buttons)
 ```
 
 ---

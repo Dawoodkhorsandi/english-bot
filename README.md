@@ -9,13 +9,13 @@ A Telegram bot that sends subscribers AI-generated English practice every 30 min
 
 ## Features
 
-- **Grammar Drills** -- one verb conjugated across 14 English tenses with example sentences
+- **Grammar Drills** -- one verb across 21 forms (12 tenses, all 4 conditionals, modals, passive, imperative, *used to*), delivered as five navigable pages with ◀️/▶️ buttons
 - **Vocabulary Cards** -- meaning, pronunciation, synonyms, opposites, and examples
 - **Spaced Repetition** -- SM-2-style review scheduler resurfaces words at growing intervals
 - **Quizzes** -- four question types (word-to-meaning, meaning-to-word, synonym, fill-in-the-blank)
 - **Weekly Digest** -- Sunday evening recap of the week's words, quiz accuracy, and streaks
 - **Per-User Settings** -- difficulty level (beginner/intermediate/advanced), send interval, pause/resume
-- **Multi-Provider AI** -- Gemini, Groq, Cerebras, OpenRouter, GitHub Models, Cloudflare, Mistral with automatic fallback
+- **Multi-Provider AI** -- Gemini, Groq, Cerebras, OpenRouter, GitHub Models, Cloudflare, Mistral, Gemini2, SambaNova, Cohere with automatic fallback
 - **Pre-Generated Pool** -- background worker keeps a content pool topped up; broadcasts never block on AI calls
 - **Quiet Hours** -- no broadcasts during configurable overnight window (default 00:00--09:00 Tehran)
 - **Daily Review** -- compact bedtime recap of the day's vocabulary at midnight
@@ -167,6 +167,9 @@ The bot tries providers in order and uses the first that responds. A `429` cause
 | GitHub Models | `GITHUB_MODELS_TOKEN` | `openai/gpt-4o-mini` |
 | Cloudflare | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | `@cf/meta/llama-3.1-8b-instruct` |
 | Mistral | `MISTRAL_API_KEY` | `mistral-small-latest` |
+| Gemini2 | `GEMINI_API_KEY` | `gemini-2.0-flash` |
+| SambaNova | `SAMBANOVA_API_KEY` | `Meta-Llama-3.3-70B-Instruct` |
+| Cohere | `COHERE_API_KEY` | `command-r` |
 
 ## Project Structure
 
