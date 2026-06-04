@@ -114,8 +114,8 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `TIMEZONE` | `Asia/Tehran` | IANA timezone for scheduling |
 | `QUIET_START` | `00:00` | Start of no-broadcast window (local time) |
 | `QUIET_END` | `09:00` | End of no-broadcast window (local time) |
-| `POOL_TARGET` | `30` | Desired pooled items per kind for the default level |
-| `POOL_MIN` | `10` | Pool target for non-default levels |
+| `POOL_TARGET` | `300` | Desired pooled items per kind for the default level |
+| `POOL_MIN` | `100` | Pool target for non-default levels |
 | `REFILL_INTERVAL` | `20s` | How often the filler checks the pool |
 | `GEN_SPACING` | `3s` | Minimum gap between AI calls |
 | `REVIEW_CHECK_INTERVAL` | `1h` | How often the SRS scheduler scans for due reviews |

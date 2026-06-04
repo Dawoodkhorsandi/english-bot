@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"testing"
 	"time"
 )
@@ -104,15 +106,24 @@ func TestStorePoolTerms(t *testing.T) {
 	s.AddToPool(kindDrill, "beginner", "walk", "m2", "t2")
 	s.AddToPool(kindWord, defaultLevel, "apple", "m3", "t3")
 
-	terms, err := s.PoolTerms(kindDrill)
+	// PoolTerms is scoped per (kind, level).
+	terms, err := s.PoolTerms(kindDrill, defaultLevel)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(terms) != 2 {
-		t.Fatalf("expected 2 drill terms, got %d", len(terms))
+	if len(terms) != 1 || terms[0] != "run" {
+		t.Fatalf("expected [run] at default level, got %v", terms)
 	}
 
-	terms, err = s.PoolTerms(kindWord)
+	terms, err = s.PoolTerms(kindDrill, "beginner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(terms) != 1 || terms[0] != "walk" {
+		t.Fatalf("expected [walk] at beginner level, got %v", terms)
+	}
+
+	terms, err = s.PoolTerms(kindWord, defaultLevel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,14 +138,22 @@ func TestStoreAddToPoolIdempotent(t *testing.T) {
 	if err := s.AddToPool(kindDrill, defaultLevel, "run", "m1", "t1"); err != nil {
 		t.Fatal(err)
 	}
-	// duplicate (kind, term) should be ignored
+	// A duplicate (kind, level, term) is ignored.
+	if err := s.AddToPool(kindDrill, defaultLevel, "run", "m1b", "t1b"); err != nil {
+		t.Fatal(err)
+	}
+	terms, _ := s.PoolTerms(kindDrill, defaultLevel)
+	if len(terms) != 1 {
+		t.Fatalf("expected 1 (idempotent within level), got %d", len(terms))
+	}
+
+	// The same term at a different level is now allowed (per-level dedup).
 	if err := s.AddToPool(kindDrill, "beginner", "run", "m2", "t2"); err != nil {
 		t.Fatal(err)
 	}
-
-	terms, _ := s.PoolTerms(kindDrill)
+	terms, _ = s.PoolTerms(kindDrill, "beginner")
 	if len(terms) != 1 {
-		t.Fatalf("expected 1 (idempotent), got %d", len(terms))
+		t.Fatalf("expected run also pooled at beginner level, got %d", len(terms))
 	}
 }
 
@@ -145,28 +164,29 @@ func TestStorePooledUnseen(t *testing.T) {
 	s.AddToPool(kindDrill, defaultLevel, "run", "m1", "text-run")
 	s.AddToPool(kindDrill, defaultLevel, "jump", "m2", "text-jump")
 
-	// Should return oldest unseen
-	term, _, text, ok, err := s.PooledUnseen(kindDrill, defaultLevel, chatID)
+	// Selection is randomized, so the first unseen item is either run or jump.
+	term, _, _, ok, err := s.PooledUnseen(kindDrill, defaultLevel, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || term != "run" || text != "text-run" {
-		t.Fatalf("expected run, got %q ok=%v", term, ok)
+	if !ok || (term != "run" && term != "jump") {
+		t.Fatalf("expected run or jump, got %q ok=%v", term, ok)
 	}
 
-	// Mark "run" as seen
-	s.RecordSentWord(chatID, "run")
+	// Mark the returned term seen; the other unseen term must come next.
+	first := term
+	s.RecordSentWord(chatID, first)
 
 	term, _, _, ok, err = s.PooledUnseen(kindDrill, defaultLevel, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || term != "jump" {
-		t.Fatalf("expected jump after seeing run, got %q ok=%v", term, ok)
+	if !ok || term == first {
+		t.Fatalf("expected the other unseen term after seeing %q, got %q ok=%v", first, term, ok)
 	}
 
-	// Mark "jump" as seen too
-	s.RecordSentWord(chatID, "jump")
+	// Mark it seen too — now nothing is unseen.
+	s.RecordSentWord(chatID, term)
 
 	_, _, _, ok, err = s.PooledUnseen(kindDrill, defaultLevel, chatID)
 	if err != nil {
@@ -194,6 +214,123 @@ func TestStorePooledOldest(t *testing.T) {
 	}
 	if !ok || term != "run" {
 		t.Fatalf("expected oldest=run, got %q", term)
+	}
+}
+
+// TestMigrateUpgradesPreV13Schema simulates a pre-v1.13 database — content_pool
+// with the old global UNIQUE(kind, term) and sent tables without last_sent_at — and
+// verifies openStore's migration rebuilds it to per-level dedup and backfills
+// last_sent_at without losing data.
+func TestMigrateUpgradesPreV13Schema(t *testing.T) {
+	path := t.TempDir() + "/legacy.db"
+
+	// Build the old schema by hand and seed a row.
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	_, err = raw.Exec(`
+		CREATE TABLE content_pool (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			kind       TEXT    NOT NULL,
+			term       TEXT    NOT NULL,
+			meaning    TEXT    DEFAULT '',
+			text       TEXT    NOT NULL,
+			level      TEXT    NOT NULL DEFAULT 'intermediate',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (kind, term)
+		);
+		CREATE TABLE sent_words (
+			chat_id INTEGER NOT NULL,
+			word    TEXT    NOT NULL,
+			sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (chat_id, word)
+		);
+		INSERT INTO content_pool (kind, term, meaning, text, level) VALUES ('drill', 'run', '', 'text-run', 'intermediate');
+		INSERT INTO sent_words (chat_id, word, sent_at) VALUES (42, 'run', '2026-01-01 08:00:00');
+	`)
+	if err != nil {
+		t.Fatalf("seed legacy schema: %v", err)
+	}
+	raw.Close()
+
+	// openStore runs migrate() on the existing file.
+	store, err := openStore(path)
+	if err != nil {
+		t.Fatalf("openStore (migrate): %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	// Per-level dedup is now in force: the same term may be pooled at another level.
+	if !store.poolDedupIsLevelAware() {
+		t.Fatal("expected content_pool to be level-aware after migration")
+	}
+	if err := store.AddToPool(kindDrill, "beginner", "run", "", "text-run-beginner"); err != nil {
+		t.Fatalf("AddToPool same term, other level: %v", err)
+	}
+	if terms, _ := store.PoolTerms(kindDrill, "beginner"); len(terms) != 1 {
+		t.Fatalf("expected run pooled at beginner level post-migration, got %v", terms)
+	}
+	// The pre-existing row survived.
+	if terms, _ := store.PoolTerms(kindDrill, defaultLevel); len(terms) != 1 || terms[0] != "run" {
+		t.Fatalf("expected original run preserved at default level, got %v", terms)
+	}
+
+	// last_sent_at was added and backfilled from sent_at for the existing row.
+	if !store.columnExists("sent_words", "last_sent_at") {
+		t.Fatal("expected sent_words.last_sent_at after migration")
+	}
+	// Backfilled value must equal sent_at. The driver may reformat the datetime on
+	// read (e.g. RFC3339), so compare the two columns directly rather than a literal.
+	var matches int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM sent_words WHERE chat_id = 42 AND word = 'run' AND last_sent_at = sent_at",
+	).Scan(&matches); err != nil {
+		t.Fatalf("read last_sent_at: %v", err)
+	}
+	if matches != 1 {
+		t.Fatal("expected last_sent_at to be backfilled equal to sent_at")
+	}
+}
+
+// TestServeContentRotatesWhenExhausted is the regression test for the "same drill
+// every hour" bug: once a user has seen every pooled item at their level, the
+// broadcast fallback (allowGenerate=false) must rotate through the pool instead of
+// pinning the single oldest item forever. The guarantee we assert is that no two
+// consecutive broadcast serves return the same item.
+func TestServeContentRotatesWhenExhausted(t *testing.T) {
+	s := testStore(t)
+	var chatID int64 = 777
+	s.AddSubscriber(chatID)
+
+	// Distinct texts so we can detect repeats by content.
+	s.AddToPool(kindDrill, defaultLevel, "run", "", "text-run")
+	s.AddToPool(kindDrill, defaultLevel, "jump", "", "text-jump")
+	s.AddToPool(kindDrill, defaultLevel, "swim", "", "text-swim")
+
+	ctx := context.Background()
+	chain := emptyProviderChain() // never used: allowGenerate=false stays pool-only
+
+	seen := map[string]bool{}
+	prev := ""
+	for i := 0; i < 30; i++ {
+		text, err := serveContent(ctx, chain, s, chatID, kindDrill, defaultLevel, false)
+		if err != nil {
+			t.Fatalf("serveContent iteration %d: %v", i, err)
+		}
+		if text == "" {
+			t.Fatalf("iteration %d: empty text", i)
+		}
+		if text == prev {
+			t.Fatalf("iteration %d: same item served twice in a row (%q) — rotation broken", i, text)
+		}
+		seen[text] = true
+		prev = text
+	}
+
+	// Over 30 serves of a 3-item pool, rotation must surface every item.
+	if len(seen) != 3 {
+		t.Fatalf("expected all 3 pooled drills to be served over time, got %d distinct: %v", len(seen), seen)
 	}
 }
 
