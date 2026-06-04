@@ -11,6 +11,7 @@ const (
 	kindDrill = "drill"
 	kindWord  = "word"
 	kindIdiom = "idiom"
+	kindTip   = "tip"
 )
 
 // drillPageGroups defines how a drill's numbered forms are split across paged
@@ -179,6 +180,33 @@ Rules:
 - Keep example sentences short (max 14 words) and natural.
 - Output the card only — no preamble, no explanation.`
 
+// tipPromptBase is the grammar-tip prompt without the exclusion clause.
+const tipPromptBase = `Produce exactly ONE bite-sized grammar tip for English learners in Telegram HTML.
+
+Use this exact format:
+
+💡 <b>Grammar Tip of the Day</b>
+————————————————————
+📌 <b>Topic:</b> {TOPIC}
+
+<b>Rule:</b> {one short, focused explanation of one rule/nuance}
+
+✅ <b>Correct:</b>
+• {correct example 1}
+• {correct example 2}
+
+❌ <b>Incorrect:</b>
+• {incorrect example}
+
+💬 <i>Say it aloud: "{one natural spoken sentence that applies the rule}"</i>
+
+Rules:
+- Focus on one grammar rule, common mistake, or usage nuance only.
+- Keep all examples short and natural for everyday English.
+- Use only <b> and <i> HTML tags.
+- Topic should be concise and specific.
+- Output only the formatted tip card with no preamble.`
+
 func buildDrillPrompt(level string, exclude []string) string {
 	prompt := drillPromptBase + "\n\n" + levelInstruction(level)
 	if len(exclude) == 0 {
@@ -210,6 +238,16 @@ func buildIdiomPrompt(level string, exclude []string) string {
 	}
 	return prompt + fmt.Sprintf(
 		"\n\nIMPORTANT: Do NOT use any of these idioms (already sent): %s.\nChoose a completely different idiom not in that list.",
+		strings.Join(exclude, ", "),
+	)
+}
+
+func buildTipPrompt(exclude []string) string {
+	if len(exclude) == 0 {
+		return tipPromptBase
+	}
+	return tipPromptBase + fmt.Sprintf(
+		"\n\nIMPORTANT: Avoid these already-pooled grammar topics: %s.\nChoose a different grammar topic not in that list.",
 		strings.Join(exclude, ", "),
 	)
 }
@@ -249,6 +287,8 @@ func generateContent(ctx context.Context, chain *ProviderChain, kind, level stri
 		prompt = buildWordPrompt(level, exclude)
 	case kindIdiom:
 		prompt = buildIdiomPrompt(level, exclude)
+	case kindTip:
+		prompt = buildTipPrompt(exclude)
 	default:
 		prompt = buildDrillPrompt(level, exclude)
 	}
@@ -265,6 +305,8 @@ func generateContent(ctx context.Context, chain *ProviderChain, kind, level stri
 	case kindIdiom:
 		term = parseIdiom(text)
 		meaning = parseMeaning(text)
+	case kindTip:
+		term = parseTipTopic(text)
 	default:
 		term = parseVerb(text)
 	}
@@ -312,6 +354,27 @@ func parseIdiom(card string) string {
 		term = strings.TrimSpace(term)
 		if term != "" {
 			return strings.ToLower(term)
+		}
+	}
+	return ""
+}
+
+// parseTipTopic extracts the topic from the "Topic:" line of a grammar tip.
+func parseTipTopic(tip string) string {
+	for _, line := range strings.Split(tip, "\n") {
+		lower := strings.ToLower(line)
+		if !strings.Contains(lower, "topic") || !strings.Contains(line, ":") {
+			continue
+		}
+		plain := stripHTMLTags(line)
+		idx := strings.Index(plain, ":")
+		if idx == -1 {
+			continue
+		}
+		topic := strings.TrimSpace(plain[idx+1:])
+		topic = strings.ToLower(strings.Trim(topic, " *_`[]().,!?"))
+		if topic != "" {
+			return topic
 		}
 	}
 	return ""

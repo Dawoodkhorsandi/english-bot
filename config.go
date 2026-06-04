@@ -47,6 +47,9 @@ var (
 
 	// Audio pronunciation (Change I). Set TTS_ENABLED=false to disable globally.
 	ttsEnabled = getEnvBool("TTS_ENABLED", true)
+
+	// Daily grammar tip scheduler.
+	tipTime = getEnv("TIP_TIME", "10:00")
 )
 
 // appLocation is the time.Location used for all scheduling decisions.
@@ -61,7 +64,7 @@ func loadLocation() {
 		return
 	}
 	appLocation = loc
-	log.Printf("⚙️  [CONFIG] Timezone=%s | quiet hours %s–%s | pool target=%d min=%d", appTimezone, quietStart, quietEnd, poolTarget, poolMin)
+	log.Printf("⚙️  [CONFIG] Timezone=%s | quiet hours %s–%s | tip time=%s | pool target=%d min=%d", appTimezone, quietStart, quietEnd, tipTime, poolTarget, poolMin)
 }
 
 func getEnvInt(key string, fallback int) int {

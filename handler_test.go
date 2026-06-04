@@ -328,6 +328,57 @@ func TestHandleMessageTTS(t *testing.T) {
 	}
 }
 
+func TestHandleMessageTip(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+	store.AddToPool(kindTip, defaultLevel, "used to vs would", "", "tip card text")
+
+	msg := &TelegramMessage{
+		MessageID: 1,
+		Chat:      TelegramChat{ID: 100},
+		Text:      "/tip",
+	}
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+
+	texts := mock.sentTexts()
+	if len(texts) < 2 {
+		t.Fatalf("expected at least 2 messages, got %d", len(texts))
+	}
+	if !strings.Contains(texts[0], "Fetching your grammar tip") {
+		t.Errorf("first message should contain tip fetching ack, got %q", texts[0])
+	}
+	if texts[1] != "tip card text" {
+		t.Errorf("second message should be tip card, got %q", texts[1])
+	}
+}
+
+func TestHandleMessageTipToggle(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, &TelegramMessage{
+		MessageID: 1,
+		Chat:      TelegramChat{ID: 100},
+		Text:      "/tip off",
+	})
+	if store.GetTipsEnabled(100) {
+		t.Error("expected tips disabled after /tip off")
+	}
+
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, &TelegramMessage{
+		MessageID: 2,
+		Chat:      TelegramChat{ID: 100},
+		Text:      "/tip on",
+	})
+	if !store.GetTipsEnabled(100) {
+		t.Error("expected tips enabled after /tip on")
+	}
+}
+
 func TestHandleMessageStats(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}

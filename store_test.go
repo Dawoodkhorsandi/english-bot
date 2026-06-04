@@ -525,6 +525,51 @@ func TestStoreSentVocab(t *testing.T) {
 	}
 }
 
+func TestStoreRecordSentTip(t *testing.T) {
+	s := testStore(t)
+	var chatID int64 = 605
+
+	if err := s.RecordSentTip(chatID, "used to vs would"); err != nil {
+		t.Fatalf("RecordSentTip: %v", err)
+	}
+	if err := s.RecordSentTip(chatID, "used to vs would"); err != nil {
+		t.Fatalf("RecordSentTip duplicate: %v", err)
+	}
+
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM sent_tips WHERE chat_id = ?", chatID).Scan(&count); err != nil {
+		t.Fatalf("count sent_tips: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 sent tip record, got %d", count)
+	}
+}
+
+func TestStoreTipDelivered(t *testing.T) {
+	s := testStore(t)
+	var chatID int64 = 706
+	date := "2026-06-03"
+
+	delivered, err := s.TipDelivered(chatID, date)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivered {
+		t.Fatal("expected not delivered initially")
+	}
+
+	if err := s.MarkTipDelivered(chatID, date); err != nil {
+		t.Fatal(err)
+	}
+	delivered, err = s.TipDelivered(chatID, date)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !delivered {
+		t.Fatal("expected delivered after marking")
+	}
+}
+
 func TestStoreChangelogs(t *testing.T) {
 	s := testStore(t)
 	var chatID int64 = 700

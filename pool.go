@@ -162,6 +162,8 @@ func (s *Store) recordSentFor(kind string, chatID int64, term string) error {
 		return nil
 	case kindIdiom:
 		return s.RecordSentIdiom(chatID, term)
+	case kindTip:
+		return s.RecordSentTip(chatID, term)
 	default:
 		return s.RecordSentWord(chatID, term)
 	}
@@ -174,6 +176,8 @@ func sentTableFor(kind string) string {
 		return "sent_vocab"
 	case kindIdiom:
 		return "sent_idioms"
+	case kindTip:
+		return "sent_tips"
 	default:
 		return "sent_words"
 	}
@@ -254,6 +258,32 @@ func (s *Store) MarkIdiomDelivered(chatID int64, idiomDate string) error {
 	_, err := s.db.Exec(
 		"INSERT OR IGNORE INTO idiom_delivery (chat_id, idiom_date) VALUES (?, ?)",
 		chatID, idiomDate,
+	)
+	return err
+}
+
+// TipDelivered reports whether the daily tip for tipDate has already been
+// delivered to chatID.
+func (s *Store) TipDelivered(chatID int64, tipDate string) (bool, error) {
+	var one int
+	err := s.db.QueryRow(
+		"SELECT 1 FROM daily_tip_delivery WHERE chat_id = ? AND tip_date = ?",
+		chatID, tipDate,
+	).Scan(&one)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// MarkTipDelivered records that the daily tip for tipDate was sent.
+func (s *Store) MarkTipDelivered(chatID int64, tipDate string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO daily_tip_delivery (chat_id, tip_date) VALUES (?, ?)",
+		chatID, tipDate,
 	)
 	return err
 }
@@ -425,9 +455,14 @@ func runRefillCycle(ctx context.Context, chain *ProviderChain, store *Store) {
 				case <-time.After(genSpacing):
 				case <-ctx.Done():
 					return
-				}
-			}
 		}
+	}
+	// Tips are universal (level-independent), so keep one shared tip pool.
+	if ctx.Err() != nil {
+		return
+	}
+	_ = refillKind(ctx, chain, store, kindTip, defaultLevel)
+}
 	}
 }
 

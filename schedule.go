@@ -398,6 +398,84 @@ func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, not
 }
 
 // ---------------------------------------------------------------------------
+// Daily grammar tip scheduler
+// ---------------------------------------------------------------------------
+
+// runDailyTipScheduler fires once per local day at tipTime and sends one grammar
+// tip to each non-paused subscriber who has tips enabled.
+func runDailyTipScheduler(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
+	if strings.EqualFold(strings.TrimSpace(tipTime), "off") {
+		log.Println("💡 [TIP] Daily tip scheduler disabled (TIP_TIME=off).")
+		return
+	}
+	hh, mm := parseHourMinute(tipTime)
+	log.Printf("💡 [TIP] Daily tip scheduler started (fires daily at %02d:%02d local).", hh, mm)
+	for {
+		next := nextDailyTime(time.Now(), hh, mm)
+		wait := time.Until(next)
+		log.Printf("💡 [TIP] Next tip sweep at %s (in %s).", next.Format("2006-01-02 15:04 MST"), wait.Truncate(time.Second))
+
+		select {
+		case <-ctx.Done():
+			log.Println("💡 [TIP] Daily tip scheduler stopped.")
+			return
+		case <-time.After(wait):
+		}
+
+		sendDailyTip(ctx, chain, store, notifier, time.Now())
+	}
+}
+
+// sendDailyTip sends one pooled grammar tip to each eligible subscriber. It is
+// idempotent per (chat, local date), quiet-hour aware, and best-effort.
+func sendDailyTip(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, now time.Time) {
+	if isQuietHours(now) {
+		log.Printf("🌙 [TIP] %s is within quiet hours (%s–%s); skipping tip sweep.", now.In(appLocation).Format("15:04"), quietStart, quietEnd)
+		return
+	}
+
+	tipDate := now.In(appLocation).Format("2006-01-02")
+	chats, err := store.Subscribers()
+	if err != nil {
+		log.Printf("❌ [TIP] Could not read subscribers: %v", err)
+		return
+	}
+	log.Printf("💡 [TIP] Running tip sweep for %s (%d subscribers).", tipDate, len(chats))
+
+	sent := 0
+	for _, chatID := range chats {
+		if store.IsPaused(chatID) || !store.GetTipsEnabled(chatID) {
+			continue
+		}
+
+		delivered, err := store.TipDelivered(chatID, tipDate)
+		if err != nil {
+			log.Printf("⚠️  [TIP] Delivery check failed for chat %d: %v", chatID, err)
+			continue
+		}
+		if delivered {
+			continue
+		}
+
+		// Best effort: pool-first, no inline generation on scheduler path.
+		tipText, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, false)
+		if err != nil {
+			log.Printf("⚠️  [TIP] Could not get tip for chat %d: %v", chatID, err)
+			continue
+		}
+		if err := notifier.Send(chatID, tipText); err != nil {
+			log.Printf("❌ [TIP] Send to chat %d failed: %v", chatID, err)
+			continue
+		}
+		if err := store.MarkTipDelivered(chatID, tipDate); err != nil {
+			log.Printf("⚠️  [TIP] Could not mark tip delivered for chat %d: %v", chatID, err)
+		}
+		sent++
+	}
+	log.Printf("✅ [TIP] Daily tip delivered to %d/%d subscriber(s).", sent, len(chats))
+}
+
+// ---------------------------------------------------------------------------
 // Weekly digest scheduler (Change K)
 // ---------------------------------------------------------------------------
 
