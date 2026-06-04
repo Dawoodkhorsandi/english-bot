@@ -305,6 +305,29 @@ func TestHandleMessageWord(t *testing.T) {
 	}
 }
 
+func TestHandleMessageTTS(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+
+	msg := &TelegramMessage{
+		MessageID: 1,
+		Chat:      TelegramChat{ID: 100},
+		Text:      "/tts off",
+	}
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+	if store.GetTTSEnabled(100) {
+		t.Error("expected /tts off to disable TTS")
+	}
+
+	msg.Text = "/tts on"
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+	if !store.GetTTSEnabled(100) {
+		t.Error("expected /tts on to enable TTS")
+	}
+}
+
 func TestHandleMessageStats(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}

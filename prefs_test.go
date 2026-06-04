@@ -143,6 +143,9 @@ func TestStoreGetPrefsDefaults(t *testing.T) {
 	if prefs.Interval != defaultInterval {
 		t.Errorf("default interval = %d, want %d", prefs.Interval, defaultInterval)
 	}
+	if !prefs.TTSEnabled {
+		t.Error("default TTS should be enabled")
+	}
 }
 
 func TestStoreSetAndGetLevel(t *testing.T) {
@@ -206,6 +209,30 @@ func TestStoreSetAndGetInterval(t *testing.T) {
 	}
 	if got := store.GetInterval(chatID); got != defaultInterval {
 		t.Errorf("GetInterval after invalid = %d, want %d", got, defaultInterval)
+	}
+}
+
+func TestStoreSetAndGetTTSEnabled(t *testing.T) {
+	store := openTestStore(t)
+	chatID := int64(450)
+	store.AddSubscriber(chatID)
+
+	if !store.GetTTSEnabled(chatID) {
+		t.Error("TTS should be enabled by default")
+	}
+
+	if err := store.SetTTSEnabled(chatID, false); err != nil {
+		t.Fatalf("SetTTSEnabled(false): %v", err)
+	}
+	if store.GetTTSEnabled(chatID) {
+		t.Error("TTS should be disabled after SetTTSEnabled(false)")
+	}
+
+	if err := store.SetTTSEnabled(chatID, true); err != nil {
+		t.Fatalf("SetTTSEnabled(true): %v", err)
+	}
+	if !store.GetTTSEnabled(chatID) {
+		t.Error("TTS should be enabled after SetTTSEnabled(true)")
 	}
 }
 

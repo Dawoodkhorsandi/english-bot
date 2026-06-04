@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,6 +27,8 @@ var (
 	GeminiAPIKey     = getEnv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY")
 	MaintainerChatID = getEnv("MAINTAINER_CHAT_ID", "YOUR_PERSONAL_CHAT_ID")
 )
+
+var telegramHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 const (
 	dbFile       = "subscribers.db"
@@ -129,6 +132,12 @@ var Changelogs = []ChangelogEntry{
 			"• 🔀 <b>No more repeats!</b> Fixed a bug where very active learners could keep getting the <b>same drill or word</b> over and over. Content is now picked at random and rotates fairly, so you always get fresh practice\n" +
 			"• 📚 <b>Much bigger content pool</b> — far more drills, words and idioms ready to go before anything ever comes back around\n" +
 			"• Once you've seen everything at your level, reviews now cycle through your history instead of sticking on one item",
+	},
+	{
+		Version: "1.14.0",
+		Text: "📣 <b>What's New in v1.14.0</b>\n\n" +
+			"• 🔊 <b>Pronunciation audio is here!</b> After each vocabulary card and idiom, I now send a short voice pronunciation clip to reinforce speaking out loud\n" +
+			"• ⚙️ <b>New /tts command:</b> use <code>/tts on</code> or <code>/tts off</code> to control pronunciation audio at any time",
 	},
 }
 
@@ -364,6 +373,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/quiz — Test yourself on a word you've learned\n" +
 			"/level — Choose your difficulty (beginner/intermediate/advanced)\n" +
 			"/interval — Choose how often you get practice\n" +
+			"/tts — Turn pronunciation audio on/off\n" +
 			"/stats — See your progress and streak\n" +
 			"/pause — Pause scheduled sends\n" +
 			"/resume — Resume scheduled sends\n" +
@@ -388,6 +398,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/quiz — test yourself on a word you've already learned\n" +
 			"/level — set difficulty: beginner, intermediate or advanced\n" +
 			"/interval — set how often scheduled practice arrives\n" +
+			"/tts — turn pronunciation audio on or off\n" +
 			"/stats — see your progress, streak and totals\n" +
 			"/pause — stop scheduled sends (on-demand still works)\n" +
 			"/resume — re-enable scheduled sends\n" +
@@ -420,7 +431,9 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Word delivered to ChatID %d.", chatID)
-		_ = notifier.Send(chatID, card)
+		if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+			log.Printf("❌ [WORD_SEND_ERR] Word send failed for ChatID %d: %v", chatID, err)
+		}
 
 	case "/idiom":
 		log.Printf("🤖 [AI_FLOW] /idiom requested by ChatID %d.", chatID)
@@ -434,13 +447,18 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Idiom delivered to ChatID %d.", chatID)
-		_ = notifier.Send(chatID, card)
+		if err := sendIdiomCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+			log.Printf("❌ [IDIOM_SEND_ERR] Idiom send failed for ChatID %d: %v", chatID, err)
+		}
 
 	case "/level":
 		handleLevel(store, notifier, chatID, args)
 
 	case "/interval":
 		handleInterval(store, notifier, chatID, args)
+
+	case "/tts":
+		handleTTS(store, notifier, chatID, args)
 
 	case "/stats":
 		log.Printf("📊 [STATS] requested by ChatID %d.", chatID)
@@ -528,7 +546,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 	default:
 		if strings.HasPrefix(command, "/") {
 			log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
-			_ = notifier.Send(chatID, "🤖 I don't know that command. Try /drill, /word, /quiz, /stats or /help — or just send me any word to look it up!")
+			_ = notifier.Send(chatID, "🤖 I don't know that command. Try /drill, /word, /quiz, /tts, /stats or /help — or just send me any word to look it up!")
 			return
 		}
 		// Plain text (no leading slash) is treated as a word lookup (Change M).
@@ -603,7 +621,9 @@ func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, n
 		}
 	}
 	log.Printf("✅ [LOOKUP] Delivered %q (resolved %q) to chat %d via %s.", term, word, chatID, provider)
-	_ = notifier.Send(chatID, card)
+	if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+		log.Printf("❌ [LOOKUP_ERR] Send failed for chat %d term %q: %v", chatID, term, err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -766,6 +786,52 @@ func handleInterval(store *Store, notifier Notifier, chatID int64, args []string
 	if err := notifier.SendKeyboard(chatID, text, intervalKeyboard(current)); err != nil {
 		log.Printf("❌ [INTERVAL_ERR] Could not send interval keyboard to ChatID %d: %v", chatID, err)
 	}
+}
+
+// handleTTS handles /tts on|off, controlling pronunciation voice messages per user.
+func handleTTS(store *Store, notifier Notifier, chatID int64, args []string) {
+	current := store.GetTTSEnabled(chatID)
+
+	if len(args) > 0 {
+		mode := strings.ToLower(strings.TrimSpace(args[0]))
+		var enabled bool
+		switch mode {
+		case "on":
+			enabled = true
+		case "off":
+			enabled = false
+		default:
+			_ = notifier.Send(chatID, "Usage: <code>/tts on</code> or <code>/tts off</code>.")
+			return
+		}
+
+		if err := store.SetTTSEnabled(chatID, enabled); err != nil {
+			log.Printf("❌ [TTS_ERR] Could not set TTS preference for ChatID %d: %v", chatID, err)
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't change your audio preference right now. Please try again.")
+			return
+		}
+
+		if enabled {
+			msg := "🔊 Pronunciation audio is now <b>ON</b>."
+			if !ttsEnabled {
+				msg += "\n\nℹ️ It is currently disabled globally by the bot administrator."
+			}
+			_ = notifier.Send(chatID, msg)
+			return
+		}
+		_ = notifier.Send(chatID, "🔇 Pronunciation audio is now <b>OFF</b>.")
+		return
+	}
+
+	status := "ON"
+	if !current {
+		status = "OFF"
+	}
+	msg := fmt.Sprintf("🔊 <b>Pronunciation audio</b>\n\nCurrent setting: <b>%s</b>\nUse <code>/tts on</code> or <code>/tts off</code>.", status)
+	if !ttsEnabled {
+		msg += "\n\nℹ️ It is currently disabled globally by the bot administrator."
+	}
+	_ = notifier.Send(chatID, msg)
 }
 
 // intervalKeyboard builds an inline keyboard (rows of two) of the allowed send
@@ -975,6 +1041,9 @@ func handleDrillCallback(store *Store, notifier Notifier, cb *TelegramCallbackQu
 // telegramNotifier; tests inject a mockNotifier.
 type Notifier interface {
 	Send(chatID int64, text string) error
+	SendWithMessageID(chatID int64, text string) (int64, error)
+	SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (fileID string, err error)
+	SendVoiceByFileID(chatID int64, fileID string, replyToMessageID int64) error
 	SendKeyboard(chatID int64, text string, keyboard [][]inlineButton) error
 	EditMessage(chatID, messageID int64, text string, keyboard [][]inlineButton) error
 	AnswerCallback(callbackID, text string) error
@@ -984,6 +1053,11 @@ type Notifier interface {
 type telegramNotifier struct{}
 
 func (n *telegramNotifier) Send(chatID int64, text string) error {
+	_, err := n.SendWithMessageID(chatID, text)
+	return err
+}
+
+func (n *telegramNotifier) SendWithMessageID(chatID int64, text string) (int64, error) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", TelegramBotToken)
 	payload := map[string]interface{}{
 		"chat_id":    chatID,
@@ -994,18 +1068,95 @@ func (n *telegramNotifier) Send(chatID int64, text string) error {
 	jsonPayload, _ := json.Marshal(payload)
 
 	log.Printf("➔ [HTTP_POST] sendMessage to ChatID %d | payload %d bytes", chatID, len(jsonPayload))
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	resp, err := telegramHTTPClient.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("telegram returned status %d: %s", resp.StatusCode, string(respBody))
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("telegram sendMessage read response: %w", err)
 	}
 
-	return nil
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("telegram returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var parsed struct {
+		Result struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return 0, fmt.Errorf("telegram sendMessage parse error: %w", err)
+	}
+	return parsed.Result.MessageID, nil
+}
+
+func (n *telegramNotifier) SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (string, error) {
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendVoice", TelegramBotToken)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
+		return "", err
+	}
+	if replyToMessageID > 0 {
+		if err := writer.WriteField("reply_to_message_id", strconv.FormatInt(replyToMessageID, 10)); err != nil {
+			return "", err
+		}
+	}
+
+	part, err := writer.CreateFormFile("voice", filename)
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(voice); err != nil {
+		return "", err
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, apiURL, &body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := telegramHTTPClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("telegram sendVoice returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Extract file_id from the response for caching.
+	var parsed struct {
+		Result struct {
+			Voice *struct {
+				FileID string `json:"file_id"`
+			} `json:"voice"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err == nil && parsed.Result.Voice != nil {
+		return parsed.Result.Voice.FileID, nil
+	}
+	return "", nil
+}
+
+func (n *telegramNotifier) SendVoiceByFileID(chatID int64, fileID string, replyToMessageID int64) error {
+	payload := map[string]interface{}{
+		"chat_id": chatID,
+		"voice":   fileID,
+	}
+	if replyToMessageID > 0 {
+		payload["reply_to_message_id"] = replyToMessageID
+	}
+	return telegramPost("sendVoice", payload)
 }
 
 // telegramPost marshals payload and POSTs it to the given Bot API method.
@@ -1013,7 +1164,7 @@ func telegramPost(method string, payload map[string]interface{}) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", TelegramBotToken, method)
 	jsonPayload, _ := json.Marshal(payload)
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	resp, err := telegramHTTPClient.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return err
 	}
@@ -1151,6 +1302,7 @@ func openStore(path string) (*Store, error) {
 		level            TEXT    NOT NULL DEFAULT 'intermediate',
 		paused           INTEGER NOT NULL DEFAULT 0,
 		interval_minutes INTEGER NOT NULL DEFAULT 30,
+		tts_enabled      INTEGER NOT NULL DEFAULT 1,
 		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS review_schedule (
@@ -1176,6 +1328,11 @@ func openStore(path string) (*Store, error) {
 		week_start TEXT    NOT NULL,
 		sent_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, week_start)
+	);
+	CREATE TABLE IF NOT EXISTS audio_cache (
+		word       TEXT    PRIMARY KEY,
+		file_id    TEXT    NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`
 	if _, err := db.Exec(schema); err != nil {
@@ -1265,6 +1422,15 @@ func (s *Store) migrate() error {
 		log.Println("💾 [DB_MIGRATE] Adding user_prefs.interval_minutes column...")
 		if _, err := s.db.Exec(
 			"ALTER TABLE user_prefs ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 30",
+		); err != nil {
+			return err
+		}
+	}
+	// user_prefs.tts_enabled was added in v1.12.0 (Change I).
+	if !s.columnExists("user_prefs", "tts_enabled") {
+		log.Println("💾 [DB_MIGRATE] Adding user_prefs.tts_enabled column...")
+		if _, err := s.db.Exec(
+			"ALTER TABLE user_prefs ADD COLUMN tts_enabled INTEGER NOT NULL DEFAULT 1",
 		); err != nil {
 			return err
 		}
@@ -1530,6 +1696,30 @@ func (s *Store) ResetSentIdiom(chatID int64) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// CachedAudioFileID returns the Telegram file_id for a previously uploaded
+// pronunciation of the given word, or "" if none is cached.
+func (s *Store) CachedAudioFileID(word string) string {
+	var fileID string
+	err := s.db.QueryRow(
+		"SELECT file_id FROM audio_cache WHERE word = ?",
+		strings.ToLower(strings.TrimSpace(word)),
+	).Scan(&fileID)
+	if err != nil {
+		return ""
+	}
+	return fileID
+}
+
+// CacheAudioFileID stores the Telegram file_id for a word's pronunciation audio
+// so subsequent sends can reuse it without regenerating.
+func (s *Store) CacheAudioFileID(word, fileID string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO audio_cache (word, file_id) VALUES (?, ?)",
+		strings.ToLower(strings.TrimSpace(word)), fileID,
+	)
+	return err
 }
 
 // MarkChangelogSeen records that a changelog version has been delivered to a chat.

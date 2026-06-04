@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 )
@@ -11,6 +12,7 @@ import (
 type mockNotifier struct {
 	mu       sync.Mutex
 	sent     []sentMsg
+	voices   []sentVoice
 	keyboard []sentKeyboard
 	edits    []sentEdit
 	answers  []sentAnswer
@@ -27,6 +29,13 @@ type sentKeyboard struct {
 	keyboard [][]inlineButton
 }
 
+type sentVoice struct {
+	chatID           int64
+	filename         string
+	replyToMessageID int64
+	size             int
+}
+
 type sentEdit struct {
 	chatID    int64
 	messageID int64
@@ -40,9 +49,38 @@ type sentAnswer struct {
 }
 
 func (m *mockNotifier) Send(chatID int64, text string) error {
+	_, err := m.SendWithMessageID(chatID, text)
+	return err
+}
+
+func (m *mockNotifier) SendWithMessageID(chatID int64, text string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sent = append(m.sent, sentMsg{chatID, text})
+	return int64(len(m.sent)), nil
+}
+
+func (m *mockNotifier) SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.voices = append(m.voices, sentVoice{
+		chatID:           chatID,
+		filename:         filename,
+		replyToMessageID: replyToMessageID,
+		size:             len(voice),
+	})
+	return fmt.Sprintf("file_%d", len(m.voices)), nil
+}
+
+func (m *mockNotifier) SendVoiceByFileID(chatID int64, fileID string, replyToMessageID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.voices = append(m.voices, sentVoice{
+		chatID:           chatID,
+		filename:         fileID,
+		replyToMessageID: replyToMessageID,
+		size:             -1, // sentinel: indicates a cached re-send
+	})
 	return nil
 }
 

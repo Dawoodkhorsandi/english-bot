@@ -11,6 +11,7 @@ A Telegram bot that sends subscribers AI-generated English practice every 30 min
 
 - **Grammar Drills** -- one verb across 21 forms (12 tenses, all 4 conditionals, modals, passive, imperative, *used to*), delivered as five navigable pages with ◀️/▶️ buttons
 - **Vocabulary Cards** -- meaning, pronunciation, synonyms, opposites, and examples
+- **Pronunciation Audio** -- best-effort voice note after each vocabulary card and idiom (Gemini TTS with espeak-ng fallback, per-user `/tts` toggle)
 - **Idiom of the Day** -- a common English idiom with meaning and examples, daily and on demand via `/idiom`
 - **Spaced Repetition** -- SM-2-style review scheduler resurfaces words at growing intervals
 - **Quizzes** -- four question types (word-to-meaning, meaning-to-word, synonym, fill-in-the-blank)
@@ -79,6 +80,7 @@ go test ./... -v
 | `/stats` | View your progress (words learned, streak, quiz accuracy, mastered) |
 | `/level [beginner\|intermediate\|advanced]` | Set difficulty level |
 | `/interval [minutes]` | Set send frequency (30/60/120/180/240/360/480/720) |
+| `/tts [on\|off]` | Toggle pronunciation audio on or off |
 | `/pause` | Pause scheduled sends (on-demand still works) |
 | `/resume` | Resume scheduled sends |
 | `/reset` | Clear all word/drill history |
@@ -114,6 +116,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `TIMEZONE` | `Asia/Tehran` | IANA timezone for scheduling |
 | `QUIET_START` | `00:00` | Start of no-broadcast window (local time) |
 | `QUIET_END` | `09:00` | End of no-broadcast window (local time) |
+| `TTS_ENABLED` | `true` | Global kill-switch for pronunciation audio |
 | `POOL_TARGET` | `300` | Desired pooled items per kind for the default level |
 | `POOL_MIN` | `100` | Pool target for non-default levels |
 | `REFILL_INTERVAL` | `20s` | How often the filler checks the pool |
@@ -129,7 +132,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 ## Architecture
 
 ```
-Go application (single package main, 10 source files)
+Go application (single package main, 11 source files)
 +-- main.go           -- startup, schema, Telegram types, command router, Store
 +-- config.go         -- timezone, pool & scheduler tuning knobs
 +-- providers.go      -- Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
@@ -137,6 +140,7 @@ Go application (single package main, 10 source files)
 +-- pool.go           -- content_pool Store methods, serveContent, poolFiller
 +-- schedule.go       -- quiet hours, broadcast/daily-review/weekly-digest schedulers
 +-- prefs.go          -- user_prefs Store methods, level/interval/pause helpers
++-- tts.go            -- pronunciation TTS (Gemini + espeak-ng fallback), audio cache
 +-- srs.go            -- spaced-repetition SM-2-lite logic, review scheduler
 +-- quiz.go           -- quiz building (4 types), quiz_results, quiz scheduler
 +-- stats.go          -- /stats computation, admin metrics
@@ -156,7 +160,7 @@ Go application (single package main, 10 source files)
 
 ### Database
 
-SQLite via `modernc.org/sqlite` (pure Go, no CGO). Tables: `subscribers`, `sent_words`, `sent_vocab`, `changelog_delivery`, `content_pool`, `daily_review_delivery`, `user_prefs`, `review_schedule`, `quiz_results`, `weekly_digest_delivery`.
+SQLite via `modernc.org/sqlite` (pure Go, no CGO). Tables: `subscribers`, `sent_words`, `sent_vocab`, `sent_idioms`, `changelog_delivery`, `content_pool`, `daily_review_delivery`, `user_prefs`, `review_schedule`, `quiz_results`, `weekly_digest_delivery`, `audio_cache`.
 
 ### AI Providers
 
