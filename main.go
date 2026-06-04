@@ -145,6 +145,12 @@ var Changelogs = []ChangelogEntry{
 			"• 💡 <b>Grammar Tip of the Day</b> is here! You now get one focused daily grammar tip with clear correct/incorrect examples\n" +
 			"• 🛠️ New <b>/tip</b> command: get a tip anytime, or use <code>/tip off</code> and <code>/tip on</code> to control scheduled daily tips",
 	},
+	{
+		Version: "1.15.1",
+		Text: "📣 <b>What's New in v1.15.1</b>\n\n" +
+			"• 📋 <b>Command menu!</b> Tap <b>/</b> in the chat and you'll now see a list of all available commands — no need to memorise them\n" +
+			"• The menu updates automatically on every deploy, so new commands always appear right away",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
