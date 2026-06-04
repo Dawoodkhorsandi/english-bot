@@ -146,6 +146,9 @@ func TestStoreGetPrefsDefaults(t *testing.T) {
 	if !prefs.TTSEnabled {
 		t.Error("default TTS should be enabled")
 	}
+	if !prefs.TipsEnabled {
+		t.Error("default tips_enabled should be true")
+	}
 }
 
 func TestStoreSetAndGetLevel(t *testing.T) {
@@ -233,6 +236,28 @@ func TestStoreSetAndGetTTSEnabled(t *testing.T) {
 	}
 	if !store.GetTTSEnabled(chatID) {
 		t.Error("TTS should be enabled after SetTTSEnabled(true)")
+	}
+}
+
+func TestStoreSetAndGetTipsEnabled(t *testing.T) {
+	store := openTestStore(t)
+	chatID := int64(401)
+	store.AddSubscriber(chatID)
+
+	if !store.GetTipsEnabled(chatID) {
+		t.Error("tips should be enabled by default")
+	}
+	if err := store.SetTipsEnabled(chatID, false); err != nil {
+		t.Fatalf("SetTipsEnabled(false): %v", err)
+	}
+	if store.GetTipsEnabled(chatID) {
+		t.Error("tips should be disabled after SetTipsEnabled(false)")
+	}
+	if err := store.SetTipsEnabled(chatID, true); err != nil {
+		t.Fatalf("SetTipsEnabled(true): %v", err)
+	}
+	if !store.GetTipsEnabled(chatID) {
+		t.Error("tips should be enabled after SetTipsEnabled(true)")
 	}
 }
 
@@ -337,6 +362,9 @@ func TestSentTableFor(t *testing.T) {
 	}
 	if got := sentTableFor("drill"); got != "sent_words" {
 		t.Errorf("sentTableFor(drill) = %q, want sent_words", got)
+	}
+	if got := sentTableFor("tip"); got != "sent_tips" {
+		t.Errorf("sentTableFor(tip) = %q, want sent_tips", got)
 	}
 }
 

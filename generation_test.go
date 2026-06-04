@@ -369,6 +369,45 @@ To start a conversation in a relaxed way.`,
 }
 
 // ---------------------------------------------------------------------------
+// parseTipTopic
+// ---------------------------------------------------------------------------
+
+func TestParseTipTopic(t *testing.T) {
+	tip := `💡 <b>Grammar Tip of the Day</b>
+————————————————————
+📌 <b>Topic:</b> Using "used to" vs "would"
+
+<b>Rule:</b> Example`
+	if got := parseTipTopic(tip); got != `using "used to" vs "would"` {
+		t.Errorf("parseTipTopic() = %q, want %q", got, `using "used to" vs "would"`)
+	}
+
+	if got := parseTipTopic("no topic here"); got != "" {
+		t.Errorf("parseTipTopic(no-topic) = %q, want empty", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildTipPrompt
+// ---------------------------------------------------------------------------
+
+func TestBuildTipPrompt(t *testing.T) {
+	t.Run("no exclusions", func(t *testing.T) {
+		prompt := buildTipPrompt(nil)
+		if strings.Contains(prompt, "Avoid these already-pooled grammar topics") {
+			t.Error("should not contain exclusion clause when list is empty")
+		}
+	})
+
+	t.Run("with exclusions", func(t *testing.T) {
+		prompt := buildTipPrompt([]string{"used to vs would", "since vs for"})
+		if !strings.Contains(prompt, "used to vs would, since vs for") {
+			t.Error("should contain excluded topics")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
 // buildWordLookupPrompt
 // ---------------------------------------------------------------------------
 

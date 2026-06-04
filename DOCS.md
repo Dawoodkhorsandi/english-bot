@@ -12,6 +12,7 @@ A Telegram bot written in Go that sends subscribers AI-generated English practic
 
 - 🎯 a **grammar drill** — one verb across 21 forms (12 tenses, 4 conditionals, modals, passive, imperative, *used to*), delivered as five navigable pages
 - 📘 a **vocabulary word** — meaning, pronunciation, synonyms, opposites and example sentences
+- 💡 a **daily grammar tip** — one focused rule/usage nuance with correct/incorrect examples
 
 The bot uses Google Gemini 2.5 Flash to generate unique, personalized content and tracks which verbs and words have already been sent to each user, ensuring they always receive fresh material. When a new version is deployed, existing subscribers automatically receive a changelog message on their next broadcast or `/start`.
 
@@ -26,23 +27,25 @@ Go application (multi-file, single package main)
 ├── providers.go      — Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
 ├── generation.go     — prompt builders, generateContent, generateWordFor, term/meaning parsers
 ├── pool.go           — content_pool Store methods, serveContent, poolFiller goroutine
-├── schedule.go       — quiet hours, broadcast scheduler, daily review scheduler, weekly digest scheduler
-├── prefs.go          — user_prefs Store methods, level/interval/pause helpers
+├── schedule.go       — quiet hours, broadcast scheduler, daily review scheduler, daily tip scheduler, weekly digest scheduler
+├── prefs.go          — user_prefs Store methods, level/interval/pause/tip helpers
 ├── tts.go            — pronunciation TTS generation (Gemini + espeak-ng fallback) and sendVoice helper
 ├── srs.go            — spaced-repetition SM-2-lite logic, review_schedule Store methods, review scheduler
 ├── quiz.go           — quiz building, quiz_results Store methods, quiz scheduler
 └── stats.go          — /stats computation (streaks, activity days, formatStats), admin metrics (SubscriberStats, TotalQuizStats, TotalMasteredCount)
 ```
 
-The application runs eight concurrent goroutines:
+The application runs ten concurrent goroutines:
 1. **Pool filler** (`poolFiller`) — tops up the pre-generated content pool in the background
 2. **Broadcast scheduler** (`runBroadcastScheduler`) — fires every half hour, per-user interval-aware delivery sweep
 3. **Daily review scheduler** (`runDailyReviewScheduler`) — sends a bedtime word recap at local midnight
 4. **Spaced-repetition scheduler** (`runReviewScheduler`) — resurfaces due words for memory-check review
 5. **Quiz scheduler** (`runQuizScheduler`) — periodically sends a multiple-choice quiz
 6. **Weekly digest scheduler** (`runWeeklyDigestScheduler`) — sends a weekly recap (default Sunday 20:00)
-7. **Telegram poller** (`pollTelegramUpdates`) — long-polls Telegram for incoming messages and callback queries
-8. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
+7. **Idiom scheduler** (`runIdiomScheduler`) — sends one daily idiom (default 09:00 local)
+8. **Daily tip scheduler** (`runDailyTipScheduler`) — sends one daily grammar tip (default 10:00 local)
+9. **Telegram poller** (`pollTelegramUpdates`) — long-polls Telegram for incoming messages and callback queries
+10. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
 
 ---
 
@@ -59,6 +62,7 @@ All configuration is read from environment variables at startup. There are no co
 | `QUIET_START` | `00:00` | Start of the quiet window (no scheduled sends) |
 | `QUIET_END` | `09:00` | End of the quiet window |
 | `TTS_ENABLED` | `true` | Global kill-switch for pronunciation audio (`sendVoice`) |
+| `TIP_TIME` | `10:00` | Local time to send the daily grammar tip |
 | `POOL_TARGET` | `300` | Target number of pre-generated items per (kind, level) in `content_pool` |
 | `POOL_MIN` | `100` | Low-water mark that triggers refill |
 | `REFILL_INTERVAL` | `20s` | How often the pool filler goroutine wakes |
@@ -167,6 +171,17 @@ Primary key `(chat_id, word)` — first insert sets `sent_at`; every subsequent 
 bumps `last_sent_at` via `ON CONFLICT … DO UPDATE` (v1.13.0). Index
 `idx_sent_idioms_chat` on `chat_id`. The per-user exclusion list for idioms (Change Q).
 
+#### `sent_tips` (v1.15.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `word` | `TEXT` | Lowercased grammar-tip topic already sent to this user |
+| `sent_at` | `DATETIME` | When the tip topic was first sent |
+| `last_sent_at` | `DATETIME` | When the tip was most recently served; drives least-recently-served rotation |
+
+Primary key is `(chat_id, word)` — each user sees each tip topic at most once.
+Index: `idx_sent_tips_chat` on `chat_id`.
+
 #### `changelog_delivery`
 | Column | Type | Description |
 |---|---|---|
@@ -220,6 +235,15 @@ once per user per day.
 Primary key is `(chat_id, idiom_date)` — the idiom of the day is sent at most once
 per user per day (Change Q).
 
+#### `daily_tip_delivery` (v1.15.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `tip_date` | `TEXT` | Local `YYYY-MM-DD` of the sent tip sweep |
+| `sent_at` | `DATETIME` | When the tip was delivered |
+
+Primary key is `(chat_id, tip_date)` — one scheduled tip per user per day.
+
 #### `user_prefs` (v1.4.0)
 | Column | Type | Description |
 |---|---|---|
@@ -228,6 +252,7 @@ per user per day (Change Q).
 | `paused` | `INTEGER` | `1` = scheduled sends paused, default `0` (Change H) |
 | `interval_minutes` | `INTEGER` | Minutes between scheduled sends, default `30` (Change L) |
 | `tts_enabled` | `INTEGER` | `1` = pronunciation audio enabled, default `1` (Change I) |
+| `tips_enabled` | `INTEGER` | `1` = daily scheduled grammar tips enabled, default `1` (v1.15.0) |
 | `updated_at` | `DATETIME` | Last change time |
 
 Rows are created lazily via upsert (`INSERT … ON CONFLICT`) the first time a user sets
@@ -400,10 +425,11 @@ All messages use `parse_mode: HTML`.
 | Command | Behaviour |
 |---|---|
 | `/start` | Subscribes user (idempotent). If new: baselines all changelogs as seen, notifies maintainer, sends welcome. If returning: delivers any unseen changelogs first. Always sends welcome message. |
-| `/help` | Sends usage instructions covering grammar drills (21 paged forms), vocabulary words, level/interval, TTS toggle, and pause/resume. |
+| `/help` | Sends usage instructions covering grammar drills, vocabulary words, grammar tips, level/interval, TTS toggle, and pause/resume. |
 | `/drill` | Sends a "Generating…" ack, calls `serveContent(kind=drill, level, allowGenerate=true)` (pool-first, inline-gen on miss), returns the result. |
 | `/word` | Sends a "Finding a fresh word…" ack, calls `serveContent(kind=word, level, allowGenerate=true)`, returns the vocabulary card, then best-effort sends a pronunciation voice note replying to the card. |
 | `/idiom` | Sends a "Finding an idiom…" ack, calls `serveContent(kind=idiom, level, allowGenerate=true)`, returns the idiom card, then best-effort sends a pronunciation voice note replying to it. (v1.12.0) |
+| `/tip [on\|off]` | No arg: sends an on-demand grammar tip (`serveContent(kind=tip, level=intermediate, allowGenerate=true)`). `on`/`off`: toggles scheduled daily tips via `user_prefs.tips_enabled`. (v1.15.0) |
 | `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query` and are handled by `handleCallback`. (v1.4.0) |
 | `/stats` | Sends a read-only progress summary: drills practised, words learned, mastered, active days, current & longest daily streak, quiz accuracy, level (`UserStats` / `formatStats`). (v1.5.0; mastered v1.8.0; quiz accuracy v1.9.0) |
 | `/quiz` | Sends one multiple-choice quiz on a learned word (biased to due reviews); the tapped answer is recorded and feeds spaced repetition. (v1.9.0) |
@@ -415,7 +441,7 @@ All messages use `parse_mode: HTML`.
 | `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
-| *(unknown command)* | Replies with a prompt to use /drill, /word, /quiz, /tts, /stats or /help — or to send any word to look it up. |
+| *(unknown command)* | Replies with a prompt to use /drill, /word, /tip, /quiz, /tts, /stats or /help — or to send any word to look it up. |
 | *(empty text)* | Silently ignored. |
 
 ---

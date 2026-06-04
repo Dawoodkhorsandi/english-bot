@@ -139,6 +139,12 @@ var Changelogs = []ChangelogEntry{
 			"• 🔊 <b>Pronunciation audio is here!</b> After each vocabulary card and idiom, I now send a short voice pronunciation clip to reinforce speaking out loud\n" +
 			"• ⚙️ <b>New /tts command:</b> use <code>/tts on</code> or <code>/tts off</code> to control pronunciation audio at any time",
 	},
+	{
+		Version: "1.15.0",
+		Text: "📣 <b>What's New in v1.15.0</b>\n\n" +
+			"• 💡 <b>Grammar Tip of the Day</b> is here! You now get one focused daily grammar tip with clear correct/incorrect examples\n" +
+			"• 🛠️ New <b>/tip</b> command: get a tip anytime, or use <code>/tip off</code> and <code>/tip on</code> to control scheduled daily tips",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -218,6 +224,7 @@ func main() {
 	//   4. spaced-repetition scheduler resurfaces due words for review (Change D).
 	//   5. quiz scheduler periodically tests learned words (Change E).
 	//   6. weekly digest scheduler sends a recap every DIGEST_DAY at DIGEST_TIME (Change K).
+	//   7. daily tip scheduler sends one grammar tip at TIP_TIME.
 	go poolFiller(ctx, chain, store)
 	go runBroadcastScheduler(ctx, chain, store, notifier)
 	go runDailyReviewScheduler(ctx, store, notifier)
@@ -225,6 +232,7 @@ func main() {
 	go runQuizScheduler(ctx, store, notifier)
 	go runWeeklyDigestScheduler(ctx, store, notifier)
 	go runIdiomScheduler(ctx, chain, store, notifier)
+	go runDailyTipScheduler(ctx, chain, store, notifier)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store, notifier)
@@ -370,6 +378,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
 			"/idiom — Get an idiom of the day\n" +
+			"/tip — Get a grammar tip right now\n" +
 			"/quiz — Test yourself on a word you've learned\n" +
 			"/level — Choose your difficulty (beginner/intermediate/advanced)\n" +
 			"/interval — Choose how often you get practice\n" +
@@ -395,6 +404,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/drill — generate a grammar drill on demand\n" +
 			"/word — generate a vocabulary word on demand\n" +
 			"/idiom — get a common idiom with meaning and examples\n" +
+			"/tip — grammar tip now; /tip on or /tip off for daily tips\n" +
 			"/quiz — test yourself on a word you've already learned\n" +
 			"/level — set difficulty: beginner, intermediate or advanced\n" +
 			"/interval — set how often scheduled practice arrives\n" +
@@ -450,6 +460,9 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		if err := sendIdiomCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
 			log.Printf("❌ [IDIOM_SEND_ERR] Idiom send failed for ChatID %d: %v", chatID, err)
 		}
+
+	case "/tip":
+		handleTip(ctx, chain, store, notifier, chatID, args)
 
 	case "/level":
 		handleLevel(store, notifier, chatID, args)
@@ -546,7 +559,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 	default:
 		if strings.HasPrefix(command, "/") {
 			log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
-			_ = notifier.Send(chatID, "🤖 I don't know that command. Try /drill, /word, /quiz, /tts, /stats or /help — or just send me any word to look it up!")
+			_ = notifier.Send(chatID, "🤖 I don't know that command. Try /drill, /word, /tip, /quiz, /tts, /stats or /help — or just send me any word to look it up!")
 			return
 		}
 		// Plain text (no leading slash) is treated as a word lookup (Change M).
@@ -832,6 +845,47 @@ func handleTTS(store *Store, notifier Notifier, chatID int64, args []string) {
 		msg += "\n\nℹ️ It is currently disabled globally by the bot administrator."
 	}
 	_ = notifier.Send(chatID, msg)
+}
+
+// handleTip handles /tip commands:
+//
+//	/tip       => on-demand tip
+//	/tip on    => enable scheduled daily tips
+//	/tip off   => disable scheduled daily tips
+func handleTip(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, chatID int64, args []string) {
+	if len(args) > 0 {
+		switch strings.ToLower(strings.TrimSpace(args[0])) {
+		case "on":
+			if err := store.SetTipsEnabled(chatID, true); err != nil {
+				log.Printf("❌ [TIP] Could not enable tips for ChatID %d: %v", chatID, err)
+				_ = notifier.Send(chatID, "❌ Sorry, I couldn't enable daily tips right now. Please try again.")
+				return
+			}
+			_ = notifier.Send(chatID, "✅ Daily grammar tips are <b>ON</b>. You'll receive one each day.")
+			return
+		case "off":
+			if err := store.SetTipsEnabled(chatID, false); err != nil {
+				log.Printf("❌ [TIP] Could not disable tips for ChatID %d: %v", chatID, err)
+				_ = notifier.Send(chatID, "❌ Sorry, I couldn't disable daily tips right now. Please try again.")
+				return
+			}
+			_ = notifier.Send(chatID, "🛑 Daily grammar tips are <b>OFF</b>. Use <code>/tip on</code> anytime to re-enable.")
+			return
+		default:
+			_ = notifier.Send(chatID, "Usage: <code>/tip</code>, <code>/tip on</code>, or <code>/tip off</code>")
+			return
+		}
+	}
+
+	log.Printf("💡 [TIP] /tip requested by ChatID %d.", chatID)
+	_ = notifier.Send(chatID, "🔄 <b>Fetching your grammar tip...</b>")
+	tip, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, true)
+	if err != nil {
+		log.Printf("❌ [TIP] On-demand tip failed for chat %d: %v", chatID, err)
+		_ = notifier.Send(chatID, "❌ Sorry, I couldn't fetch a tip right now. Please try again.")
+		return
+	}
+	_ = notifier.Send(chatID, tip)
 }
 
 // intervalKeyboard builds an inline keyboard (rows of two) of the allowed send
@@ -1269,6 +1323,14 @@ func openStore(path string) (*Store, error) {
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_sent_idioms_chat ON sent_idioms(chat_id);
+	CREATE TABLE IF NOT EXISTS sent_tips (
+		chat_id INTEGER NOT NULL,
+		word    TEXT    NOT NULL,
+		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, word)
+	);
+	CREATE INDEX IF NOT EXISTS idx_sent_tips_chat ON sent_tips(chat_id);
 	CREATE TABLE IF NOT EXISTS changelog_delivery (
 		chat_id INTEGER NOT NULL,
 		version TEXT    NOT NULL,
@@ -1297,12 +1359,19 @@ func openStore(path string) (*Store, error) {
 		sent_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, idiom_date)
 	);
+	CREATE TABLE IF NOT EXISTS daily_tip_delivery (
+		chat_id  INTEGER NOT NULL,
+		tip_date TEXT    NOT NULL,
+		sent_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, tip_date)
+	);
 	CREATE TABLE IF NOT EXISTS user_prefs (
 		chat_id          INTEGER PRIMARY KEY,
 		level            TEXT    NOT NULL DEFAULT 'intermediate',
 		paused           INTEGER NOT NULL DEFAULT 0,
 		interval_minutes INTEGER NOT NULL DEFAULT 30,
 		tts_enabled      INTEGER NOT NULL DEFAULT 1,
+		tips_enabled     INTEGER NOT NULL DEFAULT 1,
 		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS review_schedule (
@@ -1431,6 +1500,15 @@ func (s *Store) migrate() error {
 		log.Println("💾 [DB_MIGRATE] Adding user_prefs.tts_enabled column...")
 		if _, err := s.db.Exec(
 			"ALTER TABLE user_prefs ADD COLUMN tts_enabled INTEGER NOT NULL DEFAULT 1",
+		); err != nil {
+			return err
+		}
+	}
+	// user_prefs.tips_enabled was added in v1.15.0.
+	if !s.columnExists("user_prefs", "tips_enabled") {
+		log.Println("💾 [DB_MIGRATE] Adding user_prefs.tips_enabled column...")
+		if _, err := s.db.Exec(
+			"ALTER TABLE user_prefs ADD COLUMN tips_enabled INTEGER NOT NULL DEFAULT 1",
 		); err != nil {
 			return err
 		}
@@ -1684,6 +1762,16 @@ func (s *Store) RecordSentIdiom(chatID int64, idiom string) error {
 		`INSERT INTO sent_idioms (chat_id, word, last_sent_at) VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
 		 ON CONFLICT(chat_id, word) DO UPDATE SET last_sent_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
 		chatID, strings.ToLower(strings.TrimSpace(idiom)),
+	)
+	return err
+}
+
+// RecordSentTip stores a grammar tip topic as having been sent to a chat (idempotent).
+func (s *Store) RecordSentTip(chatID int64, topic string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO sent_tips (chat_id, word, last_sent_at) VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
+		 ON CONFLICT(chat_id, word) DO UPDATE SET last_sent_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
+		chatID, strings.ToLower(strings.TrimSpace(topic)),
 	)
 	return err
 }

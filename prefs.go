@@ -31,10 +31,11 @@ var allIntervals = []int{30, 60, 120, 180, 240, 360, 480, 720}
 
 // UserPrefs holds the per-user settings stored in the user_prefs table.
 type UserPrefs struct {
-	Level      string
-	Paused     bool
-	Interval   int  // minutes between scheduled sends
-	TTSEnabled bool // whether pronunciation voice messages are enabled
+	Level       string
+	Paused      bool
+	Interval    int  // minutes between scheduled sends
+	TTSEnabled  bool // whether pronunciation voice messages are enabled
+	TipsEnabled bool // scheduled daily grammar tips
 }
 
 // normalizeLevel lowercases/trims a level string and validates it, falling back
@@ -92,14 +93,15 @@ func intervalLabel(minutes int) string {
 
 // GetPrefs returns the user's preferences, applying defaults when no row exists.
 func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
-	prefs := UserPrefs{Level: defaultLevel, Paused: false, Interval: defaultInterval, TTSEnabled: true}
+	prefs := UserPrefs{Level: defaultLevel, Paused: false, Interval: defaultInterval, TTSEnabled: true, TipsEnabled: true}
 	var level string
 	var paused int
 	var interval int
 	var ttsEnabled int
+	var tipsEnabled int
 	err := s.db.QueryRow(
-		"SELECT level, paused, interval_minutes, tts_enabled FROM user_prefs WHERE chat_id = ?", chatID,
-	).Scan(&level, &paused, &interval, &ttsEnabled)
+		"SELECT level, paused, interval_minutes, tts_enabled, tips_enabled FROM user_prefs WHERE chat_id = ?", chatID,
+	).Scan(&level, &paused, &interval, &ttsEnabled, &tipsEnabled)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return prefs, nil
@@ -114,6 +116,7 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 		prefs.Interval = iv
 	}
 	prefs.TTSEnabled = ttsEnabled != 0
+	prefs.TipsEnabled = tipsEnabled != 0
 	return prefs, nil
 }
 
@@ -203,6 +206,30 @@ func (s *Store) SetTTSEnabled(chatID int64, enabled bool) error {
 	_, err := s.db.Exec(`
 		INSERT INTO user_prefs (chat_id, tts_enabled) VALUES (?, ?)
 		ON CONFLICT(chat_id) DO UPDATE SET tts_enabled = excluded.tts_enabled, updated_at = CURRENT_TIMESTAMP`,
+		chatID, v,
+	)
+	return err
+}
+
+// GetTipsEnabled reports whether scheduled daily tips are enabled for a user.
+func (s *Store) GetTipsEnabled(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load tips_enabled for chat %d: %v (using default=true)", chatID, err)
+		return true
+	}
+	return prefs.TipsEnabled
+}
+
+// SetTipsEnabled upserts the user's scheduled-tip flag.
+func (s *Store) SetTipsEnabled(chatID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, tips_enabled) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET tips_enabled = excluded.tips_enabled, updated_at = CURRENT_TIMESTAMP`,
 		chatID, v,
 	)
 	return err
