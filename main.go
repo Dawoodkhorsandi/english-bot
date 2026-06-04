@@ -145,6 +145,12 @@ var Changelogs = []ChangelogEntry{
 			"• 💡 <b>Grammar Tip of the Day</b> is here! You now get one focused daily grammar tip with clear correct/incorrect examples\n" +
 			"• 🛠️ New <b>/tip</b> command: get a tip anytime, or use <code>/tip off</code> and <code>/tip on</code> to control scheduled daily tips",
 	},
+	{
+		Version: "1.15.1",
+		Text: "📣 <b>What's New in v1.15.1</b>\n\n" +
+			"• 📋 <b>Command menu!</b> Tap <b>/</b> in the chat and you'll now see a list of all available commands — no need to memorise them\n" +
+			"• The menu updates automatically on every deploy, so new commands always appear right away",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -213,6 +219,9 @@ func main() {
 	defer store.Close()
 
 	notifier := &telegramNotifier{}
+
+	// Register bot commands with Telegram so users see a command menu.
+	registerBotCommands()
 
 	// On deploy: immediately broadcast unseen changelogs to all subscribers.
 	broadcastChangelogsOnStartup(store, notifier)
@@ -1229,6 +1238,35 @@ func telegramPost(method string, payload map[string]interface{}) error {
 		return fmt.Errorf("telegram %s returned status %d: %s", method, resp.StatusCode, string(respBody))
 	}
 	return nil
+}
+
+// registerBotCommands calls setMyCommands so Telegram shows a command menu when
+// users tap "/" in the chat. Best-effort; failure is non-fatal.
+//
+// NOTE: When adding a new user-facing command, add it to the slice below so
+// users can discover it through the Telegram command menu.
+func registerBotCommands() {
+	commands := []map[string]string{
+		{"command": "drill", "description": "Get a grammar drill right now"},
+		{"command": "word", "description": "Get a vocabulary word right now"},
+		{"command": "idiom", "description": "Get an idiom of the day"},
+		{"command": "tip", "description": "Get a grammar tip (or /tip on|off)"},
+		{"command": "quiz", "description": "Test yourself on a learned word"},
+		{"command": "level", "description": "Set difficulty (beginner/intermediate/advanced)"},
+		{"command": "interval", "description": "Set how often practice arrives"},
+		{"command": "tts", "description": "Toggle pronunciation audio on/off"},
+		{"command": "stats", "description": "See your progress and streak"},
+		{"command": "pause", "description": "Pause scheduled sends"},
+		{"command": "resume", "description": "Resume scheduled sends"},
+		{"command": "reset", "description": "Clear your practiced history"},
+		{"command": "help", "description": "How it works"},
+	}
+	payload := map[string]interface{}{"commands": commands}
+	if err := telegramPost("setMyCommands", payload); err != nil {
+		log.Printf("⚠️  [INIT] Could not register bot commands: %v", err)
+	} else {
+		log.Printf("✅ [INIT] Registered %d bot commands with Telegram.", len(commands))
+	}
 }
 
 func (n *telegramNotifier) SendKeyboard(chatID int64, text string, keyboard [][]inlineButton) error {
