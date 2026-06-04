@@ -151,6 +151,13 @@ var Changelogs = []ChangelogEntry{
 			"• 📋 <b>Command menu!</b> Tap <b>/</b> in the chat and you'll now see a list of all available commands — no need to memorise them\n" +
 			"• The menu updates automatically on every deploy, so new commands always appear right away",
 	},
+	{
+		Version: "1.16.0",
+		Text: "📣 <b>What's New in v1.16.0</b>\n\n" +
+			"• 🎚️ <b>New difficulty level: Upper-Intermediate!</b> Bridges the gap between Intermediate (B1–B2) and Advanced (C1–C2)\n" +
+			"• Targets CEFR B2–C1 — academic, professional, and media vocabulary with natural sentence complexity\n" +
+			"• Use /level to switch to the new level",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -389,7 +396,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/idiom — Get an idiom of the day\n" +
 			"/tip — Get a grammar tip right now\n" +
 			"/quiz — Test yourself on a word you've learned\n" +
-			"/level — Choose your difficulty (beginner/intermediate/advanced)\n" +
+			"/level — Choose your difficulty (beginner/intermediate/upper-intermediate/advanced)\n" +
 			"/interval — Choose how often you get practice\n" +
 			"/tts — Turn pronunciation audio on/off\n" +
 			"/stats — See your progress and streak\n" +
@@ -415,7 +422,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/idiom — get a common idiom with meaning and examples\n" +
 			"/tip — grammar tip now; /tip on or /tip off for daily tips\n" +
 			"/quiz — test yourself on a word you've already learned\n" +
-			"/level — set difficulty: beginner, intermediate or advanced\n" +
+			"/level — set difficulty: beginner, intermediate, upper-intermediate or advanced\n" +
 			"/interval — set how often scheduled practice arrives\n" +
 			"/tts — turn pronunciation audio on or off\n" +
 			"/stats — see your progress, streak and totals\n" +
@@ -584,7 +591,7 @@ func handleLevel(store *Store, notifier Notifier, chatID int64, args []string) {
 	if len(args) > 0 {
 		level, ok := normalizeLevel(args[0])
 		if !ok {
-			_ = notifier.Send(chatID, "🤔 I don't know that level. Choose <b>beginner</b>, <b>intermediate</b> or <b>advanced</b>.")
+			_ = notifier.Send(chatID, "🤔 I don't know that level. Choose <b>beginner</b>, <b>intermediate</b>, <b>upper-intermediate</b> or <b>advanced</b>.")
 			return
 		}
 		if err := store.SetLevel(chatID, level); err != nil {
@@ -760,18 +767,23 @@ func handleHealth(store *Store, chain *ProviderChain, notifier Notifier, chatID 
 	_ = notifier.Send(chatID, b.String())
 }
 
-// levelKeyboard builds a one-row inline keyboard of the three levels, marking the
+// levelKeyboard builds a two-row inline keyboard of the four levels, marking the
 // current one with a check.
 func levelKeyboard(current string) [][]inlineButton {
-	var row []inlineButton
-	for _, l := range allLevels {
+	var row1, row2 []inlineButton
+	for i, l := range allLevels {
 		label := levelLabel(l)
 		if l == current {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: "level:" + l})
+		btn := inlineButton{Text: label, CallbackData: "level:" + l}
+		if i < 2 {
+			row1 = append(row1, btn)
+		} else {
+			row2 = append(row2, btn)
+		}
 	}
-	return [][]inlineButton{row}
+	return [][]inlineButton{row1, row2}
 }
 
 // handleInterval handles the /interval command. With a valid numeric argument it
@@ -1252,7 +1264,7 @@ func registerBotCommands() {
 		{"command": "idiom", "description": "Get an idiom of the day"},
 		{"command": "tip", "description": "Get a grammar tip (or /tip on|off)"},
 		{"command": "quiz", "description": "Test yourself on a learned word"},
-		{"command": "level", "description": "Set difficulty (beginner/intermediate/advanced)"},
+		{"command": "level", "description": "Set difficulty (beginner/intermediate/upper-intermediate/advanced)"},
 		{"command": "interval", "description": "Set how often practice arrives"},
 		{"command": "tts", "description": "Toggle pronunciation audio on/off"},
 		{"command": "stats", "description": "See your progress and streak"},

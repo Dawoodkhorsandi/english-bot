@@ -199,7 +199,7 @@ Primary key is `(chat_id, version)` — each version is delivered at most once p
 | `term` | `TEXT` | Lowercased verb/word the item teaches |
 | `meaning` | `TEXT` | One-line meaning (words only; empty for drills) |
 | `text` | `TEXT` | Ready-to-send HTML message |
-| `level` | `TEXT` | Difficulty: `beginner` / `intermediate` / `advanced` (added v1.4.0, default `intermediate`) |
+| `level` | `TEXT` | Difficulty: `beginner` / `intermediate` / `upper-intermediate` / `advanced` (added v1.4.0, upper-intermediate v1.16.0, default `intermediate`) |
 | `created_at` | `DATETIME` | When the item was generated |
 
 Unique constraint on `(kind, level, term)` (v1.13.0; previously `(kind, term)`) — the
@@ -538,7 +538,7 @@ Ordered so page 1 leads with the forms learners use most (v1.12.0):
 
 **Retry policy:** 2 attempts per provider with exponential backoff (2 s → 4 s); rate-limit (429) causes immediate failover. Respects context cancellation between retries.
 
-**Difficulty target:** determined by the user's level (beginner / intermediate / advanced).
+**Difficulty target:** determined by the user's level (beginner / intermediate / upper-intermediate / advanced).
 
 **Output format:** Telegram HTML (`parse_mode: HTML`, only `<b>` and `<i>` tags). The card structure is:
 
@@ -851,7 +851,7 @@ poolFiller(ctx, chain, store):
 | `term` | `TEXT` | The verb/word, lowercased |
 | `text` | `TEXT` | Full Telegram-HTML message |
 | `meaning` | `TEXT` | One-line meaning, parsed from the card's Meaning line (used by the daily review; empty for drills) |
-| `level` | `TEXT` | Difficulty: `beginner` / `intermediate` / `advanced` (default `intermediate`) |
+| `level` | `TEXT` | Difficulty: `beginner` / `intermediate` / `upper-intermediate` / `advanced` (default `intermediate`) |
 | `created_at` | `DATETIME` | Generation time |
 
 `UNIQUE(kind, level, term)` keeps the pool free of duplicates per kind and level;
@@ -1170,10 +1170,10 @@ Index `idx_quiz_chat` on `chat_id`. Append-only history (no uniqueness) feeding
 
 Lets users tune content difficulty instead of the hard-coded "intermediate".
 
-- Levels: `beginner`, `intermediate`, `advanced`.
+- Levels: `beginner`, `intermediate`, `upper-intermediate` (v1.16.0), `advanced`.
 - Stored on the `user_prefs` table (see below), defaulting to `intermediate`.
 - The chosen level is injected into the drill/word prompt via `levelInstruction`
-  (`generation.go`) as a CEFR-band directive (A1–A2 / B1–B2 / C1–C2).
+  (`generation.go`) as a CEFR-band directive (A1–A2 / B1–B2 / B2–C1 / C1–C2).
 - **Pool interaction (as implemented):** `content_pool` gained a `level` column.
   The `UNIQUE(kind, level, term)` constraint is per-level (v1.13.0; previously global),
   so the same term can be pooled at different difficulty levels. `PoolTerms` de-dupes
@@ -1191,7 +1191,7 @@ Lets users tune content difficulty instead of the hard-coded "intermediate".
 | Command | Behaviour |
 |---|---|
 | `/level` | Show current level + inline buttons to change it. |
-| `/level <beginner\|intermediate\|advanced>` | Set the level directly by argument. |
+| `/level <beginner\|intermediate\|upper-intermediate\|advanced>` | Set the level directly by argument. |
 
 ---
 

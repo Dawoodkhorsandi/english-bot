@@ -492,6 +492,22 @@ func TestHandleLevelWithArg(t *testing.T) {
 	}
 }
 
+func TestHandleLevelUpperIntermediate(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+	handleLevel(store, mock, 100, []string{"upper-intermediate"})
+
+	got := store.GetLevel(100)
+	if got != "upper-intermediate" {
+		t.Errorf("level = %q, want upper-intermediate", got)
+	}
+	if !strings.Contains(strings.ToLower(mock.lastSentText()), "upper-intermediate") {
+		t.Errorf("expected confirmation with 'upper-intermediate', got %q", mock.lastSentText())
+	}
+}
+
 func TestHandleLevelWithInvalidArg(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}

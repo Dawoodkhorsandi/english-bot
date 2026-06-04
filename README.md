@@ -16,7 +16,7 @@ A Telegram bot that sends subscribers AI-generated English practice every 30 min
 - **Spaced Repetition** -- SM-2-style review scheduler resurfaces words at growing intervals
 - **Quizzes** -- four question types (word-to-meaning, meaning-to-word, synonym, fill-in-the-blank)
 - **Weekly Digest** -- Sunday evening recap of the week's words, quiz accuracy, and streaks
-- **Per-User Settings** -- difficulty level (beginner/intermediate/advanced), send interval, pause/resume
+- **Per-User Settings** -- difficulty level (beginner/intermediate/upper-intermediate/advanced), send interval, pause/resume
 - **Multi-Provider AI** -- Gemini, Groq, Cerebras, OpenRouter, GitHub Models, Cloudflare, Mistral, Gemini2, SambaNova, Cohere with automatic fallback
 - **Pre-Generated Pool** -- background worker keeps a content pool topped up; broadcasts never block on AI calls
 - **Quiet Hours** -- no broadcasts during configurable overnight window (default 00:00--09:00 Tehran)
@@ -78,7 +78,7 @@ go test ./... -v
 | `/idiom` | Get an idiom with meaning and examples |
 | `/quiz` | Take a multiple-choice quiz |
 | `/stats` | View your progress (words learned, streak, quiz accuracy, mastered) |
-| `/level [beginner\|intermediate\|advanced]` | Set difficulty level |
+| `/level [beginner\|intermediate\|upper-intermediate\|advanced]` | Set difficulty level |
 | `/interval [minutes]` | Set send frequency (30/60/120/180/240/360/480/720) |
 | `/tts [on\|off]` | Toggle pronunciation audio on or off |
 | `/pause` | Pause scheduled sends (on-demand still works) |
