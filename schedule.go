@@ -385,7 +385,7 @@ func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, not
 			log.Printf("⚠️  [IDIOM] No idiom available for chat %d: %v", chatID, err)
 			continue
 		}
-		if err := notifier.Send(chatID, text); err != nil {
+		if err := sendIdiomCardWithTTS(ctx, store, notifier, chatID, text); err != nil {
 			log.Printf("❌ [IDIOM] Send to chat %d failed: %v", chatID, err)
 			continue
 		}

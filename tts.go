@@ -28,23 +28,53 @@ func sendWordCardWithTTS(ctx context.Context, store *Store, notifier Notifier, c
 	if err != nil {
 		return err
 	}
-	maybeSendWordTTS(ctx, store, notifier, chatID, card, msgID)
+	maybeSendTTS(ctx, store, notifier, chatID, card, msgID)
 	return nil
 }
 
-// maybeSendWordTTS tries Gemini TTS first, then falls back to espeak-ng.
+// sendIdiomCardWithTTS sends an idiom card and then (best-effort) a pronunciation
+// voice note as a reply to that card.
+func sendIdiomCardWithTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string) error {
+	msgID, err := notifier.SendWithMessageID(chatID, card)
+	if err != nil {
+		return err
+	}
+	maybeSendTTS(ctx, store, notifier, chatID, card, msgID)
+	return nil
+}
+
+// extractTTSTerm tries to extract a speakable term from a card. It checks for
+// a vocabulary word first, then falls back to an idiom phrase.
+func extractTTSTerm(card string) string {
+	if w := strings.TrimSpace(parseWord(card)); w != "" {
+		return w
+	}
+	return strings.TrimSpace(parseIdiom(card))
+}
+
+// maybeSendTTS tries Gemini TTS first, then falls back to espeak-ng.
 // Any error is logged and swallowed so card delivery is never blocked.
-func maybeSendWordTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string, replyToMessageID int64) {
+// Generated audio is cached by word in audio_cache so subsequent sends for the
+// same word reuse the Telegram file_id (zero-cost re-send).
+func maybeSendTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string, replyToMessageID int64) {
 	if !ttsEnabled || isQuietHours(time.Now()) || store.IsPaused(chatID) || !store.GetTTSEnabled(chatID) {
 		return
 	}
 
-	word := strings.TrimSpace(parseWord(card))
+	word := extractTTSTerm(card)
 	if word == "" {
 		return
 	}
 	word = sanitizeTTSText(word)
 	if word == "" {
+		return
+	}
+
+	// Check audio_cache first: reuse a previously uploaded Telegram file_id.
+	if fileID := store.CachedAudioFileID(word); fileID != "" {
+		if err := notifier.SendVoiceByFileID(chatID, fileID, replyToMessageID); err != nil {
+			log.Printf("⚠️  [TTS] Cached sendVoice failed for %q (chat %d): %v", word, chatID, err)
+		}
 		return
 	}
 
@@ -59,8 +89,16 @@ func maybeSendWordTTS(ctx context.Context, store *Store, notifier Notifier, chat
 	}
 
 	filename := "word." + ext
-	if err := notifier.SendVoice(chatID, audio, filename, replyToMessageID); err != nil {
+	fileID, err := notifier.SendVoice(chatID, audio, filename, replyToMessageID)
+	if err != nil {
 		log.Printf("⚠️  [TTS] sendVoice failed for %q (chat %d): %v", word, chatID, err)
+		return
+	}
+	// Cache the Telegram file_id so future sends of the same word skip generation.
+	if fileID != "" {
+		if err := store.CacheAudioFileID(word, fileID); err != nil {
+			log.Printf("⚠️  [TTS] Could not cache file_id for %q: %v", word, err)
+		}
 	}
 }
 

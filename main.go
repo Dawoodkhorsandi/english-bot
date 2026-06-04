@@ -447,7 +447,9 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Idiom delivered to ChatID %d.", chatID)
-		_ = notifier.Send(chatID, card)
+		if err := sendIdiomCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+			log.Printf("❌ [IDIOM_SEND_ERR] Idiom send failed for ChatID %d: %v", chatID, err)
+		}
 
 	case "/level":
 		handleLevel(store, notifier, chatID, args)
@@ -1040,7 +1042,8 @@ func handleDrillCallback(store *Store, notifier Notifier, cb *TelegramCallbackQu
 type Notifier interface {
 	Send(chatID int64, text string) error
 	SendWithMessageID(chatID int64, text string) (int64, error)
-	SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) error
+	SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (fileID string, err error)
+	SendVoiceByFileID(chatID int64, fileID string, replyToMessageID int64) error
 	SendKeyboard(chatID int64, text string, keyboard [][]inlineButton) error
 	EditMessage(chatID, messageID int64, text string, keyboard [][]inlineButton) error
 	AnswerCallback(callbackID, text string) error
@@ -1090,47 +1093,70 @@ func (n *telegramNotifier) SendWithMessageID(chatID int64, text string) (int64, 
 	return parsed.Result.MessageID, nil
 }
 
-func (n *telegramNotifier) SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) error {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendVoice", TelegramBotToken)
+func (n *telegramNotifier) SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (string, error) {
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendVoice", TelegramBotToken)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
 	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
-		return err
+		return "", err
 	}
 	if replyToMessageID > 0 {
 		if err := writer.WriteField("reply_to_message_id", strconv.FormatInt(replyToMessageID, 10)); err != nil {
-			return err
+			return "", err
 		}
 	}
 
 	part, err := writer.CreateFormFile("voice", filename)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, err := part.Write(voice); err != nil {
-		return err
+		return "", err
 	}
 	if err := writer.Close(); err != nil {
-		return err
+		return "", err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, &body)
+	req, err := http.NewRequest(http.MethodPost, apiURL, &body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := telegramHTTPClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("telegram sendVoice returned status %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("telegram sendVoice returned status %d: %s", resp.StatusCode, string(respBody))
 	}
-	return nil
+
+	// Extract file_id from the response for caching.
+	var parsed struct {
+		Result struct {
+			Voice *struct {
+				FileID string `json:"file_id"`
+			} `json:"voice"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err == nil && parsed.Result.Voice != nil {
+		return parsed.Result.Voice.FileID, nil
+	}
+	return "", nil
+}
+
+func (n *telegramNotifier) SendVoiceByFileID(chatID int64, fileID string, replyToMessageID int64) error {
+	payload := map[string]interface{}{
+		"chat_id": chatID,
+		"voice":   fileID,
+	}
+	if replyToMessageID > 0 {
+		payload["reply_to_message_id"] = replyToMessageID
+	}
+	return telegramPost("sendVoice", payload)
 }
 
 // telegramPost marshals payload and POSTs it to the given Bot API method.
@@ -1302,6 +1328,11 @@ func openStore(path string) (*Store, error) {
 		week_start TEXT    NOT NULL,
 		sent_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, week_start)
+	);
+	CREATE TABLE IF NOT EXISTS audio_cache (
+		word       TEXT    PRIMARY KEY,
+		file_id    TEXT    NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`
 	if _, err := db.Exec(schema); err != nil {
@@ -1665,6 +1696,30 @@ func (s *Store) ResetSentIdiom(chatID int64) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// CachedAudioFileID returns the Telegram file_id for a previously uploaded
+// pronunciation of the given word, or "" if none is cached.
+func (s *Store) CachedAudioFileID(word string) string {
+	var fileID string
+	err := s.db.QueryRow(
+		"SELECT file_id FROM audio_cache WHERE word = ?",
+		strings.ToLower(strings.TrimSpace(word)),
+	).Scan(&fileID)
+	if err != nil {
+		return ""
+	}
+	return fileID
+}
+
+// CacheAudioFileID stores the Telegram file_id for a word's pronunciation audio
+// so subsequent sends can reuse it without regenerating.
+func (s *Store) CacheAudioFileID(word, fileID string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO audio_cache (word, file_id) VALUES (?, ?)",
+		strings.ToLower(strings.TrimSpace(word)), fileID,
+	)
+	return err
 }
 
 // MarkChangelogSeen records that a changelog version has been delivered to a chat.

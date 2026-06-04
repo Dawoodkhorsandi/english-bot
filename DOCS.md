@@ -270,6 +270,17 @@ scheduling (Change E); managed by `quiz.go`.
 Primary key is `(chat_id, week_start)` — the weekly digest is sent at most
 once per user per week.
 
+#### `audio_cache` (v1.14.0)
+| Column | Type | Description |
+|---|---|---|
+| `word` | `TEXT PRIMARY KEY` | Lowercased word or idiom phrase |
+| `file_id` | `TEXT` | Telegram file_id from a previous `sendVoice` upload |
+| `created_at` | `DATETIME` | When the cache entry was created |
+
+Stores the Telegram `file_id` returned by `sendVoice` so subsequent pronunciation
+sends for the same word reuse the cached file (zero-cost re-send, no TTS regeneration).
+Inserts are idempotent (`INSERT OR IGNORE`).
+
 ### Legacy Migration
 
 On first run, if a `subscribers.json` file exists (the old flat-file format), `migrateLegacyJSON` imports all active subscribers into SQLite and renames the file to `subscribers.json.migrated` so the migration only runs once.
@@ -350,6 +361,10 @@ type Store struct { db *sql.DB }
 | `SubscriberStats` | `() (total, active, paused int)` | Aggregate subscriber counts for admin `/metrics` |
 | `TotalQuizStats` | `() (answered, correct int)` | Global quiz answer tallies for admin `/metrics` |
 | `TotalMasteredCount` | `() int` | Total mastered words across all users for admin `/metrics` |
+| `GetTTSEnabled` | `(chatID int64) bool` | Whether pronunciation audio is enabled for the user (default true) |
+| `SetTTSEnabled` | `(chatID int64, enabled bool) error` | Upserts the user's TTS preference |
+| `CachedAudioFileID` | `(word string) string` | Returns cached Telegram file_id for a word's pronunciation, or "" |
+| `CacheAudioFileID` | `(word, fileID string) error` | Stores a Telegram file_id for a word's pronunciation (idempotent) |
 
 ---
 
@@ -395,7 +410,7 @@ All messages use `parse_mode: HTML`.
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
 | `/interval [min]` | With a numeric argument, sets the send interval directly; without, shows the current interval + an inline keyboard of options (`handleInterval`). Allowed: 30/60/120/180/240/360/480/720 min. (v1.6.0) |
-| `/tts [on/off]` | With `on`/`off`, toggles pronunciation audio in `user_prefs.tts_enabled`; without an argument, shows current TTS status. (v1.12.0) |
+| `/tts [on/off]` | With `on`/`off`, toggles pronunciation audio in `user_prefs.tts_enabled`; without an argument, shows current TTS status. (v1.14.0) |
 | `/metrics` | *(Admin only)* Subscriber stats (total/active/paused), pool depth per kind+level, quiz volume, mastered count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
@@ -1193,7 +1208,7 @@ Soft opt-out of broadcasts without deleting history (you opted against full unsu
 
 ---
 
-## Change I — Audio Pronunciation — IMPLEMENTED in v1.12.0
+## Change I — Audio Pronunciation — IMPLEMENTED in v1.14.0
 
 Let learners *hear* a word, not just read its IPA.
 
@@ -1206,6 +1221,9 @@ Let learners *hear* a word, not just read its IPA.
 - Audio is best-effort only: any TTS/send failure is logged and never blocks card delivery.
 - TTS is skipped during quiet hours and for paused users.
 - Global config: `TTS_ENABLED` (default `true`); per-user opt-out: `user_prefs.tts_enabled`.
+- Audio is cached per word in the `audio_cache` table: the Telegram `file_id` from the
+  first `sendVoice` is stored and reused on subsequent sends, avoiding redundant TTS
+  generation.
 
 | Command | Behaviour |
 |---|---|
@@ -1387,7 +1405,7 @@ and get back a vocabulary card formatted exactly like `/word`.
 7. ~~**Change J (Admin metrics)**~~ — ✅ **DONE in v1.10.0** (`/metrics`, `/announce`,
    `/health` gated by `MAINTAINER_CHAT_ID`; `SubscriberStats`, `TotalQuizStats`,
    `TotalMasteredCount` in `stats.go`).
-8. ~~**Change I (Audio)**~~ — ✅ **DONE in v1.12.0** (best-effort post-word `sendVoice`, Gemini-first with `espeak-ng` fallback, `/tts on|off`, `user_prefs.tts_enabled`).
+8. ~~**Change I (Audio)**~~ — ✅ **DONE in v1.14.0** (best-effort post-word/idiom `sendVoice`, Gemini-first with `espeak-ng` fallback, `/tts on|off`, `user_prefs.tts_enabled`, `audio_cache` table).
 9. ~~**Change K (Weekly digest)**~~ — ✅ **DONE in v1.10.0** (`runWeeklyDigestScheduler`
    in `schedule.go`; `weekly_digest_delivery` table; `DIGEST_DAY`/`DIGEST_TIME` config;
    two new quiz types — synonym + fill-in-the-blank — also shipped in v1.10.0).
@@ -1575,7 +1593,7 @@ XP system to drive daily engagement.
 
 ---
 
-### Change I — Audio Pronunciation (implemented in v1.12.0)
+### Change I — Audio Pronunciation (implemented in v1.14.0)
 
 **Priority: LOW** | **Effort: Medium**
 
@@ -1596,4 +1614,4 @@ with `espeak-ng` fallback, plus per-user `/tts` opt-out.
 | 6 | **T (Custom words)** | v1.13.0 | User-driven content, extends existing pool infra |
 | 7 | **S (Sentence rearrangement)** | v1.13.0 | New quiz type, needs button-sequence UX |
 | 8 | **U (XP/Gamification)** | v1.14.0 | Cross-cutting -- add after core features stabilize |
-| 9 | **I (Audio)** | v1.12.0 | ✅ Implemented (Gemini + `espeak-ng` fallback, `/tts`) |
+| 9 | **I (Audio)** | v1.14.0 | ✅ Implemented (Gemini + `espeak-ng` fallback, `/tts`, `audio_cache`) |

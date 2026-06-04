@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 )
@@ -59,7 +60,7 @@ func (m *mockNotifier) SendWithMessageID(chatID int64, text string) (int64, erro
 	return int64(len(m.sent)), nil
 }
 
-func (m *mockNotifier) SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) error {
+func (m *mockNotifier) SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.voices = append(m.voices, sentVoice{
@@ -67,6 +68,18 @@ func (m *mockNotifier) SendVoice(chatID int64, voice []byte, filename string, re
 		filename:         filename,
 		replyToMessageID: replyToMessageID,
 		size:             len(voice),
+	})
+	return fmt.Sprintf("file_%d", len(m.voices)), nil
+}
+
+func (m *mockNotifier) SendVoiceByFileID(chatID int64, fileID string, replyToMessageID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.voices = append(m.voices, sentVoice{
+		chatID:           chatID,
+		filename:         fileID,
+		replyToMessageID: replyToMessageID,
+		size:             -1, // sentinel: indicates a cached re-send
 	})
 	return nil
 }
