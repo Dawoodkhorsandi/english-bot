@@ -846,7 +846,7 @@ func TestHandleWordLookup(t *testing.T) {
 	}
 
 	// Check word was pooled
-	terms, _ := store.PoolTerms(kindWord)
+	terms, _ := store.PoolTerms(kindWord, defaultLevel)
 	found := false
 	for _, term := range terms {
 		if term == "serendipity" {
@@ -911,7 +911,7 @@ func TestServeContentInlineGenerate(t *testing.T) {
 	}
 
 	// Should be added to pool
-	terms, _ := store.PoolTerms(kindWord)
+	terms, _ := store.PoolTerms(kindWord, defaultLevel)
 	found := false
 	for _, term := range terms {
 		if term == "ephemeral" {

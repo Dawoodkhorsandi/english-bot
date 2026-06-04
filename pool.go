@@ -27,10 +27,11 @@ func (s *Store) PoolCount(kind, level string) (int, error) {
 	return n, err
 }
 
-// PoolTerms returns every term currently in the pool for a kind, across all
-// levels (the UNIQUE(kind, term) constraint is global, so de-dup must be too).
-func (s *Store) PoolTerms(kind string) ([]string, error) {
-	rows, err := s.db.Query("SELECT term FROM content_pool WHERE kind = ?", kind)
+// PoolTerms returns every term currently in the pool for a kind at a given level.
+// De-dup is per-level (the UNIQUE(kind, level, term) constraint is per-level), so
+// the same term may legitimately exist at other levels.
+func (s *Store) PoolTerms(kind, level string) ([]string, error) {
+	rows, err := s.db.Query("SELECT term FROM content_pool WHERE kind = ? AND level = ?", kind, level)
 	if err != nil {
 		return nil, err
 	}
@@ -57,15 +58,49 @@ func (s *Store) AddToPool(kind, level, term, meaning, text string) error {
 	return err
 }
 
-// PooledUnseen returns the oldest pooled item for kind+level whose term the user
-// has not seen yet. Returns ok=false if none are available.
+// PooledUnseen returns a random pooled item for kind+level whose term the user has
+// not seen yet. Selection is randomized (rather than oldest-first) so subscribers
+// don't all receive pooled content in the same lock-step order. Returns ok=false if
+// none are available.
 func (s *Store) PooledUnseen(kind, level string, chatID int64) (term, meaning, text string, ok bool, err error) {
 	sentTable := sentTableFor(kind)
 	query := fmt.Sprintf(`
 		SELECT term, meaning, text FROM content_pool
 		WHERE kind = ? AND level = ?
 		  AND term NOT IN (SELECT word FROM %s WHERE chat_id = ?)
-		ORDER BY created_at ASC, id ASC
+		ORDER BY RANDOM()
+		LIMIT 1`, sentTable)
+
+	row := s.db.QueryRow(query, kind, level, chatID)
+	if err = row.Scan(&term, &meaning, &text); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", "", false, nil
+		}
+		return "", "", "", false, err
+	}
+	return term, meaning, text, true, nil
+}
+
+// PooledRecycled returns a pooled item for kind+level for a user who has already
+// seen everything at that level. It picks at random among all pooled items EXCEPT
+// the one most recently served to that user, so a broadcast can never repeat the
+// same item back-to-back (the bug that pinned the single oldest item forever).
+// Returns ok=false only if the pool for that level is empty.
+func (s *Store) PooledRecycled(kind, level string, chatID int64) (term, meaning, text string, ok bool, err error) {
+	sentTable := sentTableFor(kind)
+	// Exclude the user's most-recently-served term (by last_sent_at) so we never
+	// serve it twice in a row. COALESCE guards the no-history case (empty string
+	// excludes nothing). When the pool holds a single item the exclusion yields no
+	// row and the caller falls back to PooledOldest.
+	query := fmt.Sprintf(`
+		SELECT term, meaning, text FROM content_pool
+		WHERE kind = ? AND level = ?
+		  AND term <> COALESCE((
+		        SELECT word FROM %s
+		        WHERE chat_id = ?
+		        ORDER BY last_sent_at DESC, word DESC
+		        LIMIT 1), '')
+		ORDER BY RANDOM()
 		LIMIT 1`, sentTable)
 
 	row := s.db.QueryRow(query, kind, level, chatID)
@@ -290,7 +325,7 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 
 	if allowGenerate {
 		log.Printf("📦 [POOL] Miss for kind=%s level=%s chat=%d; generating inline.", kind, level, chatID)
-		exclude, _ := store.PoolTerms(kind)
+		exclude, _ := store.PoolTerms(kind, level)
 		genText, genTerm, meaning, provider, gErr := generateContent(ctx, chain, kind, level, exclude)
 		if gErr != nil {
 			return "", gErr
@@ -307,16 +342,25 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 		return genText, nil
 	}
 
-	// Broadcast fallback: pool couldn't personalize at this level, reuse the
-	// oldest item for the level.
-	term, _, text, ok, err = store.PooledOldest(kind, level)
+	// Broadcast fallback: the user has seen every pooled item at this level. Rotate
+	// through their history by re-serving a random item other than the one served
+	// most recently, instead of pinning the single oldest pooled item forever.
+	term, _, text, ok, err = store.PooledRecycled(kind, level, chatID)
 	if err != nil {
-		return "", err
+		log.Printf("⚠️  [POOL] Recycle lookup failed for kind=%s level=%s chat=%d: %v", kind, level, chatID, err)
+	}
+	if !ok {
+		// Final safety net (e.g. a single-item pool, where the "not most-recent"
+		// filter excludes everything): re-serve the oldest pooled item.
+		term, _, text, ok, err = store.PooledOldest(kind, level)
+		if err != nil {
+			return "", err
+		}
 	}
 	if !ok {
 		return "", fmt.Errorf("content pool empty for kind %s level %s", kind, level)
 	}
-	log.Printf("📦 [POOL] No unseen %s/%s for chat %d; reusing oldest pooled %q.", kind, level, chatID, term)
+	log.Printf("📦 [POOL] No unseen %s/%s for chat %d; re-serving pooled %q (rotation).", kind, level, chatID, term)
 	if err := store.recordSentFor(kind, chatID, term); err != nil {
 		log.Printf("⚠️  [POOL] Could not record %s %q for chat %d: %v", kind, term, chatID, err)
 	}
@@ -401,7 +445,7 @@ func refillKind(ctx context.Context, chain *ProviderChain, store *Store, kind, l
 		return false
 	}
 
-	exclude, _ := store.PoolTerms(kind)
+	exclude, _ := store.PoolTerms(kind, level)
 	text, term, meaning, provider, err := generateContent(ctx, chain, kind, level, exclude)
 	if err != nil {
 		log.Printf("⚠️  [POOL_FILLER] Generation failed for kind=%s level=%s: %v", kind, level, err)

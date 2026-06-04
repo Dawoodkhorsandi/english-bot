@@ -14,9 +14,12 @@ var (
 	quietStart  = getEnv("QUIET_START", "00:00")
 	quietEnd    = getEnv("QUIET_END", "09:00")
 
-	// Generation pool tuning (Change B)
-	poolTarget     = getEnvInt("POOL_TARGET", 30)
-	poolMin        = getEnvInt("POOL_MIN", 10)
+	// Generation pool tuning (Change B). Targets are deliberately large so that
+	// even very active users go a long time before exhausting the unseen pool and
+	// falling into recycle-rotation. Override via POOL_TARGET/POOL_MIN to trade
+	// content variety against background generation load.
+	poolTarget     = getEnvInt("POOL_TARGET", 300)
+	poolMin        = getEnvInt("POOL_MIN", 100)
 	refillInterval = getEnvDuration("REFILL_INTERVAL", 20*time.Second)
 	genSpacing     = getEnvDuration("GEN_SPACING", 3*time.Second)
 

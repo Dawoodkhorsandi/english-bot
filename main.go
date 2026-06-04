@@ -123,6 +123,13 @@ var Changelogs = []ChangelogEntry{
 			"• 🎯 <b>Drills lead with the essentials:</b> page 1 of every grammar drill now opens with the forms you use most — Simple Present, Present Continuous, Simple Past and Future <i>will</i>\n" +
 			"• Say them out loud and make them stick! 💪",
 	},
+	{
+		Version: "1.13.0",
+		Text: "📣 <b>What's New in v1.13.0</b>\n\n" +
+			"• 🔀 <b>No more repeats!</b> Fixed a bug where very active learners could keep getting the <b>same drill or word</b> over and over. Content is now picked at random and rotates fairly, so you always get fresh practice\n" +
+			"• 📚 <b>Much bigger content pool</b> — far more drills, words and idioms ready to go before anything ever comes back around\n" +
+			"• Once you've seen everything at your level, reviews now cycle through your history instead of sticking on one item",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -1091,6 +1098,7 @@ func openStore(path string) (*Store, error) {
 		chat_id INTEGER NOT NULL,
 		word    TEXT    NOT NULL,
 		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_sent_words_chat ON sent_words(chat_id);
@@ -1098,6 +1106,7 @@ func openStore(path string) (*Store, error) {
 		chat_id INTEGER NOT NULL,
 		word    TEXT    NOT NULL,
 		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_sent_vocab_chat ON sent_vocab(chat_id);
@@ -1105,6 +1114,7 @@ func openStore(path string) (*Store, error) {
 		chat_id INTEGER NOT NULL,
 		word    TEXT    NOT NULL,
 		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_sent_idioms_chat ON sent_idioms(chat_id);
@@ -1122,7 +1132,7 @@ func openStore(path string) (*Store, error) {
 		text       TEXT    NOT NULL,
 		level      TEXT    NOT NULL DEFAULT 'intermediate',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE (kind, term)
+		UNIQUE (kind, level, term)
 	);
 	CREATE TABLE IF NOT EXISTS daily_review_delivery (
 		chat_id     INTEGER NOT NULL,
@@ -1198,12 +1208,57 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+	// Pre-v1.13 used UNIQUE(kind, term), which prevented a term from being pooled
+	// at more than one level and starved non-default levels (a verb pooled at the
+	// default level could never be pooled at, say, advanced). Rebuild the table
+	// with UNIQUE(kind, level, term) so each level keeps its own independent pool.
+	if !s.poolDedupIsLevelAware() {
+		log.Println("💾 [DB_MIGRATE] Rebuilding content_pool with per-level dedup (kind, level, term)...")
+		if _, err := s.db.Exec(`
+			CREATE TABLE content_pool_v2 (
+				id         INTEGER PRIMARY KEY AUTOINCREMENT,
+				kind       TEXT    NOT NULL,
+				term       TEXT    NOT NULL,
+				meaning    TEXT    DEFAULT '',
+				text       TEXT    NOT NULL,
+				level      TEXT    NOT NULL DEFAULT 'intermediate',
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE (kind, level, term)
+			);
+			INSERT OR IGNORE INTO content_pool_v2 (id, kind, term, meaning, text, level, created_at)
+				SELECT id, kind, term, meaning, text, level, created_at FROM content_pool;
+			DROP TABLE content_pool;
+			ALTER TABLE content_pool_v2 RENAME TO content_pool;
+		`); err != nil {
+			return err
+		}
+	}
 	// The level-aware index is created here (after the column is guaranteed to
-	// exist) so it works on both fresh and pre-v1.4.0 databases.
+	// exist, and after any rebuild that would have dropped it) so it works on
+	// fresh, pre-v1.4.0 and pre-v1.13 databases alike.
 	if _, err := s.db.Exec(
 		"CREATE INDEX IF NOT EXISTS idx_content_pool_kind ON content_pool(kind, level, created_at)",
 	); err != nil {
 		return err
+	}
+	// last_sent_at (recency, distinct from sent_at = first-sent) was added in
+	// v1.13 to drive least-recently-served rotation without disturbing the
+	// historical sent_at used by streaks/reviews. Backfill it from sent_at.
+	for _, table := range []string{"sent_words", "sent_vocab", "sent_idioms"} {
+		if s.columnExists(table, "last_sent_at") {
+			continue
+		}
+		log.Printf("💾 [DB_MIGRATE] Adding %s.last_sent_at column...", table)
+		if _, err := s.db.Exec(
+			"ALTER TABLE " + table + " ADD COLUMN last_sent_at DATETIME",
+		); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(
+			"UPDATE " + table + " SET last_sent_at = sent_at WHERE last_sent_at IS NULL",
+		); err != nil {
+			return err
+		}
 	}
 	// user_prefs.interval_minutes was added in v1.6.0 (Change L).
 	if !s.columnExists("user_prefs", "interval_minutes") {
@@ -1215,6 +1270,69 @@ func (s *Store) migrate() error {
 		}
 	}
 	return nil
+}
+
+// poolDedupIsLevelAware reports whether content_pool's UNIQUE constraint already
+// includes the level column (UNIQUE(kind, level, term)). Pre-v1.13 databases use
+// UNIQUE(kind, term) and return false, signalling that a rebuild is needed. On any
+// inspection error it returns true (assume up-to-date) so we never rebuild blindly.
+func (s *Store) poolDedupIsLevelAware() bool {
+	rows, err := s.db.Query("PRAGMA index_list(content_pool)")
+	if err != nil {
+		return true
+	}
+	var uniqueIdx []string
+	for rows.Next() {
+		var (
+			seq            int
+			name, origin   string
+			unique, partia int
+		)
+		if err := rows.Scan(&seq, &name, &unique, &origin, &partia); err != nil {
+			rows.Close()
+			return true
+		}
+		// origin "u" marks the implicit index backing a UNIQUE table constraint.
+		if unique == 1 && origin == "u" {
+			uniqueIdx = append(uniqueIdx, name)
+		}
+	}
+	rows.Close()
+	if len(uniqueIdx) == 0 {
+		// No UNIQUE constraint found at all (unexpected) — leave it alone.
+		return true
+	}
+	for _, idx := range uniqueIdx {
+		for _, col := range s.indexColumns(idx) {
+			if col == "level" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// indexColumns returns the column names participating in the given index, in order.
+func (s *Store) indexColumns(index string) []string {
+	rows, err := s.db.Query("PRAGMA index_info(" + index + ")")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var (
+			seqno, cid int
+			name       sql.NullString
+		)
+		if err := rows.Scan(&seqno, &cid, &name); err != nil {
+			return cols
+		}
+		if name.Valid {
+			cols = append(cols, name.String)
+		}
+	}
+	return cols
 }
 
 // columnExists reports whether a table has a column with the given name.
@@ -1327,10 +1445,15 @@ func (s *Store) SentWords(chatID int64) ([]string, error) {
 	return words, rows.Err()
 }
 
-// RecordSentWord stores a verb as having been sent to a chat (idempotent).
+// RecordSentWord stores a verb as having been sent to a chat. The first send sets
+// sent_at (used by streaks/reviews); every send bumps last_sent_at, which drives
+// least-recently-served rotation once the user has seen the whole pool.
 func (s *Store) RecordSentWord(chatID int64, word string) error {
+	// last_sent_at uses millisecond precision (strftime %f) so the most-recently
+	// served item is always unambiguous, even for rapid back-to-back serves.
 	_, err := s.db.Exec(
-		"INSERT OR IGNORE INTO sent_words (chat_id, word) VALUES (?, ?)",
+		`INSERT INTO sent_words (chat_id, word, last_sent_at) VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
+		 ON CONFLICT(chat_id, word) DO UPDATE SET last_sent_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
 		chatID, strings.ToLower(strings.TrimSpace(word)),
 	)
 	return err
@@ -1365,10 +1488,13 @@ func (s *Store) SentVocab(chatID int64) ([]string, error) {
 	return words, rows.Err()
 }
 
-// RecordSentVocab stores a vocabulary word as having been sent to a chat (idempotent).
+// RecordSentVocab stores a vocabulary word as having been sent to a chat. sent_at
+// records the first send (used by streaks/reviews); last_sent_at is bumped on every
+// send to drive least-recently-served rotation.
 func (s *Store) RecordSentVocab(chatID int64, word string) error {
 	_, err := s.db.Exec(
-		"INSERT OR IGNORE INTO sent_vocab (chat_id, word) VALUES (?, ?)",
+		`INSERT INTO sent_vocab (chat_id, word, last_sent_at) VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
+		 ON CONFLICT(chat_id, word) DO UPDATE SET last_sent_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
 		chatID, strings.ToLower(strings.TrimSpace(word)),
 	)
 	return err
@@ -1384,10 +1510,13 @@ func (s *Store) ResetSentVocab(chatID int64) (int64, error) {
 	return res.RowsAffected()
 }
 
-// RecordSentIdiom stores an idiom as having been sent to a chat (idempotent).
+// RecordSentIdiom stores an idiom as having been sent to a chat. sent_at records the
+// first send; last_sent_at is bumped on every send to drive least-recently-served
+// rotation.
 func (s *Store) RecordSentIdiom(chatID int64, idiom string) error {
 	_, err := s.db.Exec(
-		"INSERT OR IGNORE INTO sent_idioms (chat_id, word) VALUES (?, ?)",
+		`INSERT INTO sent_idioms (chat_id, word, last_sent_at) VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
+		 ON CONFLICT(chat_id, word) DO UPDATE SET last_sent_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
 		chatID, strings.ToLower(strings.TrimSpace(idiom)),
 	)
 	return err

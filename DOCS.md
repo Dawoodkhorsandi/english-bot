@@ -57,8 +57,8 @@ All configuration is read from environment variables at startup. There are no co
 | `TIMEZONE` | `Asia/Tehran` | IANA timezone for quiet hours, daily review, and digest scheduling |
 | `QUIET_START` | `00:00` | Start of the quiet window (no scheduled sends) |
 | `QUIET_END` | `09:00` | End of the quiet window |
-| `POOL_TARGET` | `30` | Target number of pre-generated items per (kind, level) in `content_pool` |
-| `POOL_MIN` | `10` | Low-water mark that triggers refill |
+| `POOL_TARGET` | `300` | Target number of pre-generated items per (kind, level) in `content_pool` |
+| `POOL_MIN` | `100` | Low-water mark that triggers refill |
 | `REFILL_INTERVAL` | `20s` | How often the pool filler goroutine wakes |
 | `GEN_SPACING` | `3s` | Minimum spacing between AI generation calls |
 | `AI_PROVIDER_ORDER` | `gemini,groq,cerebras,openrouter,github,cloudflare,mistral,gemini2,sambanova,cohere` | Comma-separated provider fallback order |
@@ -134,9 +134,11 @@ Every subscriber will receive the new entry on their next broadcast (quiet hours
 |---|---|---|
 | `chat_id` | `INTEGER` | FK → subscriber chat_id |
 | `word` | `TEXT` | Lowercased verb that was already sent |
-| `sent_at` | `DATETIME` | When the verb was sent |
+| `sent_at` | `DATETIME` | When the verb was first sent |
+| `last_sent_at` | `DATETIME` | When the verb was most recently served (v1.13.0); drives least-recently-served rotation |
 
-Primary key is `(chat_id, word)` — inserts are idempotent (`INSERT OR IGNORE`).
+Primary key is `(chat_id, word)` — first insert sets `sent_at`; every subsequent serve
+bumps `last_sent_at` via `ON CONFLICT … DO UPDATE` (v1.13.0).
 Index: `idx_sent_words_chat` on `chat_id` for fast per-user lookups.
 
 #### `sent_vocab`
@@ -144,9 +146,11 @@ Index: `idx_sent_words_chat` on `chat_id` for fast per-user lookups.
 |---|---|---|
 | `chat_id` | `INTEGER` | FK → subscriber chat_id |
 | `word` | `TEXT` | Lowercased vocabulary word that was already sent |
-| `sent_at` | `DATETIME` | When the word was sent |
+| `sent_at` | `DATETIME` | When the word was first sent |
+| `last_sent_at` | `DATETIME` | When the word was most recently served (v1.13.0); drives least-recently-served rotation |
 
-Primary key is `(chat_id, word)` — inserts are idempotent (`INSERT OR IGNORE`).
+Primary key is `(chat_id, word)` — first insert sets `sent_at`; every subsequent serve
+bumps `last_sent_at` via `ON CONFLICT … DO UPDATE` (v1.13.0).
 Index: `idx_sent_vocab_chat` on `chat_id`. Kept separate from `sent_words` so grammar-drill verbs and vocabulary words have independent exclusion lists.
 
 #### `sent_idioms` (v1.12.0)
@@ -154,10 +158,12 @@ Index: `idx_sent_vocab_chat` on `chat_id`. Kept separate from `sent_words` so gr
 |---|---|---|
 | `chat_id` | `INTEGER` | FK → subscriber chat_id |
 | `word` | `TEXT` | Lowercased idiom phrase already sent (column named `word` so the generic `PooledUnseen` query works across kinds) |
-| `sent_at` | `DATETIME` | When the idiom was sent |
+| `sent_at` | `DATETIME` | When the idiom was first sent |
+| `last_sent_at` | `DATETIME` | When the idiom was most recently served (v1.13.0); drives least-recently-served rotation |
 
-Primary key `(chat_id, word)`; index `idx_sent_idioms_chat` on `chat_id`. The
-per-user exclusion list for idioms (Change Q).
+Primary key `(chat_id, word)` — first insert sets `sent_at`; every subsequent serve
+bumps `last_sent_at` via `ON CONFLICT … DO UPDATE` (v1.13.0). Index
+`idx_sent_idioms_chat` on `chat_id`. The per-user exclusion list for idioms (Change Q).
 
 #### `changelog_delivery`
 | Column | Type | Description |
@@ -179,15 +185,18 @@ Primary key is `(chat_id, version)` — each version is delivered at most once p
 | `level` | `TEXT` | Difficulty: `beginner` / `intermediate` / `advanced` (added v1.4.0, default `intermediate`) |
 | `created_at` | `DATETIME` | When the item was generated |
 
-Unique constraint on `(kind, term)` — the pool never holds duplicate terms per kind
-(global across levels). Index: `idx_content_pool_kind` on `(kind, level, created_at)`.
+Unique constraint on `(kind, level, term)` (v1.13.0; previously `(kind, term)`) — the
+pool deduplicates per kind *and* level, so the same term can be pooled at multiple
+difficulty levels independently. Index: `idx_content_pool_kind` on `(kind, level, created_at)`.
 The `poolFiller` goroutine keeps each `(kind, level)` for every *active* level topped
 up (`POOL_TARGET` for the default level, `POOL_MIN` for others); `serveContent` reads
 from here first, filtered by the user's level, and falls back to inline generation
-(commands) or the oldest pooled item at that level (broadcasts).
+(commands) or a recycled/oldest pooled item at that level (broadcasts).
 
 > **Migration:** `Store.migrate` adds the `level` column via `ALTER TABLE` on older
-> databases that predate v1.4.0 (guarded by a `PRAGMA table_info` check).
+> databases that predate v1.4.0 (guarded by a `PRAGMA table_info` check). From v1.13.0,
+> it also rebuilds the table from `UNIQUE(kind, term)` to `UNIQUE(kind, level, term)`
+> (guarded by `poolDedupIsLevelAware`) and adds `last_sent_at` to the sent tables.
 
 #### `daily_review_delivery` (v1.3.0)
 | Column | Type | Description |
@@ -287,22 +296,25 @@ type Store struct { db *sql.DB }
 | `Close` | `() error` | Closes the DB connection |
 | `migrate` | `() error` | Applies additive column migrations to pre-existing databases |
 | `columnExists` | `(table, column string) bool` | Reports whether a table has a column with the given name |
+| `poolDedupIsLevelAware` | `() bool` | Reports whether content_pool's UNIQUE constraint includes the level column (v1.13.0) |
+| `indexColumns` | `(index string) []string` | Returns column names in a given index (v1.13.0) |
 | `migrateLegacyJSON` | `()` | Imports subscribers from the old JSON file if present |
 | `AddSubscriber` | `(chatID int64) (bool, error)` | Inserts subscriber; returns `true` if newly added |
 | `Subscribers` | `() ([]int64, error)` | Returns all subscribed chat IDs |
 | `SentWords` | `(chatID int64) ([]string, error)` | Returns verbs already sent to a user, ordered by `sent_at` |
-| `RecordSentWord` | `(chatID int64, word string) error` | Records a verb as sent (idempotent) |
+| `RecordSentWord` | `(chatID int64, word string) error` | Records a verb as sent; first call sets `sent_at`, every call bumps `last_sent_at` |
 | `ResetSentWords` | `(chatID int64) (int64, error)` | Deletes all verb history for a user; returns count removed |
 | `SentVocab` | `(chatID int64) ([]string, error)` | Returns vocabulary words already sent to a user, ordered by `sent_at` |
-| `RecordSentVocab` | `(chatID int64, word string) error` | Records a vocabulary word as sent (idempotent) |
+| `RecordSentVocab` | `(chatID int64, word string) error` | Records a vocabulary word as sent; first call sets `sent_at`, every call bumps `last_sent_at` |
 | `ResetSentVocab` | `(chatID int64) (int64, error)` | Deletes all vocabulary history for a user; returns count removed |
 | `MarkChangelogSeen` | `(chatID int64, version string) error` | Records that a changelog version was delivered to a user |
 | `UnseenChangelogs` | `(chatID int64) ([]ChangelogEntry, error)` | Returns changelog entries not yet delivered to this user |
 | `PoolCount` | `(kind, level string) (int, error)` | How many items are pooled for a kind at a level |
-| `PoolTerms` | `(kind string) ([]string, error)` | All pooled terms across all levels (exclusion list for filler) |
+| `PoolTerms` | `(kind, level string) ([]string, error)` | All pooled terms at a given level (exclusion list for filler) |
 | `AddToPool` | `(kind, level, term, meaning, text string) error` | Insert a generated item at a level (idempotent) |
-| `PooledUnseen` | `(kind, level string, chatID int64) (term, meaning, text string, ok bool, err error)` | Oldest pooled item for kind+level this user hasn't seen |
-| `PooledOldest` | `(kind, level string) (term, meaning, text string, ok bool, err error)` | Oldest pooled item for kind+level regardless of user (broadcast fallback) |
+| `PooledUnseen` | `(kind, level string, chatID int64) (term, meaning, text string, ok bool, err error)` | Random pooled item for kind+level this user hasn't seen |
+| `PooledRecycled` | `(kind, level string, chatID int64) (term, meaning, text string, ok bool, err error)` | Random pooled item excluding the user's most recently served (rotation fallback, v1.13.0) |
+| `PooledOldest` | `(kind, level string) (term, meaning, text string, ok bool, err error)` | Oldest pooled item for kind+level regardless of user (final safety net) |
 | `recordSentFor` | `(kind string, chatID int64, term string) error` | Records a sent term in the appropriate history table; seeds SRS for words |
 | `WordsSentBetween` | `(chatID int64, startUTC, endUTC string) ([]reviewItem, error)` | Words sent to a user within a UTC time range (daily review) |
 | `ReviewDelivered` | `(chatID int64, reviewDate string) (bool, error)` | Whether a daily review has been delivered for a given date |
@@ -524,12 +536,14 @@ Ordered so page 1 leads with the forms learners use most (v1.12.0):
 `serveContent` is the single read-path for both on-demand commands and broadcasts.
 It returns ready-to-send text of a given kind for a user, recording the chosen term:
 
-1. Tries an unseen pooled item at the user's level (`PooledUnseen`).
+1. Tries an unseen pooled item at the user's level (`PooledUnseen`, randomized).
 2. On a miss with `allowGenerate=true` (on-demand `/drill`, `/word`): generates
    inline via `generateContent` → `ProviderChain.Generate`, adds the result to the
    pool, and serves it.
-3. On a miss with `allowGenerate=false` (broadcasts): falls back to the oldest
-   pooled item at that level (`PooledOldest`) so broadcasts never call the AI directly.
+3. On a miss with `allowGenerate=false` (broadcasts): rotates through the user's
+   history via `PooledRecycled` (random item excluding the most recently served),
+   so no item is ever repeated back-to-back. Falls back to `PooledOldest` only as a
+   final safety net (e.g. single-item pool).
 
 `generateContent` builds the appropriate prompt (`buildDrillPrompt` / `buildWordPrompt`),
 calls the provider chain, and parses the term (and meaning, for words) from the output.
@@ -568,11 +582,12 @@ half-hour slot fires (runBroadcastScheduler)
             │         └─ sendToTelegram(chatID, entry.Text)
             │         └─ store.MarkChangelogSeen(chatID, entry.Version)
             │
-            └─ serveContent(kind, prefs.Level, allowGenerate=false)
-                 └─ store.PooledUnseen(kind, level, chatID) → pooled item
-                 └─ (fallback) store.PooledOldest(kind, level)
-                 └─ store.recordSentFor(kind, chatID, term)
-                 └─ sendToTelegram(chatID, text)
+             └─ serveContent(kind, prefs.Level, allowGenerate=false)
+                  └─ store.PooledUnseen(kind, level, chatID) → pooled item (random)
+                  └─ (fallback) store.PooledRecycled(kind, level, chatID) → rotation
+                  └─ (safety net) store.PooledOldest(kind, level)
+                  └─ store.recordSentFor(kind, chatID, term)
+                  └─ sendToTelegram(chatID, text)
 ```
 
 ---
@@ -788,7 +803,7 @@ poolFiller(ctx, chain, store):
 | `level` | `TEXT` | Difficulty: `beginner` / `intermediate` / `advanced` (default `intermediate`) |
 | `created_at` | `DATETIME` | Generation time |
 
-`UNIQUE(kind, term)` keeps the pool free of duplicates (global across levels);
+`UNIQUE(kind, level, term)` keeps the pool free of duplicates per kind and level;
 index `idx_content_pool_kind` on `(kind, level, created_at)`.
 
 ### New Store methods
@@ -796,9 +811,9 @@ index `idx_content_pool_kind` on `(kind, level, created_at)`.
 | Method | Description |
 |---|---|
 | `PoolCount(kind, level) (int, error)` | How many items are pooled for a kind at a level |
-| `PoolTerms(kind) ([]string, error)` | All pooled terms across all levels (exclusion list for the filler) |
+| `PoolTerms(kind, level) ([]string, error)` | All pooled terms at a given level (exclusion list for the filler) |
 | `AddToPool(kind, level, term, meaning, text) error` | Insert a generated item at a level (idempotent) |
-| `PooledUnseen(kind, level, chatID) (term, meaning, text, ok, err)` | Oldest pooled item for kind+level this user hasn't seen |
+| `PooledUnseen(kind, level, chatID) (term, meaning, text, ok, err)` | Random pooled item for kind+level this user hasn't seen |
 | `PooledOldest(kind, level) (term, meaning, text, ok, err)` | Oldest pooled item for kind+level regardless of user (broadcast fallback) |
 | `recordSentFor(kind, chatID, term) error` | Records a sent term in the appropriate history table; seeds SRS for words |
 
@@ -817,12 +832,18 @@ serveContent(ctx, chain, store, chatID, kind, level, allowGenerate):
       store.recordSentFor(kind, chatID, term)
       return text                              // inline generation fallback
 
-  // broadcast fallback: no unseen item, reuse the oldest pooled item at this level
-  term, _, text, found = store.PooledOldest(kind, level)
-  if found:
-      store.recordSentFor(kind, chatID, term)
-      return text
-  return error "pool empty"
+  // broadcast fallback: no unseen item, rotate through history (random,
+-  // excluding the most recently served item to avoid back-to-back repeats)
+-  term, _, text, found = store.PooledRecycled(kind, level, chatID)
+-  if found:
+-      store.recordSentFor(kind, chatID, term)
+-      return text
+-  // final safety net: reuse the oldest pooled item at this level
+   term, _, text, found = store.PooledOldest(kind, level)
+   if found:
+       store.recordSentFor(kind, chatID, term)
+       return text
+   return error "pool empty"
 ```
 
 - Broadcasts call `serveContent` with `allowGenerate=false` — **no broadcast ever
@@ -834,8 +855,8 @@ serveContent(ctx, chain, store, chatID, kind, level, allowGenerate):
 
 | Variable | Default | Description |
 |---|---|---|
-| `POOL_TARGET` | `30` | Desired pooled items per kind |
-| `POOL_MIN` | `10` | Pool target for non-default levels (default level uses `POOL_TARGET`) |
+| `POOL_TARGET` | `300` | Desired pooled items per kind |
+| `POOL_MIN` | `100` | Pool target for non-default levels (default level uses `POOL_TARGET`) |
 | `REFILL_INTERVAL` | `20s` | How often the filler checks the pool |
 | `GEN_SPACING` | `3s` | Minimum gap between successive AI calls |
 
@@ -1103,8 +1124,9 @@ Lets users tune content difficulty instead of the hard-coded "intermediate".
 - The chosen level is injected into the drill/word prompt via `levelInstruction`
   (`generation.go`) as a CEFR-band directive (A1–A2 / B1–B2 / C1–C2).
 - **Pool interaction (as implemented):** `content_pool` gained a `level` column.
-  The `UNIQUE(kind, term)` constraint stays global (a term lives at one level), and
-  `PoolTerms` de-dupes across all levels so the same word isn't regenerated. The
+  The `UNIQUE(kind, level, term)` constraint is per-level (v1.13.0; previously global),
+  so the same term can be pooled at different difficulty levels. `PoolTerms` de-dupes
+  within a level when building the filler's exclusion list. The
   filler (`runRefillCycle`) tops up each `(kind, level)` for every *active* level —
   the default level plus any level a user has selected (`Store.ActiveLevels`).
   `poolTargetFor` keeps the full `POOL_TARGET` for the default level and the smaller
