@@ -240,6 +240,7 @@ func TestLevelInstruction(t *testing.T) {
 	results := map[string]string{
 		levelBeginner:     levelInstruction(levelBeginner),
 		levelIntermediate: levelInstruction(levelIntermediate),
+		levelUpperInt:     levelInstruction(levelUpperInt),
 		levelAdvanced:     levelInstruction(levelAdvanced),
 	}
 
@@ -249,10 +250,12 @@ func TestLevelInstruction(t *testing.T) {
 			t.Errorf("levelInstruction(%q) returned empty string", level)
 		}
 	}
-	if results[levelBeginner] == results[levelIntermediate] ||
-		results[levelBeginner] == results[levelAdvanced] ||
-		results[levelIntermediate] == results[levelAdvanced] {
-		t.Error("levelInstruction should return different strings for each level")
+	seen := map[string]string{}
+	for level, result := range results {
+		if prev, dup := seen[result]; dup {
+			t.Errorf("levelInstruction(%q) == levelInstruction(%q); all levels must return distinct strings", level, prev)
+		}
+		seen[result] = level
 	}
 }
 

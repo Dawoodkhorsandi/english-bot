@@ -17,11 +17,14 @@ func TestNormalizeLevel(t *testing.T) {
 	}{
 		{"beginner", "beginner", true},
 		{"intermediate", "intermediate", true},
+		{"upper-intermediate", "upper-intermediate", true},
 		{"advanced", "advanced", true},
 		{"BEGINNER", "beginner", true},
 		{"Advanced", "advanced", true},
 		{"  intermediate  ", "intermediate", true},
 		{" Beginner ", "beginner", true},
+		{"UPPER-INTERMEDIATE", "upper-intermediate", true},
+		{" Upper-Intermediate ", "upper-intermediate", true},
 		{"", defaultLevel, false},
 		{"unknown", defaultLevel, false},
 		{"pro", defaultLevel, false},
@@ -45,6 +48,7 @@ func TestLevelLabel(t *testing.T) {
 	}{
 		{"beginner", "Beginner"},
 		{"intermediate", "Intermediate"},
+		{"upper-intermediate", "Upper-Intermediate"},
 		{"advanced", "Advanced"},
 		{"unknown", "Intermediate"},
 		{"", "Intermediate"},
@@ -378,6 +382,9 @@ func TestPoolTargetFor(t *testing.T) {
 	}
 	if got := poolTargetFor("beginner"); got != poolMin {
 		t.Errorf("poolTargetFor(beginner) = %d, want %d", got, poolMin)
+	}
+	if got := poolTargetFor("upper-intermediate"); got != poolMin {
+		t.Errorf("poolTargetFor(upper-intermediate) = %d, want %d", got, poolMin)
 	}
 	if got := poolTargetFor("advanced"); got != poolMin {
 		t.Errorf("poolTargetFor(advanced) = %d, want %d", got, poolMin)

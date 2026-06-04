@@ -11,15 +11,16 @@ import (
 // Difficulty levels (Change F). The level is injected into generation prompts
 // and used to partition the content pool.
 const (
-	levelBeginner     = "beginner"
-	levelIntermediate = "intermediate"
-	levelAdvanced     = "advanced"
+	levelBeginner         = "beginner"
+	levelIntermediate     = "intermediate"
+	levelUpperInt         = "upper-intermediate"
+	levelAdvanced         = "advanced"
 
 	defaultLevel = levelIntermediate
 )
 
 // allLevels is the ordered set of selectable levels.
-var allLevels = []string{levelBeginner, levelIntermediate, levelAdvanced}
+var allLevels = []string{levelBeginner, levelIntermediate, levelUpperInt, levelAdvanced}
 
 // Send interval (Change L). Users choose how often scheduled drills/words arrive.
 // Values are kept as multiples of the 30-minute base scheduler tick so the
@@ -55,6 +56,8 @@ func levelLabel(level string) string {
 	switch level {
 	case levelBeginner:
 		return "Beginner"
+	case levelUpperInt:
+		return "Upper-Intermediate"
 	case levelAdvanced:
 		return "Advanced"
 	default:

@@ -271,6 +271,8 @@ func levelInstruction(level string) string {
 	switch level {
 	case levelBeginner:
 		return "DIFFICULTY: Target CEFR A1–A2 (beginner) learners. Pick a very common, simple, high-frequency word and keep all example sentences short and easy."
+	case levelUpperInt:
+		return "DIFFICULTY: Target CEFR B2–C1 (upper-intermediate) learners. Pick a word that is common in academic, professional, or media contexts but not everyday conversation. Use example sentences with natural complexity — subordinate clauses, idiomatic phrasing — without being obscure."
 	case levelAdvanced:
 		return "DIFFICULTY: Target CEFR C1–C2 (advanced) learners. Pick a sophisticated, less common word and use richer, more nuanced example sentences."
 	default:
