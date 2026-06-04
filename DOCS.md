@@ -422,6 +422,12 @@ inlineButton          — Text (string), CallbackData (string)
 
 All messages use `parse_mode: HTML`.
 
+> **Important:** When adding a new user-facing command, you must also add it to the
+> `registerBotCommands()` function in `main.go`. This function calls
+> `setMyCommands` at startup to register the command menu that Telegram shows
+> users when they tap `/`. Forgetting this step means users won't discover the
+> new command through the Telegram UI.
+
 | Command | Behaviour |
 |---|---|
 | `/start` | Subscribes user (idempotent). If new: baselines all changelogs as seen, notifies maintainer, sends welcome. If returning: delivers any unseen changelogs first. Always sends welcome message. |

@@ -1236,6 +1236,9 @@ func telegramPost(method string, payload map[string]interface{}) error {
 
 // registerBotCommands calls setMyCommands so Telegram shows a command menu when
 // users tap "/" in the chat. Best-effort; failure is non-fatal.
+//
+// NOTE: When adding a new user-facing command, add it to the slice below so
+// users can discover it through the Telegram command menu.
 func registerBotCommands() {
 	commands := []map[string]string{
 		{"command": "drill", "description": "Get a grammar drill right now"},
