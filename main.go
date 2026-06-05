@@ -168,6 +168,16 @@ var Changelogs = []ChangelogEntry{
 			"• No more message pileups — a smart rate limiter ensures at most one message per interval window\n" +
 			"• Default broadcast interval changed from 30 → 60 min for a calmer default experience",
 	},
+	{
+		Version: "1.18.0",
+		Text: "📣 <b>What's New in v1.18.0</b>\n\n" +
+			"• 🧩 <b>Native quiz polls!</b> Questions now use Telegram's built-in quiz format — tap your answer and see the correct one highlighted instantly\n" +
+			"• ⌨️ <b>Quick-access keyboard</b> — four shortcut buttons (Word / Drill / Quiz / Stats) now live at the bottom of your keyboard\n" +
+			"• 📊 <b>Progress bars</b> in /stats show your streak and quiz accuracy at a glance\n" +
+			"• 🎉 <b>Streak celebrations</b> — hit 3, 7, 14, 30 or 60 days in a row and I'll cheer you on\n" +
+			"• ⌨️ <b>Typing indicator</b> — you'll see 'typing...' while I'm generating content so the wait feels shorter\n" +
+			"• 👋 Personalised greetings using your Telegram name",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -180,6 +190,7 @@ type TelegramUpdate struct {
 	UpdateID      int64                  `json:"update_id"`
 	Message       *TelegramMessage       `json:"message"`
 	CallbackQuery *TelegramCallbackQuery `json:"callback_query"`
+	PollAnswer    *TelegramPollAnswer    `json:"poll_answer"`
 }
 
 type TelegramMessage struct {
@@ -202,14 +213,27 @@ type TelegramChat struct {
 }
 
 type TelegramUser struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+}
+
+// TelegramPollAnswer is sent when a user answers a native Telegram poll.
+type TelegramPollAnswer struct {
+	PollID    string        `json:"poll_id"`
+	User      *TelegramUser `json:"user"`
+	OptionIDs []int         `json:"option_ids"`
 }
 
 // inlineButton is one button in an inline keyboard.
 type inlineButton struct {
-	Text         string `json:"text"`
-	CallbackData string `json:"callback_data"`
+	Text         string       `json:"text"`
+	CallbackData string       `json:"callback_data,omitempty"`
+	WebApp       *webAppInfo  `json:"web_app,omitempty"`
+}
+
+type webAppInfo struct {
+	URL string `json:"url"`
 }
 
 func main() {
@@ -236,6 +260,11 @@ func main() {
 	defer store.Close()
 
 	notifier := &telegramNotifier{}
+
+	// Start the optional Mini App web server (requires WEB_APP_URL to be set).
+	if webAppURL != "" {
+		startWebServer(store)
+	}
 
 	// Register bot commands with Telegram so users see a command menu.
 	registerBotCommands()
@@ -332,6 +361,9 @@ func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store
 				case update.CallbackQuery != nil:
 					log.Printf("🔘 [CALLBACK_DISPATCH] Update %d | Data: %q", update.UpdateID, update.CallbackQuery.Data)
 					handleCallback(store, notifier, update.CallbackQuery)
+				case update.PollAnswer != nil:
+					log.Printf("🗳️ [POLL_ANSWER] Update %d | Poll %q", update.UpdateID, update.PollAnswer.PollID)
+					go handleQuizPollAnswer(store, update.PollAnswer)
 				default:
 					log.Printf("📝 [POLLER_SKIP] Non-message update %d. Skipping.", update.UpdateID)
 				}
@@ -348,8 +380,13 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 
 	chatID := msg.Chat.ID
 	username := "unknown"
-	if msg.From != nil && msg.From.Username != "" {
-		username = msg.From.Username
+	firstName := ""
+	if msg.From != nil {
+		if msg.From.Username != "" {
+			username = msg.From.Username
+		}
+		firstName = msg.From.FirstName
+		store.SetFirstName(chatID, firstName)
 	}
 
 	log.Printf("🎮 [COMMAND_MATCH] %q from @%s (ID: %d)", msg.Text, username, chatID)
@@ -357,6 +394,18 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 	fields := strings.Fields(msg.Text)
 	command := fields[0]
 	args := fields[1:]
+
+	// Map persistent reply-keyboard button labels to slash commands.
+	switch command {
+	case "📘 Word":
+		command = "/word"
+	case "🎯 Drill":
+		command = "/drill"
+	case "🧩 Quiz":
+		command = "/quiz"
+	case "📊 Stats":
+		command = "/stats"
+	}
 
 	switch command {
 	case "/start":
@@ -395,7 +444,11 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			sendPendingChangelogs(store, notifier, chatID)
 		}
 
-		welcome := "👋 <b>Welcome to English Muscle Memory Bot!</b>\n\n" +
+		greeting := "👋"
+		if firstName != "" {
+			greeting = fmt.Sprintf("👋 Hey <b>%s</b>!", firstName)
+		}
+		welcome := greeting + " <b>Welcome to English Muscle Memory Bot!</b>\n\n" +
 			"I'll send you grammar drills and vocabulary words on a schedule, alternating between:\n" +
 			"• 🎯 a <b>grammar drill</b> (one verb across 21 forms — tap ▶️ to page through tenses, conditionals & more)\n" +
 			"• 📘 a <b>vocabulary word</b> (meaning, pronunciation, synonyms, opposites & examples)\n\n" +
@@ -417,7 +470,8 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/resume — Resume scheduled sends\n" +
 			"/reset — Clear your practiced history\n" +
 			"/help — How it works"
-		_ = notifier.Send(chatID, welcome)
+		replyKB := [][]string{{"📘 Word", "🎯 Drill"}, {"🧩 Quiz", "📊 Stats"}}
+		_ = notifier.SendWithReplyKeyboard(chatID, welcome, replyKB)
 
 	case "/help":
 		helpText := "💡 <b>How Muscle Memory Practice Works</b>\n\n" +
@@ -446,6 +500,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 
 	case "/drill":
 		log.Printf("🤖 [AI_FLOW] /drill requested by ChatID %d.", chatID)
+		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Generating your drill...</b>")
 
 		drill, err := serveContent(ctx, chain, store, chatID, kindDrill, store.GetLevel(chatID), true)
@@ -457,9 +512,11 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 
 		log.Printf("✅ [AI_SUCCESS] Drill delivered to ChatID %d.", chatID)
 		_ = sendDrill(notifier, chatID, drill)
+		go checkStreakCelebration(store, notifier, chatID, firstName)
 
 	case "/word":
 		log.Printf("🤖 [AI_FLOW] /word requested by ChatID %d.", chatID)
+		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding a fresh word for you...</b>")
 
 		card, err := serveContent(ctx, chain, store, chatID, kindWord, store.GetLevel(chatID), true)
@@ -473,9 +530,11 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
 			log.Printf("❌ [WORD_SEND_ERR] Word send failed for ChatID %d: %v", chatID, err)
 		}
+		go checkStreakCelebration(store, notifier, chatID, firstName)
 
 	case "/idiom":
 		log.Printf("🤖 [AI_FLOW] /idiom requested by ChatID %d.", chatID)
+		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding an idiom for you...</b>")
 
 		card, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), true)
@@ -497,6 +556,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		handleSetup(store, notifier, chatID)
 
 	case "/tip":
+		notifier.SendTyping(chatID)
 		handleTip(ctx, chain, store, notifier, chatID, args)
 
 	case "/level":
@@ -516,7 +576,15 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't pull your stats right now. Please try again.")
 			return
 		}
-		_ = notifier.Send(chatID, formatStats(stats))
+		if webAppURL != "" {
+			kb := [][]inlineButton{{{
+				Text:   "📊 Full Dashboard",
+				WebApp: &webAppInfo{URL: webAppURL + "/stats"},
+			}}}
+			_ = notifier.SendKeyboard(chatID, formatStats(stats, firstName), kb)
+		} else {
+			_ = notifier.Send(chatID, formatStats(stats, firstName))
+		}
 
 	case "/quiz":
 		log.Printf("🧩 [QUIZ] requested by ChatID %d.", chatID)
@@ -1126,18 +1194,31 @@ func settingsText(prefs UserPrefs) string {
 	}
 	return fmt.Sprintf(
 		"⚙️ <b>Your Settings</b>\n\n"+
-			"📚 Level: <b>%s</b>\n"+
-			"⏱ Broadcasts: every <b>%s</b>  •  Status: <b>%s</b>\n\n"+
-			"🔊 TTS: <b>%s</b>   💡 Tips: <b>%s</b>\n"+
-			"🗣️ Idiom: <b>%s</b>   🌙 Daily Review: <b>%s</b>\n"+
-			"❓ Quizzes: <b>%s</b> (every %s)   🔁 SRS: <b>%s</b>\n"+
-			"📊 Weekly Digest: <b>%s</b>\n\n"+
+			"📚 <b>Level:</b> %s\n"+
+			"⏱ <b>Broadcast interval:</b> every %s  •  <b>Status:</b> %s\n\n"+
+			"🔊 <b>Voice pronunciation (TTS):</b> %s\n"+
+			"    <i>Sends a short audio clip after each word/idiom so you hear the right accent</i>\n\n"+
+			"🔁 <b>SRS word reviews:</b> %s\n"+
+			"    <i>Spaced-repetition: learned words come back at growing intervals to lock them into memory</i>\n\n"+
+			"🧩 <b>Quizzes:</b> %s  (every %s)\n"+
+			"    <i>Multiple-choice questions on words you've already learned</i>\n\n"+
+			"🗣️ <b>Idiom of the day:</b> %s\n"+
+			"    <i>One common English expression with meaning and examples, sent once a day</i>\n\n"+
+			"💡 <b>Daily grammar tip:</b> %s\n"+
+			"    <i>One focused grammar rule with correct/incorrect examples, sent once a day</i>\n\n"+
+			"🌙 <b>Midnight recap:</b> %s\n"+
+			"    <i>A quick summary of today's words sent at midnight — great for a last look before sleep</i>\n\n"+
+			"📊 <b>Weekly digest:</b> %s\n"+
+			"    <i>Every Sunday evening: a recap of the week's words, quiz accuracy and streak</i>\n\n"+
 			"Tap a button below to change any setting.",
 		levelLabel(prefs.Level),
 		intervalLabel(prefs.Interval), status,
-		onOff(prefs.TTSEnabled), onOff(prefs.TipsEnabled),
-		onOff(prefs.IdiomEnabled), onOff(prefs.DailyReviewEnabled),
-		onOff(prefs.QuizEnabled), quizIntervalLabel(prefs.QuizIntervalHours), onOff(prefs.ReviewEnabled),
+		onOff(prefs.TTSEnabled),
+		onOff(prefs.ReviewEnabled),
+		onOff(prefs.QuizEnabled), quizIntervalLabel(prefs.QuizIntervalHours),
+		onOff(prefs.IdiomEnabled),
+		onOff(prefs.TipsEnabled),
+		onOff(prefs.DailyReviewEnabled),
 		onOff(prefs.DigestEnabled),
 	)
 }
@@ -1161,23 +1242,23 @@ func settingsKeyboard(prefs UserPrefs) [][]inlineButton {
 			{Text: "⏱ Every " + intervalLabel(prefs.Interval), CallbackData: "settings:goto:interval"},
 		},
 		{
-			tog("TTS", "tts", prefs.TTSEnabled),
-			tog("Tips", "tips", prefs.TipsEnabled),
+			tog("🔊 Voice pronunciation", "tts", prefs.TTSEnabled),
+			tog("💡 Daily grammar tip", "tips", prefs.TipsEnabled),
 		},
 		{
-			tog("Idiom", "idiom", prefs.IdiomEnabled),
-			tog("Daily Review", "daily_review", prefs.DailyReviewEnabled),
+			tog("🗣️ Idiom of the day", "idiom", prefs.IdiomEnabled),
+			tog("🌙 Midnight recap", "daily_review", prefs.DailyReviewEnabled),
 		},
 		{
-			tog("Quizzes", "quiz", prefs.QuizEnabled),
-			tog("SRS Reviews", "srs", prefs.ReviewEnabled),
+			tog("🧩 Quizzes", "quiz", prefs.QuizEnabled),
+			tog("🔁 Word reviews (SRS)", "srs", prefs.ReviewEnabled),
 		},
 		{
-			tog("Weekly Digest", "digest", prefs.DigestEnabled),
+			tog("📊 Weekly digest", "digest", prefs.DigestEnabled),
 			pauseBtn,
 		},
 		{
-			{Text: "⏱ Quiz interval: every " + quizIntervalLabel(prefs.QuizIntervalHours), CallbackData: "settings:goto:quiz_interval"},
+			{Text: "⏱ Quiz every " + quizIntervalLabel(prefs.QuizIntervalHours), CallbackData: "settings:goto:quiz_interval"},
 		},
 	}
 }
@@ -1625,6 +1706,63 @@ func handleDrillCallback(store *Store, notifier Notifier, cb *TelegramCallbackQu
 }
 
 // ---------------------------------------------------------------------------
+// Streak milestone celebration
+// ---------------------------------------------------------------------------
+
+var streakMilestones = []int{3, 7, 14, 30, 60}
+
+// checkStreakCelebration fires a one-time congratulatory message when the user
+// reaches a new streak milestone. Best-effort; errors are silently dropped.
+func checkStreakCelebration(store *Store, notifier Notifier, chatID int64, firstName string) {
+	stats, err := store.UserStats(chatID)
+	if err != nil || stats.CurrentStreak == 0 {
+		return
+	}
+	streak := stats.CurrentStreak
+
+	milestone := 0
+	for _, m := range streakMilestones {
+		if streak >= m {
+			milestone = m
+		}
+	}
+	if milestone == 0 {
+		return
+	}
+	if store.GetStreakCelebrated(chatID) >= milestone {
+		return
+	}
+	store.SetStreakCelebrated(chatID, milestone)
+
+	name := firstName
+	if name == "" {
+		if prefs, err := store.GetPrefs(chatID); err == nil && prefs.FirstName != "" {
+			name = prefs.FirstName
+		}
+	}
+	if name == "" {
+		name = "friend"
+	}
+
+	var msg string
+	switch milestone {
+	case 3:
+		msg = fmt.Sprintf("🎉 <b>3-day streak!</b> Great start, %s! Consistency is the secret sauce.", name)
+	case 7:
+		msg = fmt.Sprintf("🔥 <b>7-day streak!</b> One full week, %s! You're building a real habit.", name)
+	case 14:
+		msg = fmt.Sprintf("⚡ <b>14-day streak!</b> Two weeks strong, %s! Your vocabulary is growing fast.", name)
+	case 30:
+		msg = fmt.Sprintf("🏆 <b>30-day streak!</b> A whole month, %s! You're officially dedicated.", name)
+	case 60:
+		msg = fmt.Sprintf("💎 <b>60-day streak!</b> Two months of daily practice, %s! You're unstoppable.", name)
+	}
+	if msg != "" {
+		_ = notifier.Send(chatID, msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Notifier interface (strategy pattern for Telegram sends — testable via DI)
 // ---------------------------------------------------------------------------
 
@@ -1639,6 +1777,12 @@ type Notifier interface {
 	SendKeyboard(chatID int64, text string, keyboard [][]inlineButton) error
 	EditMessage(chatID, messageID int64, text string, keyboard [][]inlineButton) error
 	AnswerCallback(callbackID, text string) error
+	// SendTyping fires a "typing..." chat action — best-effort, errors ignored.
+	SendTyping(chatID int64)
+	// SendPoll sends a native Telegram quiz poll and returns its poll_id.
+	SendPoll(chatID int64, question string, options []string, correctIdx int, explanation string) (pollID string, err error)
+	// SendWithReplyKeyboard sends a text message with a persistent bottom keyboard.
+	SendWithReplyKeyboard(chatID int64, text string, rows [][]string) error
 }
 
 // telegramNotifier is the real Notifier that talks to the Telegram Bot API.
@@ -1828,6 +1972,75 @@ func (n *telegramNotifier) AnswerCallback(callbackID, text string) error {
 	return telegramPost("answerCallbackQuery", payload)
 }
 
+func (n *telegramNotifier) SendTyping(chatID int64) {
+	_ = telegramPost("sendChatAction", map[string]interface{}{
+		"chat_id": chatID,
+		"action":  "typing",
+	})
+}
+
+func (n *telegramNotifier) SendPoll(chatID int64, question string, options []string, correctIdx int, explanation string) (string, error) {
+	opts := make([]map[string]string, len(options))
+	for i, o := range options {
+		opts[i] = map[string]string{"text": o}
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendPoll", TelegramBotToken)
+	payload := map[string]interface{}{
+		"chat_id":           chatID,
+		"question":          question,
+		"options":           opts,
+		"type":              "quiz",
+		"correct_option_id": correctIdx,
+		"is_anonymous":      false,
+	}
+	if explanation != "" {
+		payload["explanation"] = explanation
+	}
+	jsonPayload, _ := json.Marshal(payload)
+	resp, err := telegramHTTPClient.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("sendPoll status %d: %s", resp.StatusCode, string(respBody))
+	}
+	var parsed struct {
+		Result struct {
+			Poll struct {
+				ID string `json:"id"`
+			} `json:"poll"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", fmt.Errorf("sendPoll parse: %w", err)
+	}
+	return parsed.Result.Poll.ID, nil
+}
+
+func (n *telegramNotifier) SendWithReplyKeyboard(chatID int64, text string, rows [][]string) error {
+	keyboard := make([][][]map[string]string, 1)
+	keyboard[0] = make([][]map[string]string, len(rows))
+	btns := make([][]map[string]string, len(rows))
+	for i, row := range rows {
+		btns[i] = make([]map[string]string, len(row))
+		for j, label := range row {
+			btns[i][j] = map[string]string{"text": label}
+		}
+	}
+	return telegramPost("sendMessage", map[string]interface{}{
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "HTML",
+		"reply_markup": map[string]interface{}{
+			"keyboard":          btns,
+			"resize_keyboard":   true,
+			"is_persistent":     true,
+		},
+	})
+}
+
 // sendPendingChangelogs delivers any changelog entries the user has not yet
 // seen and marks them as delivered immediately after each successful send.
 func sendPendingChangelogs(store *Store, notifier Notifier, chatID int64) {
@@ -1947,6 +2160,8 @@ func openStore(path string) (*Store, error) {
 		digest_enabled       INTEGER NOT NULL DEFAULT 1,
 		daily_review_enabled INTEGER NOT NULL DEFAULT 1,
 		quiz_interval_hours  INTEGER NOT NULL DEFAULT 6,
+		first_name           TEXT    NOT NULL DEFAULT '',
+		streak_celebrated    INTEGER NOT NULL DEFAULT 0,
 		updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS review_schedule (
@@ -2096,6 +2311,18 @@ func (s *Store) migrate() error {
 		"digest_enabled":       "INTEGER NOT NULL DEFAULT 1",
 		"daily_review_enabled": "INTEGER NOT NULL DEFAULT 1",
 		"quiz_interval_hours":  "INTEGER NOT NULL DEFAULT 6",
+	} {
+		if !s.columnExists("user_prefs", col) {
+			log.Printf("💾 [DB_MIGRATE] Adding user_prefs.%s column...", col)
+			if _, err := s.db.Exec("ALTER TABLE user_prefs ADD COLUMN " + col + " " + def); err != nil {
+				return err
+			}
+		}
+	}
+	// user_prefs UI-enhancement columns added in v1.18.0.
+	for col, def := range map[string]string{
+		"first_name":        "TEXT NOT NULL DEFAULT ''",
+		"streak_celebrated": "INTEGER NOT NULL DEFAULT 0",
 	} {
 		if !s.columnExists("user_prefs", col) {
 			log.Printf("💾 [DB_MIGRATE] Adding user_prefs.%s column...", col)

@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -460,6 +461,75 @@ func (s *Store) QuizStats(chatID int64) (answered, correct int, err error) {
 // Command + callback handlers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Native Telegram poll quiz
+// ---------------------------------------------------------------------------
+
+// pendingQuizPoll maps a Telegram poll_id to the context needed to grade it.
+type pendingQuizPoll struct {
+	chatID     int64
+	word       string
+	correctIdx int
+}
+
+var (
+	quizPollMu      sync.Mutex
+	pendingQuizPolls = make(map[string]pendingQuizPoll)
+)
+
+func storePendingPoll(pollID string, p pendingQuizPoll) {
+	quizPollMu.Lock()
+	pendingQuizPolls[pollID] = p
+	quizPollMu.Unlock()
+}
+
+func popPendingPoll(pollID string) (pendingQuizPoll, bool) {
+	quizPollMu.Lock()
+	defer quizPollMu.Unlock()
+	p, ok := pendingQuizPolls[pollID]
+	if ok {
+		delete(pendingQuizPolls, pollID)
+	}
+	return p, ok
+}
+
+// sendQuizAsPoll delivers q using Telegram's native quiz poll UI.
+// Falls back to inline keyboard if SendPoll fails.
+func sendQuizAsPoll(store *Store, notifier Notifier, chatID int64, q quizQuestion) {
+	meaning := store.MeaningForWord(q.word)
+	explanation := q.word
+	if meaning != "" {
+		explanation = fmt.Sprintf("%s — %s", q.word, meaning)
+	}
+
+	pollID, err := notifier.SendPoll(chatID, q.prompt, q.options, q.correctIdx, explanation)
+	if err != nil {
+		log.Printf("⚠️  [QUIZ] Poll send failed for chat %d, falling back to keyboard: %v", chatID, err)
+		_ = notifier.SendKeyboard(chatID, q.prompt, quizKeyboard(q))
+		return
+	}
+	storePendingPoll(pollID, pendingQuizPoll{chatID: chatID, word: q.word, correctIdx: q.correctIdx})
+}
+
+// handleQuizPollAnswer grades a poll_answer update from Telegram.
+func handleQuizPollAnswer(store *Store, pa *TelegramPollAnswer) {
+	p, ok := popPendingPoll(pa.PollID)
+	if !ok {
+		return
+	}
+	correct := len(pa.OptionIDs) > 0 && pa.OptionIDs[0] == p.correctIdx
+	if err := store.RecordQuizResult(p.chatID, p.word, correct); err != nil {
+		log.Printf("⚠️  [QUIZ] Could not record poll result for chat %d word %q: %v", p.chatID, p.word, err)
+	}
+	now := time.Now()
+	if correct {
+		_, _ = store.ApplyReviewKnown(p.chatID, p.word, now)
+	} else {
+		_, _ = store.ApplyReviewForgot(p.chatID, p.word, now)
+	}
+	log.Printf("🧩 [QUIZ] ChatID %d answered poll for %q: correct=%v.", p.chatID, p.word, correct)
+}
+
 // handleQuiz sends one quiz question on demand (/quiz).
 func handleQuiz(store *Store, notifier Notifier, chatID int64) {
 	q, ok, err := makeQuiz(store, chatID, time.Now(), newRand())
@@ -472,9 +542,7 @@ func handleQuiz(store *Store, notifier Notifier, chatID int64) {
 		_ = notifier.Send(chatID, "🧩 Not enough learned words for a quiz yet — keep practising and I'll test you soon!")
 		return
 	}
-	if err := notifier.SendKeyboard(chatID, q.prompt, quizKeyboard(q)); err != nil {
-		log.Printf("❌ [QUIZ] Could not send quiz to chat %d: %v", chatID, err)
-	}
+	sendQuizAsPoll(store, notifier, chatID, q)
 }
 
 // handleQuizCallback grades a quiz answer tap (Change E). Callback data is of the
@@ -609,10 +677,7 @@ func runQuizSweep(store *Store, notifier Notifier, now time.Time) {
 		if !ok {
 			continue
 		}
-		if err := notifier.SendKeyboard(chatID, q.prompt, quizKeyboard(q)); err != nil {
-			log.Printf("❌ [QUIZ] Send to chat %d failed: %v", chatID, err)
-			continue
-		}
+		sendQuizAsPoll(store, notifier, chatID, q)
 		sent++
 	}
 	if sent > 0 {

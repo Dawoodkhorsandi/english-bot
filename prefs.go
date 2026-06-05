@@ -51,6 +51,8 @@ type UserPrefs struct {
 	DigestEnabled      bool // weekly digest
 	DailyReviewEnabled bool // midnight vocab recap
 	QuizIntervalHours  int  // hours between scheduled quizzes
+	FirstName          string
+	StreakCelebrated   int // highest streak milestone already celebrated
 }
 
 // normalizeLevel lowercases/trims a level string and validates it, falling back
@@ -135,18 +137,20 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 		DigestEnabled: true, DailyReviewEnabled: true,
 		QuizIntervalHours: defaultQuizIntervalHours,
 	}
-	var level string
+	var level, firstName string
 	var paused, interval, ttsEnabled, tipsEnabled int
 	var quizEnabled, idiomEnabled, reviewEnabled, digestEnabled, dailyReviewEnabled int
-	var quizIntervalHours int
+	var quizIntervalHours, streakCelebrated int
 	err := s.db.QueryRow(
 		`SELECT level, paused, interval_minutes, tts_enabled, tips_enabled,
 		        quiz_enabled, idiom_enabled, review_enabled, digest_enabled,
-		        daily_review_enabled, quiz_interval_hours
+		        daily_review_enabled, quiz_interval_hours,
+		        COALESCE(first_name,''), COALESCE(streak_celebrated,0)
 		 FROM user_prefs WHERE chat_id = ?`, chatID,
 	).Scan(&level, &paused, &interval, &ttsEnabled, &tipsEnabled,
 		&quizEnabled, &idiomEnabled, &reviewEnabled, &digestEnabled,
-		&dailyReviewEnabled, &quizIntervalHours)
+		&dailyReviewEnabled, &quizIntervalHours,
+		&firstName, &streakCelebrated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return prefs, nil
@@ -170,7 +174,41 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 	if qh, ok := normalizeQuizIntervalHours(quizIntervalHours); ok {
 		prefs.QuizIntervalHours = qh
 	}
+	prefs.FirstName = firstName
+	prefs.StreakCelebrated = streakCelebrated
 	return prefs, nil
+}
+
+// SetFirstName stores the user's Telegram first name (best-effort, updated on
+// every inbound message so it stays current without a dedicated DB lookup).
+func (s *Store) SetFirstName(chatID int64, name string) {
+	if name == "" {
+		return
+	}
+	_, _ = s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, first_name) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET first_name = excluded.first_name, updated_at = CURRENT_TIMESTAMP`,
+		chatID, name,
+	)
+}
+
+// GetStreakCelebrated returns the highest streak milestone already celebrated (0 if none).
+func (s *Store) GetStreakCelebrated(chatID int64) int {
+	var n int
+	_ = s.db.QueryRow(
+		"SELECT COALESCE(streak_celebrated,0) FROM user_prefs WHERE chat_id = ?",
+		chatID,
+	).Scan(&n)
+	return n
+}
+
+// SetStreakCelebrated records the highest milestone that has been celebrated.
+func (s *Store) SetStreakCelebrated(chatID int64, milestone int) {
+	_, _ = s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, streak_celebrated) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET streak_celebrated = excluded.streak_celebrated, updated_at = CURRENT_TIMESTAMP`,
+		chatID, milestone,
+	)
 }
 
 // GetLevel returns just the user's difficulty level (default when unset).

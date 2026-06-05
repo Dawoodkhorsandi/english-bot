@@ -5,7 +5,7 @@
 [![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A Telegram bot that sends subscribers AI-generated English practice every 30 minutes, alternating between grammar drills and vocabulary cards. Built with Go and SQLite.
+A Telegram bot that sends subscribers AI-generated English practice on a configurable schedule, alternating between grammar drills and vocabulary cards. Built with Go and SQLite.
 
 ## Features
 
@@ -13,10 +13,14 @@ A Telegram bot that sends subscribers AI-generated English practice every 30 min
 - **Vocabulary Cards** -- meaning, pronunciation, synonyms, opposites, and examples
 - **Pronunciation Audio** -- best-effort voice note after each vocabulary card and idiom (Gemini TTS with espeak-ng fallback, per-user `/tts` toggle)
 - **Idiom of the Day** -- a common English idiom with meaning and examples, daily and on demand via `/idiom`
-- **Spaced Repetition** -- SM-2-style review scheduler resurfaces words at growing intervals
-- **Quizzes** -- four question types (word-to-meaning, meaning-to-word, synonym, fill-in-the-blank)
+- **Spaced Repetition (SRS)** -- SM-2-style review scheduler resurfaces words at growing intervals so you remember what you've learned
+- **Native Quiz Polls** -- Telegram's built-in quiz poll format; tap an answer and the correct one is highlighted instantly; four question types (word-to-meaning, meaning-to-word, synonym, fill-in-the-blank)
 - **Weekly Digest** -- Sunday evening recap of the week's words, quiz accuracy, and streaks
-- **Per-User Settings** -- difficulty level (beginner/intermediate/upper-intermediate/advanced), send interval, pause/resume
+- **Per-User Settings** -- `/setup` quick-setup wizard (5 time-budget presets) + `/settings` hub to toggle every feature individually; difficulty level, send interval, quiz frequency, and all daily features are per-user
+- **Streak Celebrations** -- personalised congratulations at 3, 7, 14, 30, and 60-day streaks
+- **Reply Keyboard** -- four persistent shortcut buttons (Word / Drill / Quiz / Stats) always visible at the bottom of the chat
+- **Progress Dashboard** -- `/stats` shows Unicode progress bars for streak and quiz accuracy; optional Telegram Mini App with a 30-day activity chart (set `WEB_APP_URL`)
+- **Typing Indicator** -- "typing…" chat action fires before every AI generation call
 - **Multi-Provider AI** -- Gemini, Groq, Cerebras, OpenRouter, GitHub Models, Cloudflare, Mistral, Gemini2, SambaNova, Cohere with automatic fallback
 - **Pre-Generated Pool** -- background worker keeps a content pool topped up; broadcasts never block on AI calls
 - **Quiet Hours** -- no broadcasts during configurable overnight window (default 00:00--09:00 Tehran)
@@ -72,12 +76,15 @@ go test ./... -v
 
 | Command | Description |
 |---|---|
-| `/start` | Subscribe and receive a welcome message |
+| `/start` | Subscribe and receive a welcome message + quick-access keyboard |
+| `/setup` | Quick-setup wizard — pick your daily time budget (5 min / 15 min / 30 min / 1 hr / 2 hr); bot auto-configures all settings |
+| `/settings` | View and toggle all settings in one place |
 | `/drill` | Get a grammar drill on demand |
 | `/word` | Get a vocabulary card on demand |
 | `/idiom` | Get an idiom with meaning and examples |
-| `/quiz` | Take a multiple-choice quiz |
-| `/stats` | View your progress (words learned, streak, quiz accuracy, mastered) |
+| `/tip` | Get a grammar tip now; `/tip on` or `/tip off` to control daily tips |
+| `/quiz` | Take a multiple-choice quiz (native Telegram poll) |
+| `/stats` | View progress: streak, words, quiz accuracy with progress bars |
 | `/level [beginner\|intermediate\|upper-intermediate\|advanced]` | Set difficulty level |
 | `/interval [minutes]` | Set send frequency (30/60/120/180/240/360/480/720) |
 | `/tts [on\|off]` | Toggle pronunciation audio on or off |
@@ -128,35 +135,39 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `DIGEST_TIME` | `20:00` | Local time to send the weekly digest |
 | `IDIOM_TIME` | `09:00` | Local time to send the daily idiom (`off` to disable) |
 | `AI_PROVIDER_ORDER` | `gemini,groq,...` | Comma-separated provider priority |
+| `WEB_APP_URL` | *(unset)* | Public HTTPS URL of the bot server (e.g. `https://bot.example.com`). When set, `/stats` includes a "📊 Full Dashboard" button opening the Telegram Mini App stats page. Leave unset to disable. |
+| `WEB_APP_PORT` | `8090` | TCP port for the embedded Mini App HTTP server (only used when `WEB_APP_URL` is set). |
 
 ## Architecture
 
 ```
-Go application (single package main, 11 source files)
+Go application (single package main, 12 source files)
 +-- main.go           -- startup, schema, Telegram types, command router, Store
-+-- config.go         -- timezone, pool & scheduler tuning knobs
++-- config.go         -- timezone, pool & scheduler tuning knobs, WEB_APP_URL/PORT
 +-- providers.go      -- Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
 +-- generation.go     -- prompt builders, AI generation, term/meaning parsers
 +-- pool.go           -- content_pool Store methods, serveContent, poolFiller
 +-- schedule.go       -- quiet hours, broadcast/daily-review/weekly-digest schedulers
-+-- prefs.go          -- user_prefs Store methods, level/interval/pause helpers
++-- prefs.go          -- user_prefs Store methods, level/interval/pause/toggle helpers, first_name/streak_celebrated
 +-- tts.go            -- pronunciation TTS (Gemini + espeak-ng fallback), audio cache
 +-- srs.go            -- spaced-repetition SM-2-lite logic, review scheduler
-+-- quiz.go           -- quiz building (4 types), quiz_results, quiz scheduler
-+-- stats.go          -- /stats computation, admin metrics
++-- quiz.go           -- quiz building (4 types + native polls), poll registry, quiz scheduler
++-- stats.go          -- /stats computation (progress bars), admin metrics
++-- webapp.go         -- optional Mini App HTTP server, HMAC initData validation, /api/stats
 ```
 
-### Goroutines (9 concurrent)
+### Goroutines (9 concurrent + optional web server)
 
 1. **Pool filler** -- background content generation
 2. **Broadcast scheduler** -- half-hourly, per-user interval-aware delivery
 3. **Daily review scheduler** -- bedtime word recap at midnight
 4. **Spaced-repetition scheduler** -- hourly scan for due reviews
-5. **Quiz scheduler** -- periodic multiple-choice quizzes
+5. **Quiz scheduler** -- periodic multiple-choice quizzes (native Telegram polls)
 6. **Weekly digest scheduler** -- weekly recap (default Sunday 20:00)
 7. **Idiom-of-the-day scheduler** -- daily idiom at `IDIOM_TIME` (default 09:00)
-8. **Telegram poller** -- long-polls for messages and callbacks
+8. **Telegram poller** -- long-polls for messages, callbacks, and `poll_answer` updates
 9. **Main goroutine** -- blocks on OS signal for graceful shutdown
+10. **Mini App web server** *(optional)* -- serves the stats dashboard when `WEB_APP_URL` is set
 
 ### Database
 

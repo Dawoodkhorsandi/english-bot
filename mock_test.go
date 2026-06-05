@@ -105,6 +105,30 @@ func (m *mockNotifier) AnswerCallback(callbackID, text string) error {
 	return nil
 }
 
+func (m *mockNotifier) SendTyping(_ int64) {}
+
+type sentPoll struct {
+	chatID     int64
+	question   string
+	options    []string
+	correctIdx int
+}
+
+func (m *mockNotifier) SendPoll(chatID int64, question string, options []string, correctIdx int, _ string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := fmt.Sprintf("poll_%d", len(m.sent)+len(m.keyboard)+1)
+	_ = sentPoll{chatID, question, options, correctIdx}
+	// Store as a keyboard so existing keyboard-count assertions still work.
+	m.keyboard = append(m.keyboard, sentKeyboard{chatID: chatID, text: question})
+	return id, nil
+}
+
+func (m *mockNotifier) SendWithReplyKeyboard(chatID int64, text string, _ [][]string) error {
+	_, err := m.SendWithMessageID(chatID, text)
+	return err
+}
+
 // lastSentText returns the text of the last Send call, or "".
 func (m *mockNotifier) lastSentText() string {
 	m.mu.Lock()

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,7 @@ type UserStats struct {
 	LongestStreak  int // best run of consecutive active days ever
 	MemberSince    time.Time
 	HasMemberSince bool
+	ActivityDays   []string // "2006-01-02" strings for the mini-app calendar
 }
 
 // parseStoredUTC interprets a SQLite DATETIME value (which the driver may hand
@@ -86,6 +88,10 @@ func (s *Store) UserStats(chatID int64) (UserStats, error) {
 	}
 	st.ActiveDays = len(days)
 	st.CurrentStreak, st.LongestStreak = computeStreaks(days, time.Now().In(appLocation))
+	for d := range days {
+		st.ActivityDays = append(st.ActivityDays, d)
+	}
+	sort.Strings(st.ActivityDays)
 	return st, nil
 }
 
@@ -164,26 +170,56 @@ func computeStreaks(days map[string]bool, now time.Time) (current, longest int) 
 	return current, longest
 }
 
+// progressBar renders a Unicode progress bar of the given width.
+// filled/total may exceed width; the bar is clamped to full.
+func progressBar(filled, total, width int) string {
+	if total <= 0 || width <= 0 {
+		return strings.Repeat("░", width)
+	}
+	n := filled * width / total
+	if n > width {
+		n = width
+	}
+	return strings.Repeat("█", n) + strings.Repeat("░", width-n)
+}
+
 // formatStats renders the /stats progress summary as an HTML message.
-func formatStats(st UserStats) string {
+// firstName is the user's Telegram first name; pass "" to omit the greeting.
+func formatStats(st UserStats, firstName string) string {
+	const barWidth = 10
+
+	greeting := ""
+	if firstName != "" {
+		greeting = fmt.Sprintf("Hey <b>%s</b>! Here's where you stand:\n\n", firstName)
+	}
+
 	flame := ""
 	if st.CurrentStreak >= 3 {
 		flame = " 🔥"
 	}
 
-	msg := "📊 <b>Your Progress</b>\n\n" +
-		fmt.Sprintf("🎯 Grammar drills practised: <b>%d</b>\n", st.Verbs) +
-		fmt.Sprintf("📘 Vocabulary words learned: <b>%d</b>\n", st.Words) +
-		fmt.Sprintf("🧠 Words mastered: <b>%d</b>\n", st.Mastered) +
-		fmt.Sprintf("🗓️ Active days: <b>%d</b>\n", st.ActiveDays) +
-		fmt.Sprintf("⚡ Current streak: <b>%d</b> day%s%s\n", st.CurrentStreak, plural(st.CurrentStreak), flame) +
-		fmt.Sprintf("🏆 Longest streak: <b>%d</b> day%s\n", st.LongestStreak, plural(st.LongestStreak)) +
-		fmt.Sprintf("🎚️ Level: <b>%s</b>\n", levelLabel(st.Level))
+	best := st.LongestStreak
+	if best < st.CurrentStreak {
+		best = st.CurrentStreak
+	}
+	streakBar := progressBar(st.CurrentStreak, best, barWidth)
+
+	msg := "📊 <b>Your Progress</b>\n" + greeting + "\n" +
+		fmt.Sprintf("🎯 Grammar drills: <b>%d</b>\n", st.Verbs) +
+		fmt.Sprintf("📘 Vocabulary words: <b>%d</b>  (<b>%d</b> mastered)\n", st.Words, st.Mastered) +
+		fmt.Sprintf("\n⚡ Streak: <b>%d day%s</b>%s\n", st.CurrentStreak, plural(st.CurrentStreak), flame) +
+		fmt.Sprintf("<code>%s</code>  %d / %d best\n", streakBar, st.CurrentStreak, st.LongestStreak)
 
 	if st.QuizAnswered > 0 {
 		pct := st.QuizCorrect * 100 / st.QuizAnswered
-		msg += fmt.Sprintf("🧩 Quiz accuracy: <b>%d%%</b> (%d/%d)\n", pct, st.QuizCorrect, st.QuizAnswered)
+		quizBar := progressBar(pct, 100, barWidth)
+		msg += fmt.Sprintf("\n🧩 Quiz accuracy: <b>%d%%</b> (%d/%d)\n", pct, st.QuizCorrect, st.QuizAnswered) +
+			fmt.Sprintf("<code>%s</code>\n", quizBar)
 	}
+
+	msg += fmt.Sprintf("\n🗓️ Active days: <b>%d</b>\n", st.ActiveDays) +
+		fmt.Sprintf("🎚️ Level: <b>%s</b>\n", levelLabel(st.Level))
+
 	if st.Paused {
 		msg += "⏸️ Scheduled sends: <b>paused</b> (use /resume)\n"
 	}
@@ -191,7 +227,7 @@ func formatStats(st UserStats) string {
 		msg += fmt.Sprintf("📅 Member since: <b>%s</b>\n", st.MemberSince.Format("2 Jan 2006"))
 	}
 
-	msg += "\nKeep going — say each one aloud to lock it into muscle memory! 💪"
+	msg += "\nKeep going — say each word aloud to lock it in! 💪"
 	return msg
 }
 

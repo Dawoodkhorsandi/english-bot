@@ -544,7 +544,7 @@ func TestPlural(t *testing.T) {
 
 func TestFormatStatsVariants(t *testing.T) {
 	t.Run("base case", func(t *testing.T) {
-		msg := formatStats(UserStats{Level: defaultLevel})
+		msg := formatStats(UserStats{Level: defaultLevel}, "")
 		if !strings.Contains(msg, "Your Progress") {
 			t.Error("missing 'Your Progress'")
 		}
@@ -557,7 +557,7 @@ func TestFormatStatsVariants(t *testing.T) {
 	})
 
 	t.Run("with quiz stats", func(t *testing.T) {
-		msg := formatStats(UserStats{Level: defaultLevel, QuizAnswered: 10, QuizCorrect: 7})
+		msg := formatStats(UserStats{Level: defaultLevel, QuizAnswered: 10, QuizCorrect: 7}, "")
 		if !strings.Contains(msg, "Quiz accuracy") {
 			t.Error("missing 'Quiz accuracy'")
 		}
@@ -567,14 +567,14 @@ func TestFormatStatsVariants(t *testing.T) {
 	})
 
 	t.Run("paused", func(t *testing.T) {
-		msg := formatStats(UserStats{Level: defaultLevel, Paused: true})
+		msg := formatStats(UserStats{Level: defaultLevel, Paused: true}, "")
 		if !strings.Contains(msg, "paused") {
 			t.Error("missing 'paused'")
 		}
 	})
 
 	t.Run("streak with flame", func(t *testing.T) {
-		msg := formatStats(UserStats{Level: defaultLevel, CurrentStreak: 5})
+		msg := formatStats(UserStats{Level: defaultLevel, CurrentStreak: 5}, "")
 		if !strings.Contains(msg, "🔥") {
 			t.Error("missing flame emoji for streak >= 3")
 		}
