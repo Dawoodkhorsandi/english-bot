@@ -327,8 +327,13 @@ func generateWordFor(ctx context.Context, chain *ProviderChain, level, term stri
 }
 
 // parseVerb extracts the verb from the "Verb of the Session:" line of a drill.
+// Falls back to matching just "Verb:" if the full label isn't found, since some
+// AI outputs use shorter headings like "Verb: walk" or "Today's Verb: run".
 func parseVerb(drill string) string {
-	return parseLabeledTerm(drill, "verb of the session")
+	if v := parseLabeledTerm(drill, "verb of the session"); v != "" {
+		return v
+	}
+	return parseLabeledTerm(drill, "verb")
 }
 
 // parseWord extracts the word from the "Word of the Session:" line of a vocab card.
