@@ -143,12 +143,16 @@ Use this EXACT HTML format (for Telegram). Replace each {…} placeholder with r
 • {natural everyday example sentence}
 • {a second example in a different context}
 
+🇮🇷 <b>Persian</b>
+<tg-spoiler>{short Persian/Farsi translation or definition — one or two words}</tg-spoiler>
+
 💡 <i>Read it aloud and try using it in your own sentence today!</i>
 
 Rules:
 - Replace {WORD} with the chosen word in its base/dictionary form.
 - Bold the target word using <b>…</b> inside each example sentence.
-- Use only <b> and <i> HTML tags — no other tags or Markdown.
+- Use only <b>, <i>, and <tg-spoiler> HTML tags — no other tags or Markdown.
+- The Persian definition MUST be wrapped in <tg-spoiler>…</tg-spoiler> so it stays hidden until tapped.
 - Keep example sentences short (max 14 words) and natural.
 - Output the card only — no preamble, no explanation.`
 

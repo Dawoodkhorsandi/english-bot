@@ -33,6 +33,7 @@ Go application (multi-file, single package main)
 ├── srs.go            — spaced-repetition SM-2-lite logic, review_schedule Store methods, review scheduler
 ├── quiz.go           — quiz building (4 types + native poll), quiz_results, poll registry, quiz scheduler
 ├── stats.go          — /stats computation (streaks, activity days, progressBar, formatStats), admin metrics
+├── admin.go          — admin panel: paginated /users list, user detail view, direct messaging to users
 └── webapp.go         — optional Telegram Mini App HTTP server; HMAC-SHA256 initData validation; /api/stats JSON endpoint
 ```
 
@@ -58,7 +59,7 @@ All configuration is read from environment variables at startup. There are no co
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | `YOUR_TELEGRAM_BOT_TOKEN` | Telegram Bot API token from @BotFather |
 | `GEMINI_API_KEY` | `YOUR_GEMINI_API_KEY` | Google Gemini API key |
-| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/metrics`, `/announce`, `/health`) |
+| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/metrics`, `/announce`, `/health`, `/users`) |
 | `TIMEZONE` | `Asia/Tehran` | IANA timezone for quiet hours, daily review, and digest scheduling |
 | `QUIET_START` | `00:00` | Start of the quiet window (no scheduled sends) |
 | `QUIET_END` | `09:00` | End of the quiet window |
@@ -401,6 +402,8 @@ type Store struct { db *sql.DB }
 | `SetTTSEnabled` | `(chatID int64, enabled bool) error` | Upserts the user's TTS preference |
 | `CachedAudioFileID` | `(word string) string` | Returns cached Telegram file_id for a word's pronunciation, or "" |
 | `CacheAudioFileID` | `(word, fileID string) error` | Stores a Telegram file_id for a word's pronunciation (idempotent) |
+| `AdminListUsers` | `(page, perPage int) ([]AdminUserRow, int, error)` | Paginated subscriber list with prefs joined (admin panel, v1.20.0) |
+| `AdminUserDetail` | `(chatID int64) (AdminUserDetail, error)` | Full user detail snapshot: prefs, counts, quiz, SRS, streaks (admin panel, v1.20.0) |
 
 ---
 
@@ -453,12 +456,13 @@ All messages use `parse_mode: HTML`.
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
 | `/interval [min]` | With a numeric argument, sets the send interval directly; without, shows the current interval + an inline keyboard of options (`handleInterval`). Allowed: 30/60/120/180/240/360/480/720 min. (v1.6.0) |
-| `/setup` | Daily time-budget quick-setup. Shows five presets (5 / 15 / 30 / 60 / 120 min per day); tapping one sets interval, quiz frequency, and which daily features are on/off in one tap. Replaces the selection message with the full settings hub so users can see what changed. (v1.17.0) |
-| `/settings` | Shows all per-user settings in one inline-keyboard hub. Tap any button to toggle a feature or open a level/interval/quiz-interval sub-keyboard. All individual setting commands still work as shortcuts. (v1.17.0) |
+| `/setup` | Daily time-budget quick-setup. Shows five presets (5 / 15 / 30 / 60 / 120 min per day); tapping one sets interval, quiz frequency, and which daily features are on/off in one tap. Button taps use the `setup:` callback prefix. Replaces the selection message with the full settings hub so users can see what changed. (v1.17.0) |
+| `/settings` | Shows all per-user settings in one inline-keyboard hub. Tap any button to toggle a feature or open a level/interval/quiz-interval sub-keyboard. All individual setting commands still work as shortcuts. Button taps use the `settings:` callback prefix. (v1.17.0) |
 | `/tts [on/off]` | With `on`/`off`, toggles pronunciation audio in `user_prefs.tts_enabled`; without an argument, shows current TTS status. (v1.14.0) |
 | `/metrics` | *(Admin only)* Subscriber stats (total/active/paused), pool depth per kind+level, quiz volume, mastered count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
+| `/users` | *(Admin only)* Paginated user list with inline keyboard navigation; tap any user for full detail (settings, toggles, progress, quiz, SRS, streaks); send a direct message to any user. Gated by `MAINTAINER_CHAT_ID`. (v1.20.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
 | *(unknown command)* | Replies with a prompt to use /drill, /word, /tip, /quiz, /tts, /stats or /help — or to send any word to look it up. |
 | *(empty text)* | Silently ignored. |
@@ -663,7 +667,7 @@ Ordered so page 1 leads with the forms learners use most (v1.12.0):
 
 **Difficulty target:** determined by the user's level (beginner / intermediate / upper-intermediate / advanced).
 
-**Output format:** Telegram HTML (`parse_mode: HTML`, only `<b>` and `<i>` tags). The card structure is:
+**Output format:** Telegram HTML (`parse_mode: HTML`, `<b>`, `<i>`, and `<tg-spoiler>` tags). The card structure is:
 
 ```
 📘 Word of the Session: {WORD}
@@ -673,6 +677,7 @@ Ordered so page 1 leads with the forms learners use most (v1.12.0):
 ✅ Synonyms           — 3–5, comma-separated
 ⛔ Opposites          — 2–4, comma-separated
 📝 Examples           — two example sentences (target word bolded)
+🇮🇷 Persian            — short Farsi translation (hidden behind spoiler, tap to reveal)
 💡 (read-it-aloud nudge)
 ```
 
@@ -1397,17 +1402,63 @@ Maintainer-only operational tooling (gated by `chat_id == MAINTAINER_CHAT_ID`).
 | `/metrics` | Subscriber count (total/active/paused), pool depth per (kind, level), total quiz volume (answered/correct), total mastered words. |
 | `/announce <text>` | Push a one-off HTML message to all (non-paused) subscribers. |
 | `/health` | Quick check: which providers are enabled and their count. |
+| `/users` | Paginated user list (8 per page) with inline navigation and per-user detail view. (v1.20.0) |
 
 - All admin commands reply "not authorized" for non-maintainer chat IDs
   (`isMaintainer` parses `MAINTAINER_CHAT_ID` to `int64` and compares).
 - `/announce` sends the raw text after the command as-is (HTML preserved) to all
   non-paused subscribers; reports the send count back to the maintainer.
 
-**Implementation (v1.10.0):** `isMaintainer(chatID)` in `main.go` parses the
-`MaintainerChatID` env var with `strconv.ParseInt`; `handleMetrics` queries
-`SubscriberStats`, pool counts, `TotalQuizStats`, and `TotalMasteredCount` from
-`stats.go`; `handleAnnounce` iterates subscribers, skips paused users, and sends;
-`handleHealth` iterates `ProviderChain.providers` and lists enabled ones.
+### Admin Panel — `/users` (v1.20.0)
+
+The `/users` command opens an interactive admin panel built entirely with inline
+keyboards.
+
+**User list** (`admin.go:sendAdminUserListPage`): queries `subscribers` joined with
+`user_prefs`, ordered by `created_at DESC`, paginated at 8 users per page. Each
+entry shows a status icon (active/paused), first name, difficulty level, and chat ID.
+User name buttons (2 per row) link to the detail view; `◀️ Back` / `Next ▶️` buttons
+navigate pages. The page indicator (`1/3`) is a no-op button (`admin:noop`).
+
+**User detail** (`admin.go:sendAdminUserDetail`): shows a comprehensive snapshot of
+one user including:
+- Identity: first name, chat ID, join date
+- Settings: level, status (active/paused), broadcast interval, quiz interval
+- Toggles: TTS, tips, quiz, idiom, SRS review, weekly digest, daily review
+- Progress: drill count, word count (+ mastered), idiom count, tip count
+- Quiz: accuracy percentage and answer count
+- SRS: total words tracked and currently due count
+- Streaks: current streak (with fire at 3+), best streak, active days
+
+**Direct messaging** (`admin.go:handleAdminMsgSend`): the detail view includes a
+"Send Message" button. Tapping it enters message mode — the admin's next plain text
+message is forwarded to the target user. An `atomic.Int64` (`adminMsgTarget`)
+tracks the pending target; a "Cancel" button (`admin:msgcancel`) clears it. The
+admin receives delivery confirmation or an error report.
+
+**Callback data patterns:**
+
+| Pattern | Purpose |
+|---|---|
+| `admin:users:<page>` | Navigate the paginated user list |
+| `admin:user:<chatID>` | View a specific user's detail |
+| `admin:msg:<chatID>` | Enter message mode for a user |
+| `admin:msgcancel` | Cancel message mode |
+| `admin:noop` | Page indicator button (no action) |
+
+**New Store methods** (`admin.go`):
+
+| Method | Signature | Description |
+|---|---|---|
+| `AdminListUsers` | `(page, perPage int) ([]AdminUserRow, int, error)` | Paginated user list with total count |
+| `AdminUserDetail` | `(chatID int64) (AdminUserDetail, error)` | Full detail snapshot for one user |
+
+**Implementation:** `admin.go` (`AdminUserRow`, `AdminUserDetail` types,
+`AdminListUsers`/`AdminUserDetail` Store methods, `handleAdminUsers`,
+`sendAdminUserListPage`, `sendAdminUserDetail`, `handleAdminCallback`,
+`handleAdminMsgSend`, `toggleIcon`); `/users` route + `admin:` callback branch
+wired in `main.go`; admin message intercept before the word-lookup fallback in
+the default handler branch.
 
 ---
 
