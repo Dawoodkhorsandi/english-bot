@@ -184,15 +184,9 @@ var Changelogs = []ChangelogEntry{
 			"• 📊 <b>Mini App live!</b> The /stats Full Dashboard button now opens the interactive progress page at bot.mardeen.ir",
 	},
 	{
-		Version: "1.18.2",
-		Text: "📣 <b>What's New in v1.18.2</b>\n\n" +
-			"• 🐛 <b>Bug fix:</b> The reply keyboard buttons (Word / Drill / Quiz / Stats) now work correctly again",
-	},
-	{
-		Version: "1.18.3",
-		Text: "📣 <b>What's New in v1.18.3</b>\n\n" +
-			"• 🐛 <b>Bug fix:</b> Drill navigation buttons (Next / Back) now work reliably\n" +
-			"• 🐛 <b>Bug fix:</b> Android back gesture now correctly returns to the chat list",
+		Version: "1.19.0",
+		Text: "📣 <b>What's New in v1.19.0</b>\n\n" +
+			"• Bug fixes and stability improvements",
 	},
 }
 
@@ -1683,8 +1677,15 @@ func handleReviewCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 // navigation buttons (Change N). When the drill is a single page (e.g. legacy
 // content that can't be parsed into forms) it falls back to a plain send.
 func sendDrill(notifier Notifier, chatID int64, fullText string) error {
+	verb := parseVerb(fullText)
+	if verb == "" {
+		// Cannot paginate without a verb — the callback handler needs it to
+		// reload the drill from the pool. Send the full text as a single message.
+		log.Printf("⚠️  [DRILL] parseVerb returned empty for chat %d; sending un-paged.", chatID)
+		return notifier.Send(chatID, fullText)
+	}
 	text, total := renderDrillPage(fullText, 1)
-	kb := drillNavKeyboard(parseVerb(fullText), 1, total)
+	kb := drillNavKeyboard(verb, 1, total)
 	if len(kb) == 0 {
 		return notifier.Send(chatID, text)
 	}
