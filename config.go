@@ -52,6 +52,13 @@ var (
 
 	// Daily grammar tip scheduler.
 	tipTime = getEnv("TIP_TIME", "10:00")
+
+	// Mini App stats dashboard. Set WEB_APP_URL to the public HTTPS URL where the
+	// bot's web server is reachable (e.g. "https://bot.example.com"). When set,
+	// /stats includes a "📊 Full Dashboard" button that opens the web app.
+	// WEB_APP_PORT controls the local HTTP port (default 8090).
+	webAppURL  = getEnv("WEB_APP_URL", "")
+	webAppPort = getEnv("WEB_APP_PORT", "8090")
 )
 
 // appLocation is the time.Location used for all scheduling decisions.

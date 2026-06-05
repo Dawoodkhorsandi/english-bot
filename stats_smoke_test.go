@@ -88,7 +88,7 @@ func TestUserStatsDB(t *testing.T) {
 	}
 
 	// formatStats must produce a non-empty HTML message without panicking.
-	if msg := formatStats(st); len(msg) == 0 {
+	if msg := formatStats(st, ""); len(msg) == 0 {
 		t.Errorf("formatStats returned empty")
 	}
 }
