@@ -5,8 +5,54 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
+
+// ---------------------------------------------------------------------------
+// Per-user hourly rate limiter
+// ---------------------------------------------------------------------------
+
+// hourlyLimiter enforces at most one scheduled message per user per clock-hour.
+// It is shared by all background schedulers (broadcasts, SRS, quiz, idiom, tip,
+// daily review) so they never pile up on the same user in the same hour.
+// State is in-memory; a restart resets it, which is acceptable (at most one
+// extra message at the hour boundary immediately after a restart).
+type hourlyLimiter struct {
+	mu   sync.Mutex
+	seen map[int64]string // chatID → "YYYY-MM-DD-HH" (local hour key)
+}
+
+// claimSlot returns true and records the slot if no other scheduler has already
+// sent to this user in the current interval-aligned window. The window size is
+// the user's broadcast interval so a 30-min user still gets two slots per hour
+// while a 60-min user gets one. Returns false if the slot is taken.
+func (l *hourlyLimiter) claimSlot(chatID int64, now time.Time, intervalMinutes int) bool {
+	if intervalMinutes <= 0 {
+		intervalMinutes = defaultInterval
+	}
+	m := minutesSinceMidnight(now)
+	slot := m / intervalMinutes
+	key := fmt.Sprintf("%s:%d", now.In(appLocation).Format("2006-01-02"), slot)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.seen[chatID] == key {
+		return false
+	}
+	l.seen[chatID] = key
+	return true
+}
+
+// reset clears all recorded slots. Used in tests to isolate test cases.
+func (l *hourlyLimiter) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.seen = make(map[int64]string)
+}
+
+// globalHourlyLimiter is the single shared rate-limiter instance used by all
+// background schedulers. One message per user per clock-hour (all sources combined).
+var globalHourlyLimiter = &hourlyLimiter{seen: make(map[int64]string)}
 
 // ---------------------------------------------------------------------------
 // Quiet hours & slot helpers (Change C)
@@ -156,6 +202,11 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 			continue
 		}
 
+		if !globalHourlyLimiter.claimSlot(chatID, now, prefs.Interval) {
+			log.Printf("⏱️ [BROADCAST] Rate-limited: skipping chat %d (already sent this interval slot).", chatID)
+			continue
+		}
+
 		sendPendingChangelogs(store, notifier, chatID)
 
 		text, err := serveContent(ctx, chain, store, chatID, kind, prefs.Level, false)
@@ -266,7 +317,17 @@ func sendDailyReview(store *Store, notifier Notifier, now time.Time) {
 	log.Printf("🌙 [REVIEW] Building review for %s (%d subscribers).", reviewDate, len(chats))
 
 	for _, chatID := range chats {
-		if store.IsPaused(chatID) {
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [REVIEW] Could not load prefs for chat %d: %v", chatID, err)
+			continue
+		}
+		if prefs.Paused || !prefs.DailyReviewEnabled {
+			continue
+		}
+
+		if !globalHourlyLimiter.claimSlot(chatID, now, prefs.Interval) {
+			log.Printf("⏱️ [REVIEW] Rate-limited: skipping daily review for chat %d.", chatID)
 			continue
 		}
 
@@ -369,7 +430,16 @@ func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, not
 
 	sent := 0
 	for _, chatID := range chats {
-		if store.IsPaused(chatID) {
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [IDIOM] Could not load prefs for chat %d: %v", chatID, err)
+			continue
+		}
+		if prefs.Paused || !prefs.IdiomEnabled {
+			continue
+		}
+		if !globalHourlyLimiter.claimSlot(chatID, now, prefs.Interval) {
+			log.Printf("⏱️ [IDIOM] Rate-limited: skipping idiom for chat %d.", chatID)
 			continue
 		}
 		delivered, err := store.IdiomDelivered(chatID, idiomDate)
@@ -444,7 +514,16 @@ func sendDailyTip(ctx context.Context, chain *ProviderChain, store *Store, notif
 
 	sent := 0
 	for _, chatID := range chats {
-		if store.IsPaused(chatID) || !store.GetTipsEnabled(chatID) {
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [TIP] Could not load prefs for chat %d: %v", chatID, err)
+			continue
+		}
+		if prefs.Paused || !prefs.TipsEnabled {
+			continue
+		}
+		if !globalHourlyLimiter.claimSlot(chatID, now, prefs.Interval) {
+			log.Printf("⏱️ [TIP] Rate-limited: skipping tip for chat %d.", chatID)
 			continue
 		}
 
@@ -540,7 +619,16 @@ func sendWeeklyDigest(store *Store, notifier Notifier, now time.Time) {
 
 	sent := 0
 	for _, chatID := range chats {
-		if store.IsPaused(chatID) {
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [DIGEST] Could not load prefs for chat %d: %v", chatID, err)
+			continue
+		}
+		if prefs.Paused || !prefs.DigestEnabled {
+			continue
+		}
+		if !globalHourlyLimiter.claimSlot(chatID, now, prefs.Interval) {
+			log.Printf("⏱️ [DIGEST] Rate-limited: skipping digest for chat %d.", chatID)
 			continue
 		}
 

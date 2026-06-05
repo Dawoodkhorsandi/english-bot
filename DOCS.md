@@ -69,8 +69,8 @@ All configuration is read from environment variables at startup. There are no co
 | `GEN_SPACING` | `3s` | Minimum spacing between AI generation calls |
 | `AI_PROVIDER_ORDER` | `gemini,groq,cerebras,openrouter,github,cloudflare,mistral,gemini2,sambanova,cohere` | Comma-separated provider fallback order |
 | `REVIEW_CHECK_INTERVAL` | `1h` | How often the SRS scheduler checks for due reviews |
-| `REVIEW_BATCH_MAX` | `3` | Max words sent per review batch |
-| `QUIZ_INTERVAL` | `6h` | Minimum spacing between quiz prompts per user |
+| `REVIEW_BATCH_MAX` | `1` | Max SRS review cards sent per user per sweep (default 1 to avoid batching multiple cards at once) |
+| `QUIZ_INTERVAL` | `6h` | Global kill-switch for quiz scheduler (`0` disables entirely). Per-user quiz frequency is now controlled via `/settings` (default 6h). |
 | `DIGEST_DAY` | `Sunday` | Weekday the weekly digest is sent |
 | `DIGEST_TIME` | `20:00` | Time of day the weekly digest is sent |
 | `IDIOM_TIME` | `09:00` | Local time the daily idiom of the day is sent; `off` disables it |
@@ -250,9 +250,15 @@ Primary key is `(chat_id, tip_date)` — one scheduled tip per user per day.
 | `chat_id` | `INTEGER PRIMARY KEY` | FK → subscriber chat_id |
 | `level` | `TEXT` | Difficulty, default `intermediate` (Change F) |
 | `paused` | `INTEGER` | `1` = scheduled sends paused, default `0` (Change H) |
-| `interval_minutes` | `INTEGER` | Minutes between scheduled sends, default `30` (Change L) |
+| `interval_minutes` | `INTEGER` | Minutes between scheduled broadcast sends, default `60` (Change L; v1.17.0 changed default from 30→60) |
 | `tts_enabled` | `INTEGER` | `1` = pronunciation audio enabled, default `1` (Change I) |
 | `tips_enabled` | `INTEGER` | `1` = daily scheduled grammar tips enabled, default `1` (v1.15.0) |
+| `quiz_enabled` | `INTEGER` | `1` = scheduled quizzes enabled, default `1` (v1.17.0) |
+| `idiom_enabled` | `INTEGER` | `1` = daily idiom of the day enabled, default `1` (v1.17.0) |
+| `review_enabled` | `INTEGER` | `1` = SRS word memory-check reviews enabled, default `1` (v1.17.0) |
+| `digest_enabled` | `INTEGER` | `1` = weekly digest enabled, default `1` (v1.17.0) |
+| `daily_review_enabled` | `INTEGER` | `1` = midnight vocabulary recap enabled, default `1` (v1.17.0) |
+| `quiz_interval_hours` | `INTEGER` | Hours between scheduled quizzes, default `6` (v1.17.0) |
 | `updated_at` | `DATETIME` | Last change time |
 
 Rows are created lazily via upsert (`INSERT … ON CONFLICT`) the first time a user sets
@@ -442,6 +448,8 @@ All messages use `parse_mode: HTML`.
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
 | `/interval [min]` | With a numeric argument, sets the send interval directly; without, shows the current interval + an inline keyboard of options (`handleInterval`). Allowed: 30/60/120/180/240/360/480/720 min. (v1.6.0) |
+| `/setup` | Daily time-budget quick-setup. Shows five presets (5 / 15 / 30 / 60 / 120 min per day); tapping one sets interval, quiz frequency, and which daily features are on/off in one tap. Replaces the selection message with the full settings hub so users can see what changed. (v1.17.0) |
+| `/settings` | Shows all per-user settings in one inline-keyboard hub. Tap any button to toggle a feature or open a level/interval/quiz-interval sub-keyboard. All individual setting commands still work as shortcuts. (v1.17.0) |
 | `/tts [on/off]` | With `on`/`off`, toggles pronunciation audio in `user_prefs.tts_enabled`; without an argument, shows current TTS status. (v1.14.0) |
 | `/metrics` | *(Admin only)* Subscriber stats (total/active/paused), pool depth per kind+level, quiz volume, mastered count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
@@ -452,11 +460,37 @@ All messages use `parse_mode: HTML`.
 
 ---
 
+### Per-User Hourly Rate Limiter — `globalHourlyLimiter` (v1.17.0)
+
+A shared in-memory rate limiter (`hourlyLimiter` in `schedule.go`) prevents
+multiple schedulers from stacking messages on the same user in the same time
+window. The window size equals the user's chosen broadcast interval (default 60 min)
+so a 30-min user still receives two broadcast slots per hour while a 60-min user
+receives one.
+
+**How it works:** `claimSlot(chatID, now, intervalMinutes)` divides
+`minutesSinceMidnight` by the user's interval to get a slot number, then records
+`(chatID, date+slot)` in a map. The first scheduler to call `claimSlot` for a
+given user-slot wins and sends; all others skip silently.
+
+**Priority rules:**
+- **Broadcasts, quiz, idiom, tip, daily review, weekly digest** — all subject to
+  the rate limiter; they compete for the user's current interval slot.
+- **SRS word reviews** — **exempt** from the rate limiter. They send independently
+  (max 1 card per sweep, controlled by `REVIEW_BATCH_MAX`) so they never block or
+  get blocked by broadcasts. A user can receive 1 SRS card plus 1 primary message
+  in the same interval window.
+
+State is in-memory; a process restart resets it (at most one extra message at the
+first slot after restart — acceptable).
+
+---
+
 ### Broadcast Scheduler — `broadcastSweep`
 
 The broadcast scheduler (`runBroadcastScheduler`) sleeps until the next half-hour
 boundary (`:00` or `:30`) then runs a per-user delivery sweep. Each subscriber
-receives content only on slots aligned to their chosen interval (default 30 min),
+receives content only on slots aligned to their chosen interval (default 60 min),
 alternating drill/word via `dueAndKind` (wall-clock aligned so restarts and
 quiet-hour skips never desync):
 
@@ -468,6 +502,7 @@ slot fires (every 30 min, the base tick)
        └─ for each chatID:
             ├─ skip if prefs.Paused
             ├─ skip if not dueAndKind(now, prefs.Interval)
+            ├─ skip if globalHourlyLimiter.claimSlot fails (rate-limited)
             ├─ sendPendingChangelogs(chatID)
             └─ serveContent(kind, prefs.Level, allowGenerate=false)
                  └─ pool-first lookup (no inline AI call)
@@ -476,7 +511,7 @@ slot fires (every 30 min, the base tick)
 
 The content kind (drill vs word) is per-user, derived from the wall-clock slot
 index parity (`minutesSinceMidnight / interval`), so every user keeps alternating
-regardless of their chosen interval.
+regardless of their chosen interval. Default interval is 60 min (1 broadcast/hour).
 
 ---
 
@@ -543,7 +578,7 @@ Ordered so page 1 leads with the forms learners use most (v1.12.0):
 **Output format:** Telegram HTML (`parse_mode: HTML`, only `<b>` and `<i>` tags). The card structure is:
 
 ```
-📘 Word of the Hour: {WORD}
+📘 Word of the Session: {WORD}
 ————————————————————
 💬 Meaning            — one simple sentence
 🔊 Pronunciation      — syllable spelling · IPA
@@ -604,8 +639,8 @@ calls the provider chain, and parses the term (and meaning, for words) from the 
 ### Term Extraction — `parseVerb` / `parseWord`
 
 Both delegate to a shared helper `parseLabeledTerm(text, label)`:
-- `parseVerb` scans for the `Verb of the Hour:` line
-- `parseWord` scans for the `Word of the Hour:` line
+- `parseVerb` scans for the `Verb of the Session:` line
+- `parseWord` scans for the `Word of the Session:` line
 
 The helper strips any trailing HTML tags (e.g. `</b>`), strips Markdown punctuation, extracts the first token, and lowercases it. The HTML-aware stripping truncates everything from the first `<` character so terms ending in `b` (e.g. `grab`) are not corrupted by the closing tag trim.
 
@@ -1371,7 +1406,7 @@ and get back a vocabulary card formatted exactly like `/word`.
   becomes the lookup entry point.
 - **Behaviour:** generate a vocabulary card for the *user-supplied term* at the
   user's level, using the same card layout/parser as `/word`
-  (`📘 Word of the Hour …` → meaning, pronunciation, synonyms, opposites, examples).
+  (`📘 Word of the Session …` → meaning, pronunciation, synonyms, opposites, examples).
 - **Translation:** the input may be English **or the user's native language
   (Farsi)**. The prompt instructs the model to resolve the input to its English
   headword (translating if needed) and build the card around that English word, so

@@ -59,6 +59,7 @@ func TestSendDailyTip_Idempotent(t *testing.T) {
 	mock := &mockNotifier{}
 	saveQuietHours(t)
 	saveAppLocation(t)
+	resetHourlyLimiter(t)
 	appLocation = time.UTC
 	quietStart, quietEnd = "00:00", "00:00"
 

@@ -166,6 +166,10 @@ func emptyProviderChain() *ProviderChain {
 // testStoreHelper creates a fresh store for testing. Uses t.Cleanup for teardown.
 func testStoreHelper(t *testing.T) *Store {
 	t.Helper()
+	// Reset the global rate limiter so state from previous tests never bleeds in.
+	globalHourlyLimiter.reset()
+	t.Cleanup(func() { globalHourlyLimiter.reset() })
+
 	store, err := openStore(t.TempDir() + "/test.db")
 	if err != nil {
 		t.Fatalf("openStore: %v", err)

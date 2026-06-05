@@ -28,6 +28,15 @@ func saveAppLocation(t *testing.T) {
 	t.Cleanup(func() { appLocation = orig })
 }
 
+// resetHourlyLimiter clears the global rate-limiter state before a test and
+// restores an empty state after, so rate-limit decisions in one test never
+// bleed into another.
+func resetHourlyLimiter(t *testing.T) {
+	t.Helper()
+	globalHourlyLimiter.reset()
+	t.Cleanup(func() { globalHourlyLimiter.reset() })
+}
+
 func TestIsMaintainer(t *testing.T) {
 	saveMaintainer(t)
 
@@ -183,7 +192,7 @@ func TestHandleMessageDrillPaged(t *testing.T) {
 		t.Fatalf("expected 1 keyboard send for paged drill, got %d", len(mock.keyboard))
 	}
 	kb := mock.keyboard[0]
-	if !strings.Contains(kb.text, "Page 1/5") || !strings.Contains(kb.text, "Verb of the Hour: walk") {
+	if !strings.Contains(kb.text, "Page 1/5") || !strings.Contains(kb.text, "Verb of the Session: walk") {
 		t.Errorf("first page text wrong: %q", kb.text)
 	}
 	if len(kb.keyboard) == 0 {
@@ -923,7 +932,7 @@ func TestHandleWordLookup(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	chain := mockProviderChain("📘 <b>Word of the Hour: serendipity</b>\n\n<b>Meaning:</b> happy accident")
+	chain := mockProviderChain("📘 <b>Word of the Session: serendipity</b>\n\n<b>Meaning:</b> happy accident")
 
 	handleWordLookup(context.Background(), chain, store, mock, 100, "serendipity")
 
@@ -990,7 +999,7 @@ func TestServeContentInlineGenerate(t *testing.T) {
 	store := testStoreHelper(t)
 
 	store.AddSubscriber(100)
-	chain := mockProviderChain("📘 <b>Word of the Hour: ephemeral</b>\n\n<b>Meaning:</b> short-lived")
+	chain := mockProviderChain("📘 <b>Word of the Session: ephemeral</b>\n\n<b>Meaning:</b> short-lived")
 
 	text, err := serveContent(context.Background(), chain, store, 100, kindWord, defaultLevel, true)
 	if err != nil {
@@ -1070,6 +1079,7 @@ func TestRunQuizSweep(t *testing.T) {
 	mock := &mockNotifier{}
 	saveAppLocation(t)
 	saveQuietHours(t)
+	resetHourlyLimiter(t)
 	appLocation = time.UTC
 	quietStart = "00:00"
 	quietEnd = "06:00"
@@ -1086,7 +1096,8 @@ func TestRunQuizSweep(t *testing.T) {
 	}
 	store.recordSentFor(kindWord, 100, "tedious")
 
-	now := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	// Use hour 12 — aligned with the default 6h quiz interval (12 % 6 == 0).
+	now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
 	runQuizSweep(store, mock, now)
 
 	if len(mock.keyboard) == 0 {

@@ -10,7 +10,7 @@ import (
 // format (header + numbered forms + 💡 footer) for pagination tests.
 func sampleDrill(n int) string {
 	var b strings.Builder
-	b.WriteString("🎯 <b>Verb of the Hour: walk</b>\n")
+	b.WriteString("🎯 <b>Verb of the Session: walk</b>\n")
 	b.WriteString("————————————————————\n\n")
 	for i := 1; i <= n; i++ {
 		fmt.Fprintf(&b, "<b>%d. Form %d</b> · desc\n→ She <b>walks</b> sentence %d.\n\n", i, i, i)
@@ -31,7 +31,7 @@ func TestParseVerb(t *testing.T) {
 	}{
 		{
 			name: "real drill output",
-			input: `🎯 <b>Verb of the Hour: walk</b>
+			input: `🎯 <b>Verb of the Session: walk</b>
 ————————————————————
 
 <b>1. Simple Present</b> · Routine / Habit
@@ -45,7 +45,7 @@ func TestParseVerb(t *testing.T) {
 		},
 		{
 			name:  "malformed input no colon",
-			input: "Verb of the Hour walk",
+			input: "Verb of the Session walk",
 			want:  "",
 		},
 		{
@@ -75,7 +75,7 @@ func TestParseWord(t *testing.T) {
 	}{
 		{
 			name: "real vocab card",
-			input: `📘 <b>Word of the Hour: tedious</b>
+			input: `📘 <b>Word of the Session: tedious</b>
 ————————————————————
 
 💬 <b>Meaning</b>
@@ -84,7 +84,7 @@ Too long, slow, or dull; tiresome or monotonous.`,
 		},
 		{
 			name:  "word with closing HTML tag after colon",
-			input: "📘 <b>Word of the Hour: resilient</b>",
+			input: "📘 <b>Word of the Session: resilient</b>",
 			want:  "resilient",
 		},
 		{
@@ -115,38 +115,38 @@ func TestParseLabeledTerm(t *testing.T) {
 	}{
 		{
 			name:  "term ending in b (grab)",
-			text:  "🎯 <b>Verb of the Hour: grab</b>",
-			label: "verb of the hour",
+			text:  "🎯 <b>Verb of the Session: grab</b>",
+			label: "verb of the session",
 			want:  "grab",
 		},
 		{
 			name:  "term with HTML closing tag",
-			text:  "<b>Word of the Hour: bright</b>",
-			label: "word of the hour",
+			text:  "<b>Word of the Session: bright</b>",
+			label: "word of the session",
 			want:  "bright",
 		},
 		{
 			name:  "multiple words after colon takes first",
-			text:  "Word of the Hour: get along",
-			label: "word of the hour",
+			text:  "Word of the Session: get along",
+			label: "word of the session",
 			want:  "get",
 		},
 		{
 			name:  "extra whitespace and markdown",
-			text:  "Word of the Hour:  **bold**  ",
-			label: "word of the hour",
+			text:  "Word of the Session:  **bold**  ",
+			label: "word of the session",
 			want:  "bold",
 		},
 		{
 			name:  "no match returns empty",
 			text:  "nothing here",
-			label: "verb of the hour",
+			label: "verb of the session",
 			want:  "",
 		},
 		{
 			name:  "label present but no colon",
-			text:  "Verb of the Hour walk",
-			label: "verb of the hour",
+			text:  "Verb of the Session walk",
+			label: "verb of the session",
 			want:  "",
 		},
 	}
@@ -171,7 +171,7 @@ func TestParseMeaning(t *testing.T) {
 	}{
 		{
 			name: "real vocab card",
-			card: `📘 <b>Word of the Hour: tedious</b>
+			card: `📘 <b>Word of the Session: tedious</b>
 ————————————————————
 
 💬 <b>Meaning</b>
@@ -193,7 +193,7 @@ Too long, slow, or dull; tiresome or monotonous.
 		},
 		{
 			name: "missing meaning section",
-			card: "📘 <b>Word of the Hour: tedious</b>\nNo meaning here.",
+			card: "📘 <b>Word of the Session: tedious</b>\nNo meaning here.",
 			want: "",
 		},
 	}
@@ -358,7 +358,7 @@ To start a conversation in a relaxed way.`,
 		},
 		{
 			name:  "missing label",
-			input: "Word of the Hour: tedious",
+			input: "Word of the Session: tedious",
 			want:  "",
 		},
 	}
@@ -450,7 +450,7 @@ func TestDrillPromptCoversAllGroups(t *testing.T) {
 
 func TestParseDrillBody(t *testing.T) {
 	header, items, footer := parseDrillBody(sampleDrill(21))
-	if !strings.Contains(header, "Verb of the Hour") {
+	if !strings.Contains(header, "Verb of the Session") {
 		t.Errorf("header missing title, got %q", header)
 	}
 	if len(items) != 21 {
@@ -534,7 +534,7 @@ func TestRenderDrillPage(t *testing.T) {
 	if !strings.Contains(page1, "Page 1/5") || !strings.Contains(page1, "Everyday Essentials") {
 		t.Errorf("page 1 missing indicator/title, got %q", page1)
 	}
-	if !strings.Contains(page1, "Verb of the Hour") {
+	if !strings.Contains(page1, "Verb of the Session") {
 		t.Error("page 1 should repeat the header")
 	}
 	if !strings.Contains(page1, "1. Form 1") || strings.Contains(page1, "5. Form 5") {

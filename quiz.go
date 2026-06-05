@@ -526,29 +526,55 @@ func handleQuizCallback(store *Store, notifier Notifier, cb *TelegramCallbackQue
 // Quiz scheduler goroutine
 // ---------------------------------------------------------------------------
 
-// runQuizScheduler periodically sends one quiz to each eligible active subscriber
-// (quiet-hour and paused aware). Disabled when QUIZ_INTERVAL <= 0.
+// nextTopOfHour returns the next top-of-hour boundary after t (in appLocation).
+func nextTopOfHour(t time.Time) time.Time {
+	local := t.In(appLocation)
+	truncated := local.Truncate(time.Hour)
+	next := truncated.Add(time.Hour)
+	if !next.After(local) {
+		next = next.Add(time.Hour)
+	}
+	return next
+}
+
+// quizDueForUser reports whether a user with the given quiz interval (hours) is
+// due for a quiz at time t. Uses wall-clock hour alignment so restarts and
+// quiet-hour skips never desync delivery.
+func quizDueForUser(t time.Time, intervalHours int) bool {
+	if intervalHours <= 0 {
+		return false
+	}
+	h := t.In(appLocation).Hour()
+	return h%intervalHours == 0
+}
+
+// runQuizScheduler ticks once per hour (wall-clock aligned) and delivers a quiz
+// to each eligible user whose per-user quiz interval is due this hour.
+// Disabled globally when QUIZ_INTERVAL <= 0 (admin kill-switch).
 func runQuizScheduler(ctx context.Context, store *Store, notifier Notifier) {
 	if quizInterval <= 0 {
 		log.Println("🧩 [QUIZ] Quiz scheduler disabled (QUIZ_INTERVAL <= 0).")
 		return
 	}
-	log.Printf("🧩 [QUIZ] Quiz scheduler started (every %s).", quizInterval)
-	ticker := time.NewTicker(quizInterval)
-	defer ticker.Stop()
-
+	log.Println("🧩 [QUIZ] Quiz scheduler started (hourly wall-clock sweep, per-user interval).")
 	for {
+		next := nextTopOfHour(time.Now())
+		wait := time.Until(next)
+		log.Printf("🧩 [QUIZ] Next quiz sweep at %s (in %s).", next.Format("2006-01-02 15:04 MST"), wait.Truncate(time.Second))
+
 		select {
 		case <-ctx.Done():
 			log.Println("🧩 [QUIZ] Quiz scheduler stopped.")
 			return
-		case <-ticker.C:
-			runQuizSweep(store, notifier, time.Now())
+		case <-time.After(wait):
 		}
+
+		runQuizSweep(store, notifier, time.Now())
 	}
 }
 
-// runQuizSweep sends a quiz to every eligible subscriber for the current moment.
+// runQuizSweep sends a quiz to every eligible subscriber whose per-user quiz
+// interval aligns with the current hour.
 func runQuizSweep(store *Store, notifier Notifier, now time.Time) {
 	if isQuietHours(now) {
 		return
@@ -561,7 +587,18 @@ func runQuizSweep(store *Store, notifier Notifier, now time.Time) {
 	rng := newRand()
 	sent := 0
 	for _, chatID := range chats {
-		if store.IsPaused(chatID) {
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [QUIZ] Could not load prefs for chat %d: %v", chatID, err)
+			continue
+		}
+		if prefs.Paused || !prefs.QuizEnabled {
+			continue
+		}
+		if !quizDueForUser(now, prefs.QuizIntervalHours) {
+			continue
+		}
+		if !globalHourlyLimiter.claimSlot(chatID, now, prefs.Interval) {
 			continue
 		}
 		q, ok, err := makeQuiz(store, chatID, now, rng)

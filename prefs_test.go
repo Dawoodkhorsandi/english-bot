@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -265,6 +267,133 @@ func TestStoreSetAndGetTipsEnabled(t *testing.T) {
 	}
 }
 
+func TestStoreGetPrefsNewDefaults(t *testing.T) {
+	store := openTestStore(t)
+	chatID := int64(499)
+	store.AddSubscriber(chatID)
+
+	prefs, err := store.GetPrefs(chatID)
+	if err != nil {
+		t.Fatalf("GetPrefs: %v", err)
+	}
+	if !prefs.QuizEnabled {
+		t.Error("default quiz_enabled should be true")
+	}
+	if !prefs.IdiomEnabled {
+		t.Error("default idiom_enabled should be true")
+	}
+	if !prefs.ReviewEnabled {
+		t.Error("default review_enabled should be true")
+	}
+	if !prefs.DigestEnabled {
+		t.Error("default digest_enabled should be true")
+	}
+	if !prefs.DailyReviewEnabled {
+		t.Error("default daily_review_enabled should be true")
+	}
+	if prefs.QuizIntervalHours != defaultQuizIntervalHours {
+		t.Errorf("default quiz_interval_hours = %d, want %d", prefs.QuizIntervalHours, defaultQuizIntervalHours)
+	}
+}
+
+func TestStoreNewToggles(t *testing.T) {
+	store := openTestStore(t)
+	chatID := int64(500)
+	store.AddSubscriber(chatID)
+
+	for _, tc := range []struct {
+		name   string
+		get    func() bool
+		setOn  func() error
+		setOff func() error
+	}{
+		{"quiz", func() bool { return store.GetQuizEnabled(chatID) },
+			func() error { return store.SetQuizEnabled(chatID, true) },
+			func() error { return store.SetQuizEnabled(chatID, false) }},
+		{"idiom", func() bool { return store.GetIdiomEnabled(chatID) },
+			func() error { return store.SetIdiomEnabled(chatID, true) },
+			func() error { return store.SetIdiomEnabled(chatID, false) }},
+		{"review", func() bool { return store.GetReviewEnabled(chatID) },
+			func() error { return store.SetReviewEnabled(chatID, true) },
+			func() error { return store.SetReviewEnabled(chatID, false) }},
+		{"digest", func() bool { return store.GetDigestEnabled(chatID) },
+			func() error { return store.SetDigestEnabled(chatID, true) },
+			func() error { return store.SetDigestEnabled(chatID, false) }},
+		{"daily_review", func() bool { return store.GetDailyReviewEnabled(chatID) },
+			func() error { return store.SetDailyReviewEnabled(chatID, true) },
+			func() error { return store.SetDailyReviewEnabled(chatID, false) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.get() {
+				t.Errorf("%s: should be enabled by default", tc.name)
+			}
+			if err := tc.setOff(); err != nil {
+				t.Fatalf("setOff: %v", err)
+			}
+			if tc.get() {
+				t.Errorf("%s: should be disabled after setOff", tc.name)
+			}
+			if err := tc.setOn(); err != nil {
+				t.Fatalf("setOn: %v", err)
+			}
+			if !tc.get() {
+				t.Errorf("%s: should be enabled after setOn", tc.name)
+			}
+		})
+	}
+}
+
+func TestStoreQuizIntervalHours(t *testing.T) {
+	store := openTestStore(t)
+	chatID := int64(501)
+	store.AddSubscriber(chatID)
+
+	if got := store.GetQuizIntervalHours(chatID); got != defaultQuizIntervalHours {
+		t.Errorf("default quiz interval = %d, want %d", got, defaultQuizIntervalHours)
+	}
+	if err := store.SetQuizIntervalHours(chatID, 12); err != nil {
+		t.Fatalf("SetQuizIntervalHours(12): %v", err)
+	}
+	if got := store.GetQuizIntervalHours(chatID); got != 12 {
+		t.Errorf("quiz interval after set = %d, want 12", got)
+	}
+	// Invalid value should normalize to default.
+	if err := store.SetQuizIntervalHours(chatID, 99); err != nil {
+		t.Fatalf("SetQuizIntervalHours(invalid): %v", err)
+	}
+	if got := store.GetQuizIntervalHours(chatID); got != defaultQuizIntervalHours {
+		t.Errorf("quiz interval after invalid = %d, want %d", got, defaultQuizIntervalHours)
+	}
+}
+
+func TestQuizDueForUser(t *testing.T) {
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		hour     int
+		interval int
+		want     bool
+	}{
+		{0, 6, true},
+		{6, 6, true},
+		{12, 6, true},
+		{3, 6, false},
+		{10, 6, false},
+		{0, 3, true},
+		{3, 3, true},
+		{1, 3, false},
+		{0, 24, true},
+		{12, 24, false},
+	} {
+		t.Run(fmt.Sprintf("h%d_int%d", tc.hour, tc.interval), func(t *testing.T) {
+			appLocation = time.UTC
+			now := base.Add(time.Duration(tc.hour) * time.Hour)
+			if got := quizDueForUser(now, tc.interval); got != tc.want {
+				t.Errorf("quizDueForUser(hour=%d, interval=%d) = %v, want %v", tc.hour, tc.interval, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStoreActiveLevels(t *testing.T) {
 	store := openTestStore(t)
 
@@ -450,4 +579,81 @@ func TestFormatStatsVariants(t *testing.T) {
 			t.Error("missing flame emoji for streak >= 3")
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// /setup — time-budget presets
+// ---------------------------------------------------------------------------
+
+func TestTimeBudgetPresetsExhaustive(t *testing.T) {
+	expectedBudgets := []int{5, 15, 30, 60, 120}
+	for _, budget := range expectedBudgets {
+		p, ok := presetByMinutes(budget)
+		if !ok {
+			t.Errorf("presetByMinutes(%d) not found", budget)
+			continue
+		}
+		if _, ok := normalizeInterval(p.interval); !ok {
+			t.Errorf("preset %d min/day: interval %d not in allIntervals", budget, p.interval)
+		}
+		if _, ok := normalizeQuizIntervalHours(p.quizIntervalHours); !ok {
+			t.Errorf("preset %d min/day: quizIntervalHours %d not in allQuizIntervalHours", budget, p.quizIntervalHours)
+		}
+	}
+}
+
+func TestApplyTimeBudgetPreset(t *testing.T) {
+	store := openTestStore(t)
+	chatID := int64(999)
+	store.AddSubscriber(chatID)
+
+	for _, budget := range []int{5, 15, 30, 60, 120} {
+		p, _ := presetByMinutes(budget)
+		if err := applyTimeBudgetPreset(store, chatID, p); err != nil {
+			t.Fatalf("budget=%d: applyTimeBudgetPreset: %v", budget, err)
+		}
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			t.Fatalf("budget=%d: GetPrefs: %v", budget, err)
+		}
+		if prefs.Interval != p.interval {
+			t.Errorf("budget=%d: interval = %d, want %d", budget, prefs.Interval, p.interval)
+		}
+		if prefs.QuizIntervalHours != p.quizIntervalHours {
+			t.Errorf("budget=%d: quizIntervalHours = %d, want %d", budget, prefs.QuizIntervalHours, p.quizIntervalHours)
+		}
+		if prefs.IdiomEnabled != p.idiomEnabled {
+			t.Errorf("budget=%d: idiomEnabled = %v, want %v", budget, prefs.IdiomEnabled, p.idiomEnabled)
+		}
+		if prefs.TipsEnabled != p.tipsEnabled {
+			t.Errorf("budget=%d: tipsEnabled = %v, want %v", budget, prefs.TipsEnabled, p.tipsEnabled)
+		}
+		if prefs.DigestEnabled != p.digestEnabled {
+			t.Errorf("budget=%d: digestEnabled = %v, want %v", budget, prefs.DigestEnabled, p.digestEnabled)
+		}
+	}
+}
+
+func TestPresetProgressionInterval(t *testing.T) {
+	// Higher budgets should have shorter or equal intervals (more frequent content).
+	for i := 1; i < len(timeBudgetPresets); i++ {
+		prev := timeBudgetPresets[i-1]
+		curr := timeBudgetPresets[i]
+		if curr.interval > prev.interval {
+			t.Errorf("preset %q has longer interval (%d) than lower-budget %q (%d) — expected <= ",
+				curr.label, curr.interval, prev.label, prev.interval)
+		}
+	}
+}
+
+func TestPresetProgressionQuizInterval(t *testing.T) {
+	// Higher budgets should have shorter or equal quiz intervals.
+	for i := 1; i < len(timeBudgetPresets); i++ {
+		prev := timeBudgetPresets[i-1]
+		curr := timeBudgetPresets[i]
+		if curr.quizIntervalHours > prev.quizIntervalHours {
+			t.Errorf("preset %q has longer quiz interval (%dh) than lower-budget %q (%dh) — expected <=",
+				curr.label, curr.quizIntervalHours, prev.label, prev.quizIntervalHours)
+		}
+	}
 }
