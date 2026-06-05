@@ -68,7 +68,7 @@ func TestExtractTTSTerm(t *testing.T) {
 	}{
 		{
 			"word card",
-			"📘 <b>Word of the Hour: serendipity</b>\n————\n💬 Meaning — finding good things by accident",
+			"📘 <b>Word of the Session: serendipity</b>\n————\n💬 Meaning — finding good things by accident",
 			"serendipity",
 		},
 		{
@@ -83,7 +83,7 @@ func TestExtractTTSTerm(t *testing.T) {
 		},
 		{
 			"word takes priority over idiom",
-			"📘 <b>Word of the Hour: hello</b>\n🗣️ Idiom of the Day: break a leg",
+			"📘 <b>Word of the Session: hello</b>\n🗣️ Idiom of the Day: break a leg",
 			"hello",
 		},
 	}
@@ -127,7 +127,7 @@ func TestSendWordCardWithTTS_SendsCardAndVoice(t *testing.T) {
 	var chatID int64 = 500
 	store.AddSubscriber(chatID)
 
-	card := "Just a plain card with no Word of the Hour label"
+	card := "Just a plain card with no Word of the Session label"
 	err := sendWordCardWithTTS(context.Background(), store, mock, chatID, card)
 	if err != nil {
 		t.Fatalf("sendWordCardWithTTS returned error: %v", err)
@@ -151,7 +151,7 @@ func TestMaybeSendTTS_SkipsWhenDisabled(t *testing.T) {
 	var chatID int64 = 501
 	store.AddSubscriber(chatID)
 
-	card := "📘 <b>Word of the Hour: hello</b>\n————\n💬 Meaning — a greeting"
+	card := "📘 <b>Word of the Session: hello</b>\n————\n💬 Meaning — a greeting"
 
 	// Disable TTS globally
 	origTTS := ttsEnabled
@@ -171,7 +171,7 @@ func TestMaybeSendTTS_SkipsWhenUserDisabled(t *testing.T) {
 	store.AddSubscriber(chatID)
 	store.SetTTSEnabled(chatID, false)
 
-	card := "📘 <b>Word of the Hour: hello</b>\n————\n💬 Meaning — a greeting"
+	card := "📘 <b>Word of the Session: hello</b>\n————\n💬 Meaning — a greeting"
 
 	origTTS := ttsEnabled
 	ttsEnabled = true

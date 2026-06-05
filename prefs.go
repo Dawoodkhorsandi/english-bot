@@ -25,18 +25,32 @@ var allLevels = []string{levelBeginner, levelIntermediate, levelUpperInt, levelA
 // Send interval (Change L). Users choose how often scheduled drills/words arrive.
 // Values are kept as multiples of the 30-minute base scheduler tick so the
 // wall-clock alignment math stays exact.
-const defaultInterval = 30
+// Default is 60 min (one broadcast per hour). The global hourly rate limiter
+// further ensures no other scheduler adds a second message in the same hour.
+const defaultInterval = 60
 
 // allIntervals is the ordered set of selectable send intervals, in minutes.
 var allIntervals = []int{30, 60, 120, 180, 240, 360, 480, 720}
 
+// Quiz interval. Users choose how often scheduled quizzes arrive (in hours).
+const defaultQuizIntervalHours = 6
+
+// allQuizIntervalHours is the ordered set of selectable quiz intervals.
+var allQuizIntervalHours = []int{3, 6, 12, 24}
+
 // UserPrefs holds the per-user settings stored in the user_prefs table.
 type UserPrefs struct {
-	Level       string
-	Paused      bool
-	Interval    int  // minutes between scheduled sends
-	TTSEnabled  bool // whether pronunciation voice messages are enabled
-	TipsEnabled bool // scheduled daily grammar tips
+	Level              string
+	Paused             bool
+	Interval           int  // minutes between scheduled broadcasts
+	TTSEnabled         bool // pronunciation voice messages
+	TipsEnabled        bool // scheduled daily grammar tips
+	QuizEnabled        bool // scheduled quizzes
+	IdiomEnabled       bool // daily idiom of the day
+	ReviewEnabled      bool // SRS spaced-repetition memory checks
+	DigestEnabled      bool // weekly digest
+	DailyReviewEnabled bool // midnight vocab recap
+	QuizIntervalHours  int  // hours between scheduled quizzes
 }
 
 // normalizeLevel lowercases/trims a level string and validates it, falling back
@@ -76,6 +90,24 @@ func normalizeInterval(minutes int) (int, bool) {
 	return defaultInterval, false
 }
 
+// normalizeQuizIntervalHours validates a requested quiz interval (in hours).
+func normalizeQuizIntervalHours(hours int) (int, bool) {
+	for _, h := range allQuizIntervalHours {
+		if h == hours {
+			return hours, true
+		}
+	}
+	return defaultQuizIntervalHours, false
+}
+
+// quizIntervalLabel returns a human-friendly label for a quiz interval in hours.
+func quizIntervalLabel(hours int) string {
+	if hours == 1 {
+		return "1 hour"
+	}
+	return fmt.Sprintf("%d hours", hours)
+}
+
 // intervalLabel returns a human-friendly label for an interval in minutes.
 func intervalLabel(minutes int) string {
 	switch {
@@ -96,15 +128,25 @@ func intervalLabel(minutes int) string {
 
 // GetPrefs returns the user's preferences, applying defaults when no row exists.
 func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
-	prefs := UserPrefs{Level: defaultLevel, Paused: false, Interval: defaultInterval, TTSEnabled: true, TipsEnabled: true}
+	prefs := UserPrefs{
+		Level: defaultLevel, Paused: false, Interval: defaultInterval,
+		TTSEnabled: true, TipsEnabled: true,
+		QuizEnabled: true, IdiomEnabled: true, ReviewEnabled: true,
+		DigestEnabled: true, DailyReviewEnabled: true,
+		QuizIntervalHours: defaultQuizIntervalHours,
+	}
 	var level string
-	var paused int
-	var interval int
-	var ttsEnabled int
-	var tipsEnabled int
+	var paused, interval, ttsEnabled, tipsEnabled int
+	var quizEnabled, idiomEnabled, reviewEnabled, digestEnabled, dailyReviewEnabled int
+	var quizIntervalHours int
 	err := s.db.QueryRow(
-		"SELECT level, paused, interval_minutes, tts_enabled, tips_enabled FROM user_prefs WHERE chat_id = ?", chatID,
-	).Scan(&level, &paused, &interval, &ttsEnabled, &tipsEnabled)
+		`SELECT level, paused, interval_minutes, tts_enabled, tips_enabled,
+		        quiz_enabled, idiom_enabled, review_enabled, digest_enabled,
+		        daily_review_enabled, quiz_interval_hours
+		 FROM user_prefs WHERE chat_id = ?`, chatID,
+	).Scan(&level, &paused, &interval, &ttsEnabled, &tipsEnabled,
+		&quizEnabled, &idiomEnabled, &reviewEnabled, &digestEnabled,
+		&dailyReviewEnabled, &quizIntervalHours)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return prefs, nil
@@ -120,6 +162,14 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 	}
 	prefs.TTSEnabled = ttsEnabled != 0
 	prefs.TipsEnabled = tipsEnabled != 0
+	prefs.QuizEnabled = quizEnabled != 0
+	prefs.IdiomEnabled = idiomEnabled != 0
+	prefs.ReviewEnabled = reviewEnabled != 0
+	prefs.DigestEnabled = digestEnabled != 0
+	prefs.DailyReviewEnabled = dailyReviewEnabled != 0
+	if qh, ok := normalizeQuizIntervalHours(quizIntervalHours); ok {
+		prefs.QuizIntervalHours = qh
+	}
 	return prefs, nil
 }
 
@@ -234,6 +284,147 @@ func (s *Store) SetTipsEnabled(chatID int64, enabled bool) error {
 		INSERT INTO user_prefs (chat_id, tips_enabled) VALUES (?, ?)
 		ON CONFLICT(chat_id) DO UPDATE SET tips_enabled = excluded.tips_enabled, updated_at = CURRENT_TIMESTAMP`,
 		chatID, v,
+	)
+	return err
+}
+
+// GetQuizEnabled reports whether scheduled quizzes are enabled for the user.
+func (s *Store) GetQuizEnabled(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load quiz_enabled for chat %d: %v (using default=true)", chatID, err)
+		return true
+	}
+	return prefs.QuizEnabled
+}
+
+// SetQuizEnabled upserts the user's scheduled-quiz flag.
+func (s *Store) SetQuizEnabled(chatID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, quiz_enabled) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET quiz_enabled = excluded.quiz_enabled, updated_at = CURRENT_TIMESTAMP`,
+		chatID, v,
+	)
+	return err
+}
+
+// GetIdiomEnabled reports whether the daily idiom is enabled for the user.
+func (s *Store) GetIdiomEnabled(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load idiom_enabled for chat %d: %v (using default=true)", chatID, err)
+		return true
+	}
+	return prefs.IdiomEnabled
+}
+
+// SetIdiomEnabled upserts the user's daily-idiom flag.
+func (s *Store) SetIdiomEnabled(chatID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, idiom_enabled) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET idiom_enabled = excluded.idiom_enabled, updated_at = CURRENT_TIMESTAMP`,
+		chatID, v,
+	)
+	return err
+}
+
+// GetReviewEnabled reports whether SRS word reviews are enabled for the user.
+func (s *Store) GetReviewEnabled(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load review_enabled for chat %d: %v (using default=true)", chatID, err)
+		return true
+	}
+	return prefs.ReviewEnabled
+}
+
+// SetReviewEnabled upserts the user's SRS-review flag.
+func (s *Store) SetReviewEnabled(chatID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, review_enabled) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET review_enabled = excluded.review_enabled, updated_at = CURRENT_TIMESTAMP`,
+		chatID, v,
+	)
+	return err
+}
+
+// GetDigestEnabled reports whether the weekly digest is enabled for the user.
+func (s *Store) GetDigestEnabled(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load digest_enabled for chat %d: %v (using default=true)", chatID, err)
+		return true
+	}
+	return prefs.DigestEnabled
+}
+
+// SetDigestEnabled upserts the user's weekly-digest flag.
+func (s *Store) SetDigestEnabled(chatID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, digest_enabled) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET digest_enabled = excluded.digest_enabled, updated_at = CURRENT_TIMESTAMP`,
+		chatID, v,
+	)
+	return err
+}
+
+// GetDailyReviewEnabled reports whether the midnight vocab recap is enabled for the user.
+func (s *Store) GetDailyReviewEnabled(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load daily_review_enabled for chat %d: %v (using default=true)", chatID, err)
+		return true
+	}
+	return prefs.DailyReviewEnabled
+}
+
+// SetDailyReviewEnabled upserts the user's daily-review flag.
+func (s *Store) SetDailyReviewEnabled(chatID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, daily_review_enabled) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET daily_review_enabled = excluded.daily_review_enabled, updated_at = CURRENT_TIMESTAMP`,
+		chatID, v,
+	)
+	return err
+}
+
+// GetQuizIntervalHours returns the user's quiz interval in hours.
+func (s *Store) GetQuizIntervalHours(chatID int64) int {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load quiz_interval_hours for chat %d: %v (using default)", chatID, err)
+		return defaultQuizIntervalHours
+	}
+	return prefs.QuizIntervalHours
+}
+
+// SetQuizIntervalHours upserts the user's quiz interval (in hours).
+func (s *Store) SetQuizIntervalHours(chatID int64, hours int) error {
+	hours, _ = normalizeQuizIntervalHours(hours)
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, quiz_interval_hours) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET quiz_interval_hours = excluded.quiz_interval_hours, updated_at = CURRENT_TIMESTAMP`,
+		chatID, hours,
 	)
 	return err
 }

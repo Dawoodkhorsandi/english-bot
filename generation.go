@@ -44,7 +44,7 @@ const drillPromptBase = `Choose ONE common, useful everyday English verb and pro
 
 Use this exact HTML format (for Telegram). Replace each {sentence} with a short, natural sentence (max 12 words). Wrap the target verb form inside <b>…</b> in every sentence.
 
-🎯 <b>Verb of the Hour: {VERB}</b>
+🎯 <b>Verb of the Session: {VERB}</b>
 ————————————————————
 
 <b>1. Simple Present</b> · Routine / Habit
@@ -124,7 +124,7 @@ const wordPromptBase = `Choose ONE useful English word (any part of speech) that
 
 Use this EXACT HTML format (for Telegram). Replace each {…} placeholder with real content. Keep it concise and easy to read.
 
-📘 <b>Word of the Hour: {WORD}</b>
+📘 <b>Word of the Session: {WORD}</b>
 ————————————————————
 
 💬 <b>Meaning</b>
@@ -326,14 +326,14 @@ func generateWordFor(ctx context.Context, chain *ProviderChain, level, term stri
 	return text, parseWord(text), parseMeaning(text), provider, nil
 }
 
-// parseVerb extracts the verb from the "Verb of the Hour:" line of a drill.
+// parseVerb extracts the verb from the "Verb of the Session:" line of a drill.
 func parseVerb(drill string) string {
-	return parseLabeledTerm(drill, "verb of the hour")
+	return parseLabeledTerm(drill, "verb of the session")
 }
 
-// parseWord extracts the word from the "Word of the Hour:" line of a vocab card.
+// parseWord extracts the word from the "Word of the Session:" line of a vocab card.
 func parseWord(card string) string {
-	return parseLabeledTerm(card, "word of the hour")
+	return parseLabeledTerm(card, "word of the session")
 }
 
 // parseIdiom extracts the full idiom phrase from the "Idiom of the Day:" line.

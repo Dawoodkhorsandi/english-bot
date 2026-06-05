@@ -146,7 +146,7 @@ func TestMakeQuizFromSeenWords(t *testing.T) {
 // Synonym quiz tests
 // ---------------------------------------------------------------------------
 
-const sampleCardWithSynonyms = `📘 <b>Word of the Hour: tedious</b>
+const sampleCardWithSynonyms = `📘 <b>Word of the Session: tedious</b>
 ————————————————————
 
 💬 <b>Meaning</b>

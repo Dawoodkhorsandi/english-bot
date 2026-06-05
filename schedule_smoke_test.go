@@ -33,8 +33,9 @@ func TestDueAndKind(t *testing.T) {
 		{"120m @01:00 not due", at(1, 0), 120, false, ""},
 		{"120m @02:00 word", at(2, 0), 120, true, kindWord},
 		{"120m @04:00 drill", at(4, 0), 120, true, kindDrill},
-		// Zero/invalid interval falls back to default (30).
-		{"invalid falls back @00:30 word", at(0, 30), 0, true, kindWord},
+		// Zero/invalid interval falls back to default (60).
+		// At 01:00, slot index = 60/60 = 1 (odd) → word.
+		{"invalid falls back @01:00 word", at(1, 0), 0, true, kindWord},
 	}
 	for _, c := range cases {
 		due, kind := dueAndKind(c.t, c.interval)

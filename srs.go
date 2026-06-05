@@ -235,9 +235,17 @@ func runReviewSweep(store *Store, notifier Notifier, now time.Time) {
 
 	sent := 0
 	for _, chatID := range chats {
-		if store.IsPaused(chatID) {
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [SRS] Could not load prefs for chat %d: %v", chatID, err)
 			continue
 		}
+		if prefs.Paused || !prefs.ReviewEnabled {
+			continue
+		}
+		// SRS reviews are supplementary — they send independently of the global
+		// rate limiter so they never block or get blocked by broadcasts/quiz/idiom.
+		// reviewBatchMax (default 1) caps how many cards fire per sweep.
 		due, err := store.DueReviews(chatID, now, reviewBatchMax)
 		if err != nil {
 			log.Printf("⚠️  [SRS] Due lookup failed for chat %d: %v", chatID, err)

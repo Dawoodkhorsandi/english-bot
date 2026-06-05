@@ -27,9 +27,11 @@ var (
 	// provider whose key/config is unset at runtime is skipped automatically.
 	providerOrder = getEnv("AI_PROVIDER_ORDER", "gemini,groq,cerebras,openrouter,github,cloudflare,mistral,gemini2,sambanova,cohere")
 
-	// Spaced-repetition review tuning (Change D).
+	// Spaced-repetition review tuning (Change D). Batch max is 1 by default so
+	// an SRS sweep never sends more than one reminder per user per hour (works
+	// together with the global hourly rate limiter in schedule.go).
 	reviewCheckInterval = getEnvDuration("REVIEW_CHECK_INTERVAL", time.Hour)
-	reviewBatchMax      = getEnvInt("REVIEW_BATCH_MAX", 3)
+	reviewBatchMax      = getEnvInt("REVIEW_BATCH_MAX", 1)
 
 	// Quiz / active-recall tuning (Change E). Set QUIZ_INTERVAL=0 to disable
 	// scheduled quizzes (the /quiz command still works).

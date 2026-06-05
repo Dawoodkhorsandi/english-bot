@@ -158,6 +158,16 @@ var Changelogs = []ChangelogEntry{
 			"• Targets CEFR B2–C1 — academic, professional, and media vocabulary with natural sentence complexity\n" +
 			"• Use /level to switch to the new level",
 	},
+	{
+		Version: "1.17.0",
+		Text: "📣 <b>What's New in v1.17.0</b>\n\n" +
+			"• ⚙️ <b>Unified Settings!</b> Use /settings to control everything in one place\n" +
+			"• ⏱ <b>Quick Setup!</b> Use /setup to pick how much time you have per day (5 min → 2 hours) — the bot tunes itself to fit your schedule\n" +
+			"• Toggle quizzes, idiom of the day, SRS word reviews, weekly digest and midnight vocab recap individually\n" +
+			"• Set your own quiz frequency: every 3, 6, 12 or 24 hours\n" +
+			"• No more message pileups — a smart rate limiter ensures at most one message per interval window\n" +
+			"• Default broadcast interval changed from 30 → 60 min for a calmer default experience",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -386,11 +396,14 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 		welcome := "👋 <b>Welcome to English Muscle Memory Bot!</b>\n\n" +
-			"Every 30 minutes I send you something to practice — alternating between:\n" +
+			"I'll send you grammar drills and vocabulary words on a schedule, alternating between:\n" +
 			"• 🎯 a <b>grammar drill</b> (one verb across 21 forms — tap ▶️ to page through tenses, conditionals & more)\n" +
 			"• 📘 a <b>vocabulary word</b> (meaning, pronunciation, synonyms, opposites & examples)\n\n" +
 			"💬 <b>Tip:</b> send me <b>any word</b> (English or Persian) and I'll explain it like a vocabulary card!\n\n" +
+			"⏱ <b>Start here:</b> use /setup to tell me how much time you have per day — I'll tune everything automatically.\n\n" +
 			"📚 <b>Commands:</b>\n" +
+			"/setup — Quick-setup based on your daily time budget\n" +
+			"/settings — View and change all settings\n" +
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
 			"/idiom — Get an idiom of the day\n" +
@@ -476,6 +489,12 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		if err := sendIdiomCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
 			log.Printf("❌ [IDIOM_SEND_ERR] Idiom send failed for ChatID %d: %v", chatID, err)
 		}
+
+	case "/settings":
+		handleSettings(store, notifier, chatID)
+
+	case "/setup":
+		handleSetup(store, notifier, chatID)
 
 	case "/tip":
 		handleTip(ctx, chain, store, notifier, chatID, args)
@@ -909,6 +928,320 @@ func handleTip(ctx context.Context, chain *ProviderChain, store *Store, notifier
 	_ = notifier.Send(chatID, tip)
 }
 
+// ---------------------------------------------------------------------------
+// /setup — daily time-budget quick-setup (v1.17.0)
+// ---------------------------------------------------------------------------
+
+// timeBudgetPreset defines the settings applied for a given daily-time budget.
+type timeBudgetPreset struct {
+	label             string // human-readable button label
+	minutesPerDay     int    // key used in callback data
+	interval          int    // broadcast interval (minutes)
+	quizIntervalHours int    // per-user quiz interval (hours)
+	quizEnabled       bool
+	idiomEnabled      bool
+	tipsEnabled       bool
+	reviewEnabled     bool   // SRS word reviews
+	dailyReviewEnabled bool
+	digestEnabled     bool
+}
+
+// timeBudgetPresets is the ordered list of selectable daily-time presets.
+var timeBudgetPresets = []timeBudgetPreset{
+	{
+		label: "⚡ 5 min/day", minutesPerDay: 5,
+		interval: 240, quizIntervalHours: 24,
+		quizEnabled: true, idiomEnabled: false, tipsEnabled: false,
+		reviewEnabled: true, dailyReviewEnabled: false, digestEnabled: false,
+	},
+	{
+		label: "🎯 15 min/day", minutesPerDay: 15,
+		interval: 120, quizIntervalHours: 24,
+		quizEnabled: true, idiomEnabled: false, tipsEnabled: true,
+		reviewEnabled: true, dailyReviewEnabled: false, digestEnabled: false,
+	},
+	{
+		label: "📚 30 min/day", minutesPerDay: 30,
+		interval: 60, quizIntervalHours: 12,
+		quizEnabled: true, idiomEnabled: true, tipsEnabled: true,
+		reviewEnabled: true, dailyReviewEnabled: true, digestEnabled: true,
+	},
+	{
+		label: "🔥 1 hour/day", minutesPerDay: 60,
+		interval: 30, quizIntervalHours: 6,
+		quizEnabled: true, idiomEnabled: true, tipsEnabled: true,
+		reviewEnabled: true, dailyReviewEnabled: true, digestEnabled: true,
+	},
+	{
+		label: "💪 2 hours/day", minutesPerDay: 120,
+		interval: 30, quizIntervalHours: 3,
+		quizEnabled: true, idiomEnabled: true, tipsEnabled: true,
+		reviewEnabled: true, dailyReviewEnabled: true, digestEnabled: true,
+	},
+}
+
+// presetByMinutes looks up a preset by its minutesPerDay key.
+func presetByMinutes(minutes int) (timeBudgetPreset, bool) {
+	for _, p := range timeBudgetPresets {
+		if p.minutesPerDay == minutes {
+			return p, true
+		}
+	}
+	return timeBudgetPreset{}, false
+}
+
+// applyTimeBudgetPreset writes all settings defined by the preset to user_prefs.
+func applyTimeBudgetPreset(store *Store, chatID int64, p timeBudgetPreset) error {
+	if err := store.SetInterval(chatID, p.interval); err != nil {
+		return err
+	}
+	if err := store.SetQuizIntervalHours(chatID, p.quizIntervalHours); err != nil {
+		return err
+	}
+	if err := store.SetQuizEnabled(chatID, p.quizEnabled); err != nil {
+		return err
+	}
+	if err := store.SetIdiomEnabled(chatID, p.idiomEnabled); err != nil {
+		return err
+	}
+	if err := store.SetTipsEnabled(chatID, p.tipsEnabled); err != nil {
+		return err
+	}
+	if err := store.SetReviewEnabled(chatID, p.reviewEnabled); err != nil {
+		return err
+	}
+	if err := store.SetDailyReviewEnabled(chatID, p.dailyReviewEnabled); err != nil {
+		return err
+	}
+	if err := store.SetDigestEnabled(chatID, p.digestEnabled); err != nil {
+		return err
+	}
+	return nil
+}
+
+// setupKeyboard builds the time-budget selection keyboard.
+func setupKeyboard() [][]inlineButton {
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, p := range timeBudgetPresets {
+		row = append(row, inlineButton{
+			Text:         p.label,
+			CallbackData: fmt.Sprintf("setup:%d", p.minutesPerDay),
+		})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// handleSetup sends the daily-time-budget quick-setup keyboard.
+func handleSetup(store *Store, notifier Notifier, chatID int64) {
+	text := "⏱ <b>Quick Setup — How much time can you spend per day?</b>\n\n" +
+		"I'll tune your settings to fit your schedule:\n\n" +
+		"⚡ <b>5 min</b> — light touch: drill or word every 4 hours + SRS reviews\n" +
+		"🎯 <b>15 min</b> — steady: every 2 hours + daily tip + SRS reviews\n" +
+		"📚 <b>30 min</b> — solid: every hour + all daily features\n" +
+		"🔥 <b>1 hour</b> — active: every 30 min + all features + quizzes every 6h\n" +
+		"💪 <b>2 hours</b> — intensive: every 30 min + maximum quiz frequency\n\n" +
+		"You can always fine-tune later with /settings."
+	if err := notifier.SendKeyboard(chatID, text, setupKeyboard()); err != nil {
+		log.Printf("❌ [SETUP] Could not send setup keyboard to ChatID %d: %v", chatID, err)
+	}
+}
+
+// handleSetupCallback applies the chosen time-budget preset and shows the result.
+func handleSetupCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+	minutes, err := strconv.Atoi(strings.TrimPrefix(cb.Data, "setup:"))
+	if err != nil {
+		_ = notifier.AnswerCallback(cb.ID, "Unknown option")
+		return
+	}
+	p, ok := presetByMinutes(minutes)
+	if !ok {
+		_ = notifier.AnswerCallback(cb.ID, "Unknown option")
+		return
+	}
+	if err := applyTimeBudgetPreset(store, chatID, p); err != nil {
+		log.Printf("❌ [SETUP] Could not apply preset for ChatID %d: %v", chatID, err)
+		_ = notifier.AnswerCallback(cb.ID, "Could not save, try again")
+		return
+	}
+	log.Printf("⚙️  [SETUP] ChatID %d applied preset %q (%d min/day).", chatID, p.label, p.minutesPerDay)
+	_ = notifier.AnswerCallback(cb.ID, "Applied: "+p.label)
+
+	// Replace the setup message with a settings-hub view so the user can see
+	// exactly what changed and tweak anything they like.
+	prefs, _ := store.GetPrefs(chatID)
+	confirmText := fmt.Sprintf(
+		"✅ <b>Settings applied for %s</b>\n\n"+
+			"Broadcasts: every <b>%s</b>\n"+
+			"Quizzes: every <b>%s</b>\n\n"+
+			"Use /settings anytime to adjust individual options.",
+		p.label,
+		intervalLabel(p.interval),
+		quizIntervalLabel(p.quizIntervalHours),
+	)
+	if cb.Message != nil {
+		_ = notifier.EditMessage(chatID, cb.Message.MessageID, confirmText, settingsKeyboard(prefs))
+	} else {
+		_ = notifier.Send(chatID, confirmText)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /settings — unified settings hub (v1.17.0)
+// ---------------------------------------------------------------------------
+
+// handleSettings sends (or refreshes) the settings hub for the user.
+func handleSettings(store *Store, notifier Notifier, chatID int64) {
+	prefs, err := store.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("❌ [SETTINGS] Could not load prefs for ChatID %d: %v", chatID, err)
+		_ = notifier.Send(chatID, "❌ Sorry, I couldn't load your settings right now. Please try again.")
+		return
+	}
+	text := settingsText(prefs)
+	kb := settingsKeyboard(prefs)
+	if err := notifier.SendKeyboard(chatID, text, kb); err != nil {
+		log.Printf("❌ [SETTINGS] Could not send settings to ChatID %d: %v", chatID, err)
+	}
+}
+
+// settingsText formats the settings hub message body.
+func settingsText(prefs UserPrefs) string {
+	onOff := func(b bool) string {
+		if b {
+			return "ON"
+		}
+		return "OFF"
+	}
+	status := "Active"
+	if prefs.Paused {
+		status = "Paused"
+	}
+	return fmt.Sprintf(
+		"⚙️ <b>Your Settings</b>\n\n"+
+			"📚 Level: <b>%s</b>\n"+
+			"⏱ Broadcasts: every <b>%s</b>  •  Status: <b>%s</b>\n\n"+
+			"🔊 TTS: <b>%s</b>   💡 Tips: <b>%s</b>\n"+
+			"🗣️ Idiom: <b>%s</b>   🌙 Daily Review: <b>%s</b>\n"+
+			"❓ Quizzes: <b>%s</b> (every %s)   🔁 SRS: <b>%s</b>\n"+
+			"📊 Weekly Digest: <b>%s</b>\n\n"+
+			"Tap a button below to change any setting.",
+		levelLabel(prefs.Level),
+		intervalLabel(prefs.Interval), status,
+		onOff(prefs.TTSEnabled), onOff(prefs.TipsEnabled),
+		onOff(prefs.IdiomEnabled), onOff(prefs.DailyReviewEnabled),
+		onOff(prefs.QuizEnabled), quizIntervalLabel(prefs.QuizIntervalHours), onOff(prefs.ReviewEnabled),
+		onOff(prefs.DigestEnabled),
+	)
+}
+
+// settingsKeyboard builds the settings hub inline keyboard.
+func settingsKeyboard(prefs UserPrefs) [][]inlineButton {
+	tog := func(label string, key string, on bool) inlineButton {
+		icon := "✅"
+		if !on {
+			icon = "❌"
+		}
+		return inlineButton{Text: fmt.Sprintf("%s %s: %s", icon, label, map[bool]string{true: "ON", false: "OFF"}[on]), CallbackData: "settings:toggle:" + key}
+	}
+	pauseBtn := inlineButton{Text: "⏸ Pause broadcasts", CallbackData: "settings:toggle:pause"}
+	if prefs.Paused {
+		pauseBtn = inlineButton{Text: "▶️ Resume broadcasts", CallbackData: "settings:toggle:pause"}
+	}
+	return [][]inlineButton{
+		{
+			{Text: "📚 Level: " + levelLabel(prefs.Level), CallbackData: "settings:goto:level"},
+			{Text: "⏱ Every " + intervalLabel(prefs.Interval), CallbackData: "settings:goto:interval"},
+		},
+		{
+			tog("TTS", "tts", prefs.TTSEnabled),
+			tog("Tips", "tips", prefs.TipsEnabled),
+		},
+		{
+			tog("Idiom", "idiom", prefs.IdiomEnabled),
+			tog("Daily Review", "daily_review", prefs.DailyReviewEnabled),
+		},
+		{
+			tog("Quizzes", "quiz", prefs.QuizEnabled),
+			tog("SRS Reviews", "srs", prefs.ReviewEnabled),
+		},
+		{
+			tog("Weekly Digest", "digest", prefs.DigestEnabled),
+			pauseBtn,
+		},
+		{
+			{Text: "⏱ Quiz interval: every " + quizIntervalLabel(prefs.QuizIntervalHours), CallbackData: "settings:goto:quiz_interval"},
+		},
+	}
+}
+
+// settingsLevelKeyboard builds the level selection keyboard for use within the
+// settings hub, using settings-namespaced callback data and a Back button.
+func settingsLevelKeyboard(current string) [][]inlineButton {
+	var row1, row2 []inlineButton
+	for i, l := range allLevels {
+		label := levelLabel(l)
+		if l == current {
+			label = "✅ " + label
+		}
+		btn := inlineButton{Text: label, CallbackData: "settings:level:" + l}
+		if i < 2 {
+			row1 = append(row1, btn)
+		} else {
+			row2 = append(row2, btn)
+		}
+	}
+	return [][]inlineButton{
+		row1, row2,
+		{{Text: "⬅️ Back to Settings", CallbackData: "settings:show"}},
+	}
+}
+
+// settingsIntervalKeyboard builds the interval keyboard for use within settings.
+func settingsIntervalKeyboard(current int) [][]inlineButton {
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, iv := range allIntervals {
+		label := intervalLabel(iv)
+		if iv == current {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("settings:interval:%d", iv)})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Settings", CallbackData: "settings:show"}})
+	return rows
+}
+
+// settingsQuizIntervalKeyboard builds the quiz-interval keyboard within settings.
+func settingsQuizIntervalKeyboard(current int) [][]inlineButton {
+	var row []inlineButton
+	for _, h := range allQuizIntervalHours {
+		label := quizIntervalLabel(h)
+		if h == current {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("settings:quiz_interval:%d", h)})
+	}
+	return [][]inlineButton{
+		row,
+		{{Text: "⬅️ Back to Settings", CallbackData: "settings:show"}},
+	}
+}
+
 // intervalKeyboard builds an inline keyboard (rows of two) of the allowed send
 // intervals, marking the current one with a check.
 func intervalKeyboard(current int) [][]inlineButton {
@@ -993,6 +1326,16 @@ func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) 
 		return
 	}
 
+	if strings.HasPrefix(cb.Data, "setup:") {
+		handleSetupCallback(store, notifier, cb, chatID)
+		return
+	}
+
+	if strings.HasPrefix(cb.Data, "settings:") {
+		handleSettingsCallback(store, notifier, cb, chatID)
+		return
+	}
+
 	if strings.HasPrefix(cb.Data, "srs:") {
 		handleReviewCallback(store, notifier, cb, chatID)
 		return
@@ -1009,6 +1352,180 @@ func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) 
 	}
 
 	log.Printf("ℹ️  [CALLBACK_UNHANDLED] Unknown callback data %q from ChatID %d.", cb.Data, chatID)
+	_ = notifier.AnswerCallback(cb.ID, "")
+}
+
+// handleSettingsCallback processes all "settings:*" inline button taps from the
+// settings hub. It handles toggle, goto (sub-keyboard), and set operations,
+// then edits the message in place so the hub stays up-to-date.
+func handleSettingsCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+	rest := strings.TrimPrefix(cb.Data, "settings:")
+
+	// Helper: reload prefs and refresh the settings message in-place.
+	refresh := func(toast string) {
+		_ = notifier.AnswerCallback(cb.ID, toast)
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("❌ [SETTINGS] Could not reload prefs for chat %d: %v", chatID, err)
+			return
+		}
+		if cb.Message != nil {
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID, settingsText(prefs), settingsKeyboard(prefs))
+		}
+	}
+
+	// "settings:show" — just refresh (used by Back buttons in sub-keyboards).
+	if rest == "show" {
+		refresh("")
+		return
+	}
+
+	// "settings:goto:level" / "settings:goto:interval" / "settings:goto:quiz_interval"
+	if strings.HasPrefix(rest, "goto:") {
+		_ = notifier.AnswerCallback(cb.ID, "")
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			_ = notifier.AnswerCallback(cb.ID, "Could not load settings")
+			return
+		}
+		if cb.Message == nil {
+			return
+		}
+		switch strings.TrimPrefix(rest, "goto:") {
+		case "level":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("🎚️ <b>Difficulty level</b>\n\nCurrent: <b>%s</b>\nTap to change:", levelLabel(prefs.Level)),
+				settingsLevelKeyboard(prefs.Level),
+			)
+		case "interval":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("⏱ <b>Broadcast interval</b>\n\nCurrent: every <b>%s</b>\nTap to change:", intervalLabel(prefs.Interval)),
+				settingsIntervalKeyboard(prefs.Interval),
+			)
+		case "quiz_interval":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("⏱ <b>Quiz interval</b>\n\nCurrent: every <b>%s</b>\nTap to change:", quizIntervalLabel(prefs.QuizIntervalHours)),
+				settingsQuizIntervalKeyboard(prefs.QuizIntervalHours),
+			)
+		}
+		return
+	}
+
+	// "settings:level:<l>" — set level from within settings sub-keyboard.
+	if strings.HasPrefix(rest, "level:") {
+		level, ok := normalizeLevel(strings.TrimPrefix(rest, "level:"))
+		if !ok {
+			_ = notifier.AnswerCallback(cb.ID, "Unknown level")
+			return
+		}
+		if err := store.SetLevel(chatID, level); err != nil {
+			log.Printf("❌ [SETTINGS] Could not set level for chat %d: %v", chatID, err)
+			_ = notifier.AnswerCallback(cb.ID, "Could not save, try again")
+			return
+		}
+		log.Printf("🎚️  [SETTINGS] Chat %d set level to %s.", chatID, level)
+		refresh("Level set to " + levelLabel(level))
+		return
+	}
+
+	// "settings:interval:<n>" — set broadcast interval from within settings.
+	if strings.HasPrefix(rest, "interval:") {
+		minutes, perr := strconv.Atoi(strings.TrimPrefix(rest, "interval:"))
+		if perr != nil {
+			_ = notifier.AnswerCallback(cb.ID, "Unknown interval")
+			return
+		}
+		iv, ok := normalizeInterval(minutes)
+		if !ok {
+			_ = notifier.AnswerCallback(cb.ID, "Unknown interval")
+			return
+		}
+		if err := store.SetInterval(chatID, iv); err != nil {
+			log.Printf("❌ [SETTINGS] Could not set interval for chat %d: %v", chatID, err)
+			_ = notifier.AnswerCallback(cb.ID, "Could not save, try again")
+			return
+		}
+		log.Printf("⏱️  [SETTINGS] Chat %d set interval to %d min.", chatID, iv)
+		refresh("Interval set to " + intervalLabel(iv))
+		return
+	}
+
+	// "settings:quiz_interval:<n>" — set quiz interval from within settings.
+	if strings.HasPrefix(rest, "quiz_interval:") {
+		hours, perr := strconv.Atoi(strings.TrimPrefix(rest, "quiz_interval:"))
+		if perr != nil {
+			_ = notifier.AnswerCallback(cb.ID, "Unknown interval")
+			return
+		}
+		qh, ok := normalizeQuizIntervalHours(hours)
+		if !ok {
+			_ = notifier.AnswerCallback(cb.ID, "Unknown interval")
+			return
+		}
+		if err := store.SetQuizIntervalHours(chatID, qh); err != nil {
+			log.Printf("❌ [SETTINGS] Could not set quiz interval for chat %d: %v", chatID, err)
+			_ = notifier.AnswerCallback(cb.ID, "Could not save, try again")
+			return
+		}
+		log.Printf("⏱️  [SETTINGS] Chat %d set quiz interval to %dh.", chatID, qh)
+		refresh("Quiz interval set to " + quizIntervalLabel(qh))
+		return
+	}
+
+	// "settings:toggle:<key>" — toggle a boolean setting.
+	if strings.HasPrefix(rest, "toggle:") {
+		key := strings.TrimPrefix(rest, "toggle:")
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			_ = notifier.AnswerCallback(cb.ID, "Could not load settings")
+			return
+		}
+		var saveErr error
+		var toast string
+		switch key {
+		case "tts":
+			saveErr = store.SetTTSEnabled(chatID, !prefs.TTSEnabled)
+			toast = map[bool]string{true: "TTS ON", false: "TTS OFF"}[!prefs.TTSEnabled]
+		case "tips":
+			saveErr = store.SetTipsEnabled(chatID, !prefs.TipsEnabled)
+			toast = map[bool]string{true: "Tips ON", false: "Tips OFF"}[!prefs.TipsEnabled]
+		case "quiz":
+			saveErr = store.SetQuizEnabled(chatID, !prefs.QuizEnabled)
+			toast = map[bool]string{true: "Quizzes ON", false: "Quizzes OFF"}[!prefs.QuizEnabled]
+		case "idiom":
+			saveErr = store.SetIdiomEnabled(chatID, !prefs.IdiomEnabled)
+			toast = map[bool]string{true: "Idiom ON", false: "Idiom OFF"}[!prefs.IdiomEnabled]
+		case "srs":
+			saveErr = store.SetReviewEnabled(chatID, !prefs.ReviewEnabled)
+			toast = map[bool]string{true: "SRS ON", false: "SRS OFF"}[!prefs.ReviewEnabled]
+		case "digest":
+			saveErr = store.SetDigestEnabled(chatID, !prefs.DigestEnabled)
+			toast = map[bool]string{true: "Digest ON", false: "Digest OFF"}[!prefs.DigestEnabled]
+		case "daily_review":
+			saveErr = store.SetDailyReviewEnabled(chatID, !prefs.DailyReviewEnabled)
+			toast = map[bool]string{true: "Daily Review ON", false: "Daily Review OFF"}[!prefs.DailyReviewEnabled]
+		case "pause":
+			newPaused := !prefs.Paused
+			saveErr = store.SetPaused(chatID, newPaused)
+			if newPaused {
+				toast = "Broadcasts paused"
+			} else {
+				toast = "Broadcasts resumed"
+			}
+		default:
+			_ = notifier.AnswerCallback(cb.ID, "")
+			return
+		}
+		if saveErr != nil {
+			log.Printf("❌ [SETTINGS] Could not toggle %q for chat %d: %v", key, chatID, saveErr)
+			_ = notifier.AnswerCallback(cb.ID, "Could not save, try again")
+			return
+		}
+		log.Printf("⚙️  [SETTINGS] Chat %d toggled %q.", chatID, key)
+		refresh(toast)
+		return
+	}
+
 	_ = notifier.AnswerCallback(cb.ID, "")
 }
 
@@ -1264,6 +1781,8 @@ func registerBotCommands() {
 		{"command": "idiom", "description": "Get an idiom of the day"},
 		{"command": "tip", "description": "Get a grammar tip (or /tip on|off)"},
 		{"command": "quiz", "description": "Test yourself on a learned word"},
+		{"command": "setup", "description": "Quick-setup: pick how much time you have per day"},
+		{"command": "settings", "description": "View and change all your settings"},
 		{"command": "level", "description": "Set difficulty (beginner/intermediate/upper-intermediate/advanced)"},
 		{"command": "interval", "description": "Set how often practice arrives"},
 		{"command": "tts", "description": "Toggle pronunciation audio on/off"},
@@ -1416,13 +1935,19 @@ func openStore(path string) (*Store, error) {
 		PRIMARY KEY (chat_id, tip_date)
 	);
 	CREATE TABLE IF NOT EXISTS user_prefs (
-		chat_id          INTEGER PRIMARY KEY,
-		level            TEXT    NOT NULL DEFAULT 'intermediate',
-		paused           INTEGER NOT NULL DEFAULT 0,
-		interval_minutes INTEGER NOT NULL DEFAULT 30,
-		tts_enabled      INTEGER NOT NULL DEFAULT 1,
-		tips_enabled     INTEGER NOT NULL DEFAULT 1,
-		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+		chat_id              INTEGER PRIMARY KEY,
+		level                TEXT    NOT NULL DEFAULT 'intermediate',
+		paused               INTEGER NOT NULL DEFAULT 0,
+		interval_minutes     INTEGER NOT NULL DEFAULT 60,
+		tts_enabled          INTEGER NOT NULL DEFAULT 1,
+		tips_enabled         INTEGER NOT NULL DEFAULT 1,
+		quiz_enabled         INTEGER NOT NULL DEFAULT 1,
+		idiom_enabled        INTEGER NOT NULL DEFAULT 1,
+		review_enabled       INTEGER NOT NULL DEFAULT 1,
+		digest_enabled       INTEGER NOT NULL DEFAULT 1,
+		daily_review_enabled INTEGER NOT NULL DEFAULT 1,
+		quiz_interval_hours  INTEGER NOT NULL DEFAULT 6,
+		updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS review_schedule (
 		chat_id       INTEGER NOT NULL,
@@ -1540,7 +2065,7 @@ func (s *Store) migrate() error {
 	if !s.columnExists("user_prefs", "interval_minutes") {
 		log.Println("💾 [DB_MIGRATE] Adding user_prefs.interval_minutes column...")
 		if _, err := s.db.Exec(
-			"ALTER TABLE user_prefs ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 30",
+			"ALTER TABLE user_prefs ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 60",
 		); err != nil {
 			return err
 		}
@@ -1561,6 +2086,22 @@ func (s *Store) migrate() error {
 			"ALTER TABLE user_prefs ADD COLUMN tips_enabled INTEGER NOT NULL DEFAULT 1",
 		); err != nil {
 			return err
+		}
+	}
+	// user_prefs feature-toggle and quiz-interval columns added in v1.17.0.
+	for col, def := range map[string]string{
+		"quiz_enabled":         "INTEGER NOT NULL DEFAULT 1",
+		"idiom_enabled":        "INTEGER NOT NULL DEFAULT 1",
+		"review_enabled":       "INTEGER NOT NULL DEFAULT 1",
+		"digest_enabled":       "INTEGER NOT NULL DEFAULT 1",
+		"daily_review_enabled": "INTEGER NOT NULL DEFAULT 1",
+		"quiz_interval_hours":  "INTEGER NOT NULL DEFAULT 6",
+	} {
+		if !s.columnExists("user_prefs", col) {
+			log.Printf("💾 [DB_MIGRATE] Adding user_prefs.%s column...", col)
+			if _, err := s.db.Exec("ALTER TABLE user_prefs ADD COLUMN " + col + " " + def); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
