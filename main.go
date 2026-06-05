@@ -188,6 +188,12 @@ var Changelogs = []ChangelogEntry{
 		Text: "📣 <b>What's New in v1.18.2</b>\n\n" +
 			"• 🐛 <b>Bug fix:</b> The reply keyboard buttons (Word / Drill / Quiz / Stats) now work correctly again",
 	},
+	{
+		Version: "1.18.3",
+		Text: "📣 <b>What's New in v1.18.3</b>\n\n" +
+			"• 🐛 <b>Bug fix:</b> Drill navigation buttons (Next / Back) now work reliably\n" +
+			"• 🐛 <b>Bug fix:</b> Android back gesture now correctly returns to the chat list",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -321,7 +327,9 @@ func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store
 			log.Println("📡 [POLLER] Thread context killed. Terminating polling interface safely.")
 			return
 		default:
-			url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30", TelegramBotToken, offset)
+			url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30&allowed_updates=%s",
+				TelegramBotToken, offset,
+				"%5B%22message%22%2C%22callback_query%22%2C%22poll_answer%22%5D")
 
 			log.Printf("📡 [POLLER_REQ] Requesting updates from endpoint gateway. Current Offset pointer: %d", offset)
 			resp, err := client.Get(url)
@@ -1714,7 +1722,9 @@ func handleDrillCallback(store *Store, notifier Notifier, cb *TelegramCallbackQu
 	text, total := renderDrillPage(fullText, page)
 	_ = notifier.AnswerCallback(cb.ID, "")
 	if cb.Message != nil {
-		_ = notifier.EditMessage(chatID, cb.Message.MessageID, text, drillNavKeyboard(term, page, total))
+		if err := notifier.EditMessage(chatID, cb.Message.MessageID, text, drillNavKeyboard(term, page, total)); err != nil {
+			log.Printf("⚠️  [DRILL] EditMessage failed for chat %d msg %d page %d term %q: %v", chatID, cb.Message.MessageID, page, term, err)
+		}
 	}
 }
 
@@ -2049,7 +2059,6 @@ func (n *telegramNotifier) SendWithReplyKeyboard(chatID int64, text string, rows
 		"reply_markup": map[string]interface{}{
 			"keyboard":          btns,
 			"resize_keyboard":   true,
-			"is_persistent":     true,
 		},
 	})
 }
