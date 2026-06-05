@@ -183,6 +183,11 @@ var Changelogs = []ChangelogEntry{
 		Text: "📣 <b>What's New in v1.18.1</b>\n\n" +
 			"• 📊 <b>Mini App live!</b> The /stats Full Dashboard button now opens the interactive progress page at bot.mardeen.ir",
 	},
+	{
+		Version: "1.18.2",
+		Text: "📣 <b>What's New in v1.18.2</b>\n\n" +
+			"• 🐛 <b>Bug fix:</b> The reply keyboard buttons (Word / Drill / Quiz / Stats) now work correctly again",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -396,21 +401,24 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 
 	log.Printf("🎮 [COMMAND_MATCH] %q from @%s (ID: %d)", msg.Text, username, chatID)
 
-	fields := strings.Fields(msg.Text)
+	// Map persistent reply-keyboard button labels to slash commands before
+	// splitting on whitespace — the label includes a space (e.g. "🎯 Drill")
+	// so it must be matched against the full text, not just the first field.
+	trimmed := strings.TrimSpace(msg.Text)
+	switch trimmed {
+	case "📘 Word":
+		trimmed = "/word"
+	case "🎯 Drill":
+		trimmed = "/drill"
+	case "🧩 Quiz":
+		trimmed = "/quiz"
+	case "📊 Stats":
+		trimmed = "/stats"
+	}
+
+	fields := strings.Fields(trimmed)
 	command := fields[0]
 	args := fields[1:]
-
-	// Map persistent reply-keyboard button labels to slash commands.
-	switch command {
-	case "📘 Word":
-		command = "/word"
-	case "🎯 Drill":
-		command = "/drill"
-	case "🧩 Quiz":
-		command = "/quiz"
-	case "📊 Stats":
-		command = "/stats"
-	}
 
 	switch command {
 	case "/start":
