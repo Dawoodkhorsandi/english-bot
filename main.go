@@ -178,6 +178,11 @@ var Changelogs = []ChangelogEntry{
 			"• ⌨️ <b>Typing indicator</b> — you'll see 'typing...' while I'm generating content so the wait feels shorter\n" +
 			"• 👋 Personalised greetings using your Telegram name",
 	},
+	{
+		Version: "1.18.1",
+		Text: "📣 <b>What's New in v1.18.1</b>\n\n" +
+			"• 📊 <b>Mini App live!</b> The /stats Full Dashboard button now opens the interactive progress page at bot.mardeen.ir",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
