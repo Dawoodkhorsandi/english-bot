@@ -188,6 +188,11 @@ var Changelogs = []ChangelogEntry{
 		Text: "📣 <b>What's New in v1.19.0</b>\n\n" +
 			"• Bug fixes and stability improvements",
 	},
+	{
+		Version: "1.20.0",
+		Text: "📣 <b>What's New in v1.20.0</b>\n\n" +
+			"• 🇮🇷 <b>Persian definition!</b> Every vocabulary card now includes a Persian/Farsi translation — hidden behind a spoiler, tap to reveal",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -674,10 +679,22 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 		handleHealth(store, chain, notifier, chatID)
 
+	case "/users":
+		if !isMaintainer(chatID) {
+			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
+			return
+		}
+		handleAdminUsers(store, notifier, chatID)
+
 	default:
 		if strings.HasPrefix(command, "/") {
 			log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
 			_ = notifier.Send(chatID, "🤖 I don't know that command. Try /drill, /word, /tip, /quiz, /tts, /stats or /help — or just send me any word to look it up!")
+			return
+		}
+		// If the maintainer is in "message user" mode, intercept the text.
+		if isMaintainer(chatID) && adminMsgTarget.Load() != 0 {
+			handleAdminMsgSend(notifier, chatID, msg.Text)
 			return
 		}
 		// Plain text (no leading slash) is treated as a word lookup (Change M).
@@ -1444,6 +1461,15 @@ func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) 
 
 	if strings.HasPrefix(cb.Data, "drill:") {
 		handleDrillCallback(store, notifier, cb, chatID)
+		return
+	}
+
+	if strings.HasPrefix(cb.Data, "admin:") {
+		if !isMaintainer(chatID) {
+			_ = notifier.AnswerCallback(cb.ID, "🔒 Admin only")
+			return
+		}
+		handleAdminCallback(store, notifier, cb, chatID)
 		return
 	}
 

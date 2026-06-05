@@ -10,7 +10,7 @@ A Telegram bot that sends subscribers AI-generated English practice on a configu
 ## Features
 
 - **Grammar Drills** -- one verb across 21 forms (12 tenses, all 4 conditionals, modals, passive, imperative, *used to*), delivered as five navigable pages with ◀️/▶️ buttons
-- **Vocabulary Cards** -- meaning, pronunciation, synonyms, opposites, and examples
+- **Vocabulary Cards** -- meaning, pronunciation, synonyms, opposites, examples, and a hidden Persian/Farsi definition (tap to reveal)
 - **Pronunciation Audio** -- best-effort voice note after each vocabulary card and idiom (Gemini TTS with espeak-ng fallback, per-user `/tts` toggle)
 - **Idiom of the Day** -- a common English idiom with meaning and examples, daily and on demand via `/idiom`
 - **Spaced Repetition (SRS)** -- SM-2-style review scheduler resurfaces words at growing intervals so you remember what you've learned
@@ -25,7 +25,7 @@ A Telegram bot that sends subscribers AI-generated English practice on a configu
 - **Pre-Generated Pool** -- background worker keeps a content pool topped up; broadcasts never block on AI calls
 - **Quiet Hours** -- no broadcasts during configurable overnight window (default 00:00--09:00 Tehran)
 - **Daily Review** -- compact bedtime recap of the day's vocabulary at midnight
-- **Admin Tools** -- `/metrics`, `/health`, `/announce` gated by maintainer chat ID
+- **Admin Tools** -- `/metrics`, `/health`, `/announce`, `/users` (paginated user list with detail view and direct messaging) gated by maintainer chat ID
 
 ## Quick Start
 
@@ -103,6 +103,7 @@ Gated by `MAINTAINER_CHAT_ID` -- other users see "not authorized".
 | `/metrics` | Subscriber stats, pool depth, quiz volume, mastered count |
 | `/announce <text>` | Broadcast an HTML message to all active subscribers |
 | `/health` | List enabled AI providers |
+| `/users` | Paginated user list with inline buttons; tap any user to see full detail (settings, toggles, progress, quiz accuracy, SRS state, streaks); send a direct message to any user from the detail view |
 
 ## Configuration
 
@@ -141,7 +142,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 ## Architecture
 
 ```
-Go application (single package main, 12 source files)
+Go application (single package main, 13 source files)
 +-- main.go           -- startup, schema, Telegram types, command router, Store
 +-- config.go         -- timezone, pool & scheduler tuning knobs, WEB_APP_URL/PORT
 +-- providers.go      -- Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
@@ -153,6 +154,7 @@ Go application (single package main, 12 source files)
 +-- srs.go            -- spaced-repetition SM-2-lite logic, review scheduler
 +-- quiz.go           -- quiz building (4 types + native polls), poll registry, quiz scheduler
 +-- stats.go          -- /stats computation (progress bars), admin metrics
++-- admin.go          -- admin panel: paginated /users, user detail, direct messaging
 +-- webapp.go         -- optional Mini App HTTP server, HMAC initData validation, /api/stats
 ```
 
