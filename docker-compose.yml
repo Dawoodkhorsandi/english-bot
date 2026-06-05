@@ -11,7 +11,18 @@ services:
       # container restarts and image rebuilds.
       - bot-data:/data
     # The bot makes only outbound HTTPS calls (Telegram long-poll + AI
-    # providers); no inbound ports are exposed.
+    # providers). Port 8090 is reachable only within the Docker network (nginx).
+
+  nginx:
+    image: nginx:alpine
+    container_name: english-bot-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - english-bot
 
 volumes:
   bot-data:
