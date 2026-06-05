@@ -23,19 +23,20 @@ The bot uses Google Gemini 2.5 Flash to generate unique, personalized content an
 ```
 Go application (multi-file, single package main)
 ├── main.go           — startup, wiring, Telegram types, command router, Store (SQLite), env-var helpers (getEnv, lookupEnv)
-├── config.go         — timezone, pool & scheduler tuning knobs
+├── config.go         — timezone, pool & scheduler tuning knobs, WEB_APP_URL/WEB_APP_PORT
 ├── providers.go      — Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
 ├── generation.go     — prompt builders, generateContent, generateWordFor, term/meaning parsers
 ├── pool.go           — content_pool Store methods, serveContent, poolFiller goroutine
 ├── schedule.go       — quiet hours, broadcast scheduler, daily review scheduler, daily tip scheduler, weekly digest scheduler
-├── prefs.go          — user_prefs Store methods, level/interval/pause/tip helpers
+├── prefs.go          — user_prefs Store methods, level/interval/pause/tip/feature-toggle helpers, SetFirstName, streak helpers
 ├── tts.go            — pronunciation TTS generation (Gemini + espeak-ng fallback) and sendVoice helper
 ├── srs.go            — spaced-repetition SM-2-lite logic, review_schedule Store methods, review scheduler
-├── quiz.go           — quiz building, quiz_results Store methods, quiz scheduler
-└── stats.go          — /stats computation (streaks, activity days, formatStats), admin metrics (SubscriberStats, TotalQuizStats, TotalMasteredCount)
+├── quiz.go           — quiz building (4 types + native poll), quiz_results, poll registry, quiz scheduler
+├── stats.go          — /stats computation (streaks, activity days, progressBar, formatStats), admin metrics
+└── webapp.go         — optional Telegram Mini App HTTP server; HMAC-SHA256 initData validation; /api/stats JSON endpoint
 ```
 
-The application runs ten concurrent goroutines:
+The application runs ten concurrent goroutines (plus an optional web server goroutine when `WEB_APP_URL` is set):
 1. **Pool filler** (`poolFiller`) — tops up the pre-generated content pool in the background
 2. **Broadcast scheduler** (`runBroadcastScheduler`) — fires every half hour, per-user interval-aware delivery sweep
 3. **Daily review scheduler** (`runDailyReviewScheduler`) — sends a bedtime word recap at local midnight
@@ -74,6 +75,8 @@ All configuration is read from environment variables at startup. There are no co
 | `DIGEST_DAY` | `Sunday` | Weekday the weekly digest is sent |
 | `DIGEST_TIME` | `20:00` | Time of day the weekly digest is sent |
 | `IDIOM_TIME` | `09:00` | Local time the daily idiom of the day is sent; `off` disables it |
+| `WEB_APP_URL` | *(unset)* | Public HTTPS base URL where the bot's web server is reachable (e.g. `https://bot.example.com`). When set, `/stats` shows a `📊 Full Dashboard` button that opens the Telegram Mini App. Leave unset to disable the web server entirely. (v1.18.0) |
+| `WEB_APP_PORT` | `8090` | Local TCP port for the embedded Mini App HTTP server. Only used when `WEB_APP_URL` is set. (v1.18.0) |
 
 Per-provider API keys, base-URL overrides, and model overrides (e.g. `GROQ_MODEL`,
 `CEREBRAS_BASE_URL`, `GEMINI2_MODEL`, `SAMBANOVA_API_KEY`, `COHERE_API_KEY`) are
@@ -259,6 +262,8 @@ Primary key is `(chat_id, tip_date)` — one scheduled tip per user per day.
 | `digest_enabled` | `INTEGER` | `1` = weekly digest enabled, default `1` (v1.17.0) |
 | `daily_review_enabled` | `INTEGER` | `1` = midnight vocabulary recap enabled, default `1` (v1.17.0) |
 | `quiz_interval_hours` | `INTEGER` | Hours between scheduled quizzes, default `6` (v1.17.0) |
+| `first_name` | `TEXT` | User's Telegram first name, updated on every inbound message; used in streak celebrations and personalised greetings (v1.18.0) |
+| `streak_celebrated` | `INTEGER` | Highest streak milestone (3/7/14/30/60) already celebrated; prevents repeat celebrations, default `0` (v1.18.0) |
 | `updated_at` | `DATETIME` | Last change time |
 
 Rows are created lazily via upsert (`INSERT … ON CONFLICT`) the first time a user sets
@@ -438,13 +443,13 @@ All messages use `parse_mode: HTML`.
 |---|---|
 | `/start` | Subscribes user (idempotent). If new: baselines all changelogs as seen, notifies maintainer, sends welcome. If returning: delivers any unseen changelogs first. Always sends welcome message. |
 | `/help` | Sends usage instructions covering grammar drills, vocabulary words, grammar tips, level/interval, TTS toggle, and pause/resume. |
-| `/drill` | Sends a "Generating…" ack, calls `serveContent(kind=drill, level, allowGenerate=true)` (pool-first, inline-gen on miss), returns the result. |
-| `/word` | Sends a "Finding a fresh word…" ack, calls `serveContent(kind=word, level, allowGenerate=true)`, returns the vocabulary card, then best-effort sends a pronunciation voice note replying to the card. |
-| `/idiom` | Sends a "Finding an idiom…" ack, calls `serveContent(kind=idiom, level, allowGenerate=true)`, returns the idiom card, then best-effort sends a pronunciation voice note replying to it. (v1.12.0) |
-| `/tip [on\|off]` | No arg: sends an on-demand grammar tip (`serveContent(kind=tip, level=intermediate, allowGenerate=true)`). `on`/`off`: toggles scheduled daily tips via `user_prefs.tips_enabled`. (v1.15.0) |
-| `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query` and are handled by `handleCallback`. (v1.4.0) |
-| `/stats` | Sends a read-only progress summary: drills practised, words learned, mastered, active days, current & longest daily streak, quiz accuracy, level (`UserStats` / `formatStats`). (v1.5.0; mastered v1.8.0; quiz accuracy v1.9.0) |
-| `/quiz` | Sends one multiple-choice quiz on a learned word (biased to due reviews); the tapped answer is recorded and feeds spaced repetition. (v1.9.0) |
+| `/drill` | Fires `sendChatAction(typing)`, sends a "Generating…" ack, calls `serveContent(kind=drill)`, delivers the drill. After delivery, asynchronously checks streak milestones. (v1.18.0: typing indicator + streak check) |
+| `/word` | Fires `sendChatAction(typing)`, sends a "Finding…" ack, calls `serveContent(kind=word)`, delivers word card + TTS. Checks streak milestones afterward. (v1.18.0: typing indicator + streak check) |
+| `/idiom` | Fires `sendChatAction(typing)`, sends a "Finding…" ack, calls `serveContent(kind=idiom)`, delivers idiom card + TTS. (v1.12.0; v1.18.0: typing indicator) |
+| `/tip [on\|off]` | Fires `sendChatAction(typing)`. No arg: on-demand grammar tip. `on`/`off`: toggles `user_prefs.tips_enabled`. (v1.15.0; v1.18.0: typing indicator) |
+| `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query`. (v1.4.0) |
+| `/stats` | Sends a progress summary with Unicode progress bars for streak and quiz accuracy; personalised greeting from `user_prefs.first_name`. When `WEB_APP_URL` is configured, includes a `📊 Full Dashboard` inline button that opens the Telegram Mini App. (`UserStats` / `formatStats(st, firstName)`) (v1.5.0; v1.18.0: bars, greeting, mini-app button) |
+| `/quiz` | Sends a native Telegram quiz poll (`sendPoll type:quiz`); Telegram highlights the correct answer after the user taps. The `poll_answer` update is routed to `handleQuizPollAnswer` which grades the result and feeds SRS. Falls back to inline keyboard if `sendPoll` fails. (v1.9.0; v1.18.0: native polls) |
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
 | `/interval [min]` | With a numeric argument, sets the send interval directly; without, shows the current interval + an inline keyboard of options (`handleInterval`). Allowed: 30/60/120/180/240/360/480/720 min. (v1.6.0) |
@@ -483,6 +488,89 @@ given user-slot wins and sends; all others skip silently.
 
 State is in-memory; a process restart resets it (at most one extra message at the
 first slot after restart — acceptable).
+
+---
+
+### Native Quiz Polls — `sendQuizAsPoll` / `handleQuizPollAnswer` (v1.18.0)
+
+Quizzes are delivered via Telegram's `sendPoll` API with `type: quiz`. Telegram
+natively highlights the correct answer after the user taps, shows an explanation
+(the word + its meaning), and animates the result — no custom UI needed.
+
+**Poll registry:** because `poll_answer` updates arrive asynchronously (separate
+from the message flow), the bot keeps an in-memory map `pendingQuizPolls`
+(`map[string]pendingQuizPoll`) keyed by Telegram's `poll_id`. Each entry stores
+`{chatID, word, correctIdx}`. `storePendingPoll` writes to the map;
+`popPendingPoll` reads and deletes atomically under a mutex.
+
+**Grading:** when Telegram sends a `poll_answer` update,
+`handleQuizPollAnswer` pops the entry, compares `option_ids[0]` against the
+stored `correctIdx`, records the result via `RecordQuizResult`, and calls
+`ApplyReviewKnown` or `ApplyReviewForgot` to advance the SRS schedule.
+
+**Fallback:** if `sendPoll` returns an error (e.g. the bot isn't configured for
+polls), `sendQuizAsPoll` falls back transparently to `SendKeyboard` with the
+inline button quiz.
+
+---
+
+### Streak Milestone Celebrations — `checkStreakCelebration` (v1.18.0)
+
+After any `/drill` or `/word` delivery, `checkStreakCelebration` is called
+asynchronously (`go checkStreakCelebration(...)`). It:
+
+1. Loads `UserStats` to get `CurrentStreak`.
+2. Finds the highest milestone in `{3, 7, 14, 30, 60}` that the streak has
+   reached.
+3. Compares against `user_prefs.streak_celebrated` (the last celebrated
+   milestone). If the current milestone is higher, sends a congratulatory
+   message and updates the column.
+
+The column prevents the same celebration from firing twice. Milestone messages
+use the user's `first_name` (from `user_prefs`) or fall back to "friend".
+
+---
+
+### Persistent Reply Keyboard (v1.18.0)
+
+On `/start`, `SendWithReplyKeyboard` sends the welcome message with a
+`ReplyKeyboardMarkup` (`resize_keyboard: true`, `is_persistent: true`) containing
+four buttons:
+
+```
+[ 📘 Word ]  [ 🎯 Drill ]
+[ 🧩 Quiz ]  [ 📊 Stats ]
+```
+
+At the top of `handleMessage`, button texts are mapped to their slash command
+equivalents before the switch statement, so the rest of the router sees
+`/word`, `/drill`, `/quiz`, `/stats` regardless of how the user triggered the
+command.
+
+---
+
+### Telegram Mini App — `webapp.go` (v1.18.0, optional)
+
+When `WEB_APP_URL` is set, `startWebServer` launches an HTTP server on
+`WEB_APP_PORT` (default `8090`) with two routes:
+
+- `GET /stats` — serves the single-page HTML app (`statsPageHTML`)
+- `GET /api/stats?initData=...` — validates Telegram `initData` (HMAC-SHA256),
+  returns a JSON stats object
+
+**initData validation** (`validateInitData`): parses the URL-encoded string,
+sorts all fields except `hash` into a `key=value\n` check string, computes
+`HMAC-SHA256(HMAC-SHA256("WebAppData", bot_token), check_string)`, and compares
+to the `hash` field. Rejects the request on mismatch.
+
+**Stats JSON** includes `current_streak`, `longest_streak`, `words`, `mastered`,
+`verbs`, `quiz_answered`, `quiz_correct`, `quiz_pct`, `active_days`,
+`activity_days` (sorted `"YYYY-MM-DD"` strings), and `level`.
+
+**HTML page** (`statsPageHTML`) uses the Telegram WebApp JS SDK, calls
+`/api/stats`, and renders stat cards with Unicode progress bars and a Chart.js
+30-day activity bar chart. Colours adapt to Telegram's theme CSS variables
+(`--tg-theme-bg-color`, `--tg-theme-button-color`, etc.).
 
 ---
 

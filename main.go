@@ -1194,18 +1194,31 @@ func settingsText(prefs UserPrefs) string {
 	}
 	return fmt.Sprintf(
 		"⚙️ <b>Your Settings</b>\n\n"+
-			"📚 Level: <b>%s</b>\n"+
-			"⏱ Broadcasts: every <b>%s</b>  •  Status: <b>%s</b>\n\n"+
-			"🔊 TTS: <b>%s</b>   💡 Tips: <b>%s</b>\n"+
-			"🗣️ Idiom: <b>%s</b>   🌙 Daily Review: <b>%s</b>\n"+
-			"❓ Quizzes: <b>%s</b> (every %s)   🔁 SRS: <b>%s</b>\n"+
-			"📊 Weekly Digest: <b>%s</b>\n\n"+
+			"📚 <b>Level:</b> %s\n"+
+			"⏱ <b>Broadcast interval:</b> every %s  •  <b>Status:</b> %s\n\n"+
+			"🔊 <b>Voice pronunciation (TTS):</b> %s\n"+
+			"    <i>Sends a short audio clip after each word/idiom so you hear the right accent</i>\n\n"+
+			"🔁 <b>SRS word reviews:</b> %s\n"+
+			"    <i>Spaced-repetition: learned words come back at growing intervals to lock them into memory</i>\n\n"+
+			"🧩 <b>Quizzes:</b> %s  (every %s)\n"+
+			"    <i>Multiple-choice questions on words you've already learned</i>\n\n"+
+			"🗣️ <b>Idiom of the day:</b> %s\n"+
+			"    <i>One common English expression with meaning and examples, sent once a day</i>\n\n"+
+			"💡 <b>Daily grammar tip:</b> %s\n"+
+			"    <i>One focused grammar rule with correct/incorrect examples, sent once a day</i>\n\n"+
+			"🌙 <b>Midnight recap:</b> %s\n"+
+			"    <i>A quick summary of today's words sent at midnight — great for a last look before sleep</i>\n\n"+
+			"📊 <b>Weekly digest:</b> %s\n"+
+			"    <i>Every Sunday evening: a recap of the week's words, quiz accuracy and streak</i>\n\n"+
 			"Tap a button below to change any setting.",
 		levelLabel(prefs.Level),
 		intervalLabel(prefs.Interval), status,
-		onOff(prefs.TTSEnabled), onOff(prefs.TipsEnabled),
-		onOff(prefs.IdiomEnabled), onOff(prefs.DailyReviewEnabled),
-		onOff(prefs.QuizEnabled), quizIntervalLabel(prefs.QuizIntervalHours), onOff(prefs.ReviewEnabled),
+		onOff(prefs.TTSEnabled),
+		onOff(prefs.ReviewEnabled),
+		onOff(prefs.QuizEnabled), quizIntervalLabel(prefs.QuizIntervalHours),
+		onOff(prefs.IdiomEnabled),
+		onOff(prefs.TipsEnabled),
+		onOff(prefs.DailyReviewEnabled),
 		onOff(prefs.DigestEnabled),
 	)
 }
@@ -1229,23 +1242,23 @@ func settingsKeyboard(prefs UserPrefs) [][]inlineButton {
 			{Text: "⏱ Every " + intervalLabel(prefs.Interval), CallbackData: "settings:goto:interval"},
 		},
 		{
-			tog("TTS", "tts", prefs.TTSEnabled),
-			tog("Tips", "tips", prefs.TipsEnabled),
+			tog("🔊 Voice pronunciation", "tts", prefs.TTSEnabled),
+			tog("💡 Daily grammar tip", "tips", prefs.TipsEnabled),
 		},
 		{
-			tog("Idiom", "idiom", prefs.IdiomEnabled),
-			tog("Daily Review", "daily_review", prefs.DailyReviewEnabled),
+			tog("🗣️ Idiom of the day", "idiom", prefs.IdiomEnabled),
+			tog("🌙 Midnight recap", "daily_review", prefs.DailyReviewEnabled),
 		},
 		{
-			tog("Quizzes", "quiz", prefs.QuizEnabled),
-			tog("SRS Reviews", "srs", prefs.ReviewEnabled),
+			tog("🧩 Quizzes", "quiz", prefs.QuizEnabled),
+			tog("🔁 Word reviews (SRS)", "srs", prefs.ReviewEnabled),
 		},
 		{
-			tog("Weekly Digest", "digest", prefs.DigestEnabled),
+			tog("📊 Weekly digest", "digest", prefs.DigestEnabled),
 			pauseBtn,
 		},
 		{
-			{Text: "⏱ Quiz interval: every " + quizIntervalLabel(prefs.QuizIntervalHours), CallbackData: "settings:goto:quiz_interval"},
+			{Text: "⏱ Quiz every " + quizIntervalLabel(prefs.QuizIntervalHours), CallbackData: "settings:goto:quiz_interval"},
 		},
 	}
 }
