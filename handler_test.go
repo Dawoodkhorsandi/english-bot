@@ -904,15 +904,16 @@ func TestSendPendingChangelogs_SilentSkipped(t *testing.T) {
 	orig := Changelogs
 	Changelogs = append(Changelogs, ChangelogEntry{
 		Version: "99.0.0",
+		Text:    "internal fix: backfill cards",
 		Silent:  true,
 	})
 	defer func() { Changelogs = orig }()
 
 	sendPendingChangelogs(store, mock, 200)
 
-	// Silent entry should NOT have been sent to the user.
+	// Regular user should NOT receive a message.
 	if mock.sentCount() != 0 {
-		t.Errorf("silent changelog should not send a message, got %d sends", mock.sentCount())
+		t.Errorf("silent changelog should not send a message to regular user, got %d sends", mock.sentCount())
 	}
 
 	// But it should be marked as seen.
@@ -920,6 +921,52 @@ func TestSendPendingChangelogs_SilentSkipped(t *testing.T) {
 	for _, u := range unseen {
 		if u.Version == "99.0.0" {
 			t.Error("silent changelog should have been marked as seen")
+		}
+	}
+}
+
+func TestSendPendingChangelogs_SilentSentToMaintainer(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	saveMaintainer(t)
+	MaintainerChatID = "300"
+	store.AddSubscriber(300)
+
+	// Mark all existing changelogs as seen.
+	for _, entry := range Changelogs {
+		store.MarkChangelogSeen(300, entry.Version)
+	}
+
+	orig := Changelogs
+	Changelogs = append(Changelogs, ChangelogEntry{
+		Version: "99.0.0",
+		Text:    "internal fix: backfill cards",
+		Silent:  true,
+	})
+	defer func() { Changelogs = orig }()
+
+	sendPendingChangelogs(store, mock, 300)
+
+	// Maintainer SHOULD receive the silent changelog.
+	if mock.sentCount() != 1 {
+		t.Fatalf("maintainer should receive silent changelog, got %d sends", mock.sentCount())
+	}
+
+	// Verify the message has the internal deploy prefix.
+	msg := mock.lastSentText()
+	if !strings.Contains(msg, "[Internal Deploy v99.0.0]") {
+		t.Errorf("maintainer message should contain internal deploy indicator, got %q", msg)
+	}
+	if !strings.Contains(msg, "internal fix: backfill cards") {
+		t.Errorf("maintainer message should contain the changelog text, got %q", msg)
+	}
+
+	// Should also be marked as seen.
+	unseen, _ := store.UnseenChangelogs(300)
+	for _, u := range unseen {
+		if u.Version == "99.0.0" {
+			t.Error("silent changelog should have been marked as seen for maintainer")
 		}
 	}
 }
@@ -1255,8 +1302,17 @@ func TestBroadcastChangelogsOnStartup_DeliversToAll(t *testing.T) {
 
 	broadcastChangelogsOnStartup(store, mock)
 
-	// Each subscriber should have received len(Changelogs) messages.
-	expectedTotal := len(Changelogs) * 2
+	// Count only non-silent entries (silent ones are marked seen but not sent
+	// to regular users).
+	visible := 0
+	for _, e := range Changelogs {
+		if !e.Silent {
+			visible++
+		}
+	}
+
+	// Each subscriber should have received visible changelog messages.
+	expectedTotal := visible * 2
 	if got := mock.sentCount(); got != expectedTotal {
 		t.Errorf("expected %d sends, got %d", expectedTotal, got)
 	}
@@ -1267,8 +1323,8 @@ func TestBroadcastChangelogsOnStartup_DeliversToAll(t *testing.T) {
 		gotChats[s.chatID]++
 	}
 	for _, id := range []int64{100, 200} {
-		if gotChats[id] != len(Changelogs) {
-			t.Errorf("chat %d: expected %d sends, got %d", id, len(Changelogs), gotChats[id])
+		if gotChats[id] != visible {
+			t.Errorf("chat %d: expected %d sends, got %d", id, visible, gotChats[id])
 		}
 	}
 }
@@ -1298,16 +1354,30 @@ func TestBroadcastChangelogsOnStartup_SkipsAlreadySeen(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	// Mark all but the last changelog as seen.
-	for i := 0; i < len(Changelogs)-1; i++ {
-		store.MarkChangelogSeen(100, Changelogs[i].Version)
+	// Find the last visible (non-silent) changelog entry.
+	lastVisibleIdx := -1
+	for i := len(Changelogs) - 1; i >= 0; i-- {
+		if !Changelogs[i].Silent {
+			lastVisibleIdx = i
+			break
+		}
+	}
+	if lastVisibleIdx < 0 {
+		t.Fatal("no visible changelog entries found")
+	}
+
+	// Mark everything except the last visible entry as seen.
+	for i, e := range Changelogs {
+		if i != lastVisibleIdx {
+			store.MarkChangelogSeen(100, e.Version)
+		}
 	}
 
 	broadcastChangelogsOnStartup(store, mock)
 
-	// Should send only the last changelog entry.
+	// Should send only the last visible changelog entry.
 	if got := mock.sentCount(); got != 1 {
-		t.Errorf("expected 1 send (only latest unseen), got %d", got)
+		t.Errorf("expected 1 send (only latest unseen visible), got %d", got)
 	}
 	if got := mock.lastSentText(); !strings.Contains(got, "What's New") {
 		t.Error("expected changelog text containing \"What's New\"")

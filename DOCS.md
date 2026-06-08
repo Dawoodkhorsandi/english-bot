@@ -99,7 +99,7 @@ The bot has a built-in mechanism to notify existing subscribers when a new versi
 3. **Existing users** receive any unseen changelog entries:
    - At the start of each half-hourly broadcast cycle (before their drill)
    - When they run `/start` again
-4. **Silent entries** (`Silent: true`) are marked as seen without sending any message to the user. This is useful for internal fixes and housekeeping releases that don't warrant a user-facing notification.
+4. **Silent entries** (`Silent: true`) are marked as seen without sending any message to regular users. The **maintainer** (identified by `MaintainerChatID`) still receives silent entries with a `🔧 [Internal Deploy vX.Y.Z]` prefix so they know exactly when a deploy landed. This is useful for internal fixes and housekeeping releases that don't warrant a user-facing notification.
 
 The `changelog_delivery` table tracks which versions each user has already received, so each entry is delivered exactly once per user.
 

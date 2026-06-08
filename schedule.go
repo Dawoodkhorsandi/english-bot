@@ -261,7 +261,11 @@ func broadcastChangelogsOnStartup(store *Store, notifier Notifier) {
 		}
 		for _, entry := range unseen {
 			if entry.Silent {
-				// Silent entries: mark seen without sending.
+				// Maintainer receives a private deploy notice.
+				if isMaintainer(chatID) {
+					msg := fmt.Sprintf("🔧 <b>[Internal Deploy v%s]</b>\n\n%s", entry.Version, entry.Text)
+					_ = notifier.Send(chatID, msg)
+				}
 				if err := store.MarkChangelogSeen(chatID, entry.Version); err != nil {
 					log.Printf("⚠️  [CHANGELOG-BOOT] Could not mark silent v%s seen for ChatID %d: %v", entry.Version, chatID, err)
 				}

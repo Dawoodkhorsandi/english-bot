@@ -204,6 +204,14 @@ var Changelogs = []ChangelogEntry{
 			"• Use /mywords bookmarks to see only your bookmarked words\n" +
 			"• 🎚️ <b>Smoother difficulty levels!</b> Intermediate (B1) and Upper-Intermediate (B2) are better calibrated",
 	},
+	{
+		Version: "1.21.1",
+		Silent:  true,
+		Text: "• Fixed /bookmark empty state showing misleading pagination\n" +
+			"• Bookmark button now appears on all word cards including old pool entries\n" +
+			"• Stale word cards (missing Persian) are auto-refreshed in the background\n" +
+			"• Added silent changelog support for internal deploys",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -2123,7 +2131,8 @@ func (n *telegramNotifier) SendWithReplyKeyboard(chatID int64, text string, rows
 
 // sendPendingChangelogs delivers any changelog entries the user has not yet
 // seen and marks them as delivered immediately after each successful send.
-// Silent entries are marked as seen without sending a message.
+// Silent entries are marked as seen without sending a message to regular users,
+// but the maintainer still receives them with an internal-deploy indicator.
 func sendPendingChangelogs(store *Store, notifier Notifier, chatID int64) {
 	unseen, err := store.UnseenChangelogs(chatID)
 	if err != nil {
@@ -2132,7 +2141,11 @@ func sendPendingChangelogs(store *Store, notifier Notifier, chatID int64) {
 	}
 	for _, entry := range unseen {
 		if entry.Silent {
-			// Mark as seen without notifying the user.
+			// Maintainer receives a private deploy notice.
+			if isMaintainer(chatID) {
+				msg := fmt.Sprintf("🔧 <b>[Internal Deploy v%s]</b>\n\n%s", entry.Version, entry.Text)
+				_ = notifier.Send(chatID, msg)
+			}
 			if err := store.MarkChangelogSeen(chatID, entry.Version); err != nil {
 				log.Printf("⚠️  [CHANGELOG] Could not mark silent v%s seen for ChatID %d: %v", entry.Version, chatID, err)
 			}
