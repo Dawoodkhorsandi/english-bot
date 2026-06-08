@@ -180,7 +180,14 @@ func (s *Store) LearnedWords(chatID int64, offset, limit int, bookmarksOnly bool
 func formatMyWordsPage(words []LearnedWord, page, totalPages, totalWords int, bookmarksOnly bool) string {
 	var b strings.Builder
 
-	if bookmarksOnly {
+	if totalWords == 0 {
+		// Clean header without misleading "Page 1/1" when there's nothing.
+		if bookmarksOnly {
+			b.WriteString("⭐ <b>Your Bookmarks</b>\n\n")
+		} else {
+			b.WriteString("📘 <b>Your Words</b>\n\n")
+		}
+	} else if bookmarksOnly {
 		fmt.Fprintf(&b, "⭐ <b>Your Bookmarks</b> (Page %d/%d) — %d bookmarked\n\n", page, totalPages, totalWords)
 	} else {
 		fmt.Fprintf(&b, "📘 <b>Your Words</b> (Page %d/%d) — %d learned\n\n", page, totalPages, totalWords)

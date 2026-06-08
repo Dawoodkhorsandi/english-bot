@@ -195,12 +195,18 @@ func TestFormatMyWordsPage(t *testing.T) {
 		if !strings.Contains(text, "No words learned yet") {
 			t.Error("empty all-words should show guidance message")
 		}
+		if strings.Contains(text, "Page 1/1") {
+			t.Error("empty page should not show misleading 'Page 1/1'")
+		}
 	})
 
 	t.Run("empty bookmarks", func(t *testing.T) {
 		text := formatMyWordsPage(nil, 1, 1, 0, true)
 		if !strings.Contains(text, "No bookmarks yet") {
 			t.Error("empty bookmarks should show guidance message")
+		}
+		if strings.Contains(text, "Page 1/1") {
+			t.Error("empty bookmarks should not show misleading 'Page 1/1'")
 		}
 	})
 }
