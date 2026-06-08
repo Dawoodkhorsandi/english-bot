@@ -37,9 +37,12 @@ const (
 
 // ChangelogEntry holds the version tag and the HTML-formatted message that is
 // delivered once to each subscriber who hasn't seen it yet.
+// When Silent is true the version is marked as seen without sending a message,
+// useful for internal fixes that shouldn't spam users.
 type ChangelogEntry struct {
 	Version string
 	Text    string
+	Silent  bool
 }
 
 // Changelogs is the append-only release history. Add a new entry on each
@@ -2120,6 +2123,7 @@ func (n *telegramNotifier) SendWithReplyKeyboard(chatID int64, text string, rows
 
 // sendPendingChangelogs delivers any changelog entries the user has not yet
 // seen and marks them as delivered immediately after each successful send.
+// Silent entries are marked as seen without sending a message.
 func sendPendingChangelogs(store *Store, notifier Notifier, chatID int64) {
 	unseen, err := store.UnseenChangelogs(chatID)
 	if err != nil {
@@ -2127,6 +2131,13 @@ func sendPendingChangelogs(store *Store, notifier Notifier, chatID int64) {
 		return
 	}
 	for _, entry := range unseen {
+		if entry.Silent {
+			// Mark as seen without notifying the user.
+			if err := store.MarkChangelogSeen(chatID, entry.Version); err != nil {
+				log.Printf("⚠️  [CHANGELOG] Could not mark silent v%s seen for ChatID %d: %v", entry.Version, chatID, err)
+			}
+			continue
+		}
 		if err := notifier.Send(chatID, entry.Text); err != nil {
 			log.Printf("❌ [CHANGELOG] Failed to deliver v%s to ChatID %d: %v", entry.Version, chatID, err)
 			continue

@@ -890,6 +890,40 @@ func TestSendPendingChangelogs(t *testing.T) {
 	}
 }
 
+func TestSendPendingChangelogs_SilentSkipped(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	store.AddSubscriber(200)
+
+	// Mark all existing changelogs as seen first.
+	for _, entry := range Changelogs {
+		store.MarkChangelogSeen(200, entry.Version)
+	}
+
+	// Temporarily append a silent entry.
+	orig := Changelogs
+	Changelogs = append(Changelogs, ChangelogEntry{
+		Version: "99.0.0",
+		Silent:  true,
+	})
+	defer func() { Changelogs = orig }()
+
+	sendPendingChangelogs(store, mock, 200)
+
+	// Silent entry should NOT have been sent to the user.
+	if mock.sentCount() != 0 {
+		t.Errorf("silent changelog should not send a message, got %d sends", mock.sentCount())
+	}
+
+	// But it should be marked as seen.
+	unseen, _ := store.UnseenChangelogs(200)
+	for _, u := range unseen {
+		if u.Version == "99.0.0" {
+			t.Error("silent changelog should have been marked as seen")
+		}
+	}
+}
+
 func TestHandleQuiz(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}

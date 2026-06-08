@@ -260,6 +260,13 @@ func broadcastChangelogsOnStartup(store *Store, notifier Notifier) {
 			continue
 		}
 		for _, entry := range unseen {
+			if entry.Silent {
+				// Silent entries: mark seen without sending.
+				if err := store.MarkChangelogSeen(chatID, entry.Version); err != nil {
+					log.Printf("⚠️  [CHANGELOG-BOOT] Could not mark silent v%s seen for ChatID %d: %v", entry.Version, chatID, err)
+				}
+				continue
+			}
 			if err := notifier.Send(chatID, entry.Text); err != nil {
 				log.Printf("❌ [CHANGELOG-BOOT] Failed to deliver v%s to ChatID %d: %v", entry.Version, chatID, err)
 				continue

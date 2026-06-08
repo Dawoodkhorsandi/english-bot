@@ -146,15 +146,15 @@ func TestDocCallbackPrefixes_DOCS(t *testing.T) {
 }
 
 // TestDocChangelogVersionFormat checks that every changelog entry has a
-// semver-style version string and non-empty text.
+// semver-style version string and non-empty text (silent entries may omit text).
 func TestDocChangelogVersionFormat(t *testing.T) {
 	semver := regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 	for i, entry := range Changelogs {
 		if !semver.MatchString(entry.Version) {
 			t.Errorf("Changelogs[%d].Version = %q — expected semver format (X.Y.Z)", i, entry.Version)
 		}
-		if strings.TrimSpace(entry.Text) == "" {
-			t.Errorf("Changelogs[%d] (v%s) has empty Text", i, entry.Version)
+		if !entry.Silent && strings.TrimSpace(entry.Text) == "" {
+			t.Errorf("Changelogs[%d] (v%s) has empty Text (set Silent=true for internal releases)", i, entry.Version)
 		}
 	}
 }
