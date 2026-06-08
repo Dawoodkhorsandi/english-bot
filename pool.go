@@ -340,7 +340,7 @@ func (s *Store) WeeklyQuizStats(chatID int64, startUTC, endUTC string) (answered
 //     adds the result to the pool, and serves it.
 //   - On a miss with allowGenerate=false (broadcasts) it falls back to the oldest
 //     pooled item so broadcasts never call the AI directly.
-func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatID int64, kind, level string, allowGenerate bool) (string, error) {
+func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatID int64, kind, level string, allowGenerate bool) (string, string, error) {
 	term, _, text, ok, err := store.PooledUnseen(kind, level, chatID)
 	if err != nil {
 		log.Printf("⚠️  [POOL] Unseen lookup failed for kind=%s level=%s chat=%d: %v", kind, level, chatID, err)
@@ -350,7 +350,7 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 		if err := store.recordSentFor(kind, chatID, term); err != nil {
 			log.Printf("⚠️  [POOL] Could not record %s %q for chat %d: %v", kind, term, chatID, err)
 		}
-		return text, nil
+		return text, term, nil
 	}
 
 	if allowGenerate {
@@ -358,7 +358,7 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 		exclude, _ := store.PoolTerms(kind, level)
 		genText, genTerm, meaning, provider, gErr := generateContent(ctx, chain, kind, level, exclude)
 		if gErr != nil {
-			return "", gErr
+			return "", "", gErr
 		}
 		log.Printf("🧠 [POOL] Generated %s/%s %q via %s (inline).", kind, level, genTerm, provider)
 		if genTerm != "" {
@@ -369,7 +369,7 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 				log.Printf("⚠️  [POOL] Could not record %s %q for chat %d: %v", kind, genTerm, chatID, err)
 			}
 		}
-		return genText, nil
+		return genText, genTerm, nil
 	}
 
 	// Broadcast fallback: the user has seen every pooled item at this level. Rotate
@@ -384,17 +384,17 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 		// filter excludes everything): re-serve the oldest pooled item.
 		term, _, text, ok, err = store.PooledOldest(kind, level)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	if !ok {
-		return "", fmt.Errorf("content pool empty for kind %s level %s", kind, level)
+		return "", "", fmt.Errorf("content pool empty for kind %s level %s", kind, level)
 	}
 	log.Printf("📦 [POOL] No unseen %s/%s for chat %d; re-serving pooled %q (rotation).", kind, level, chatID, term)
 	if err := store.recordSentFor(kind, chatID, term); err != nil {
 		log.Printf("⚠️  [POOL] Could not record %s %q for chat %d: %v", kind, term, chatID, err)
 	}
-	return text, nil
+	return text, term, nil
 }
 
 // poolTargetFor returns how many items to keep stocked for a level. The default

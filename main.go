@@ -533,7 +533,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Generating your drill...</b>")
 
-		drill, err := serveContent(ctx, chain, store, chatID, kindDrill, store.GetLevel(chatID), true)
+		drill, _, err := serveContent(ctx, chain, store, chatID, kindDrill, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -549,7 +549,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding a fresh word for you...</b>")
 
-		card, err := serveContent(ctx, chain, store, chatID, kindWord, store.GetLevel(chatID), true)
+		card, term, err := serveContent(ctx, chain, store, chatID, kindWord, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Word generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -557,7 +557,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Word delivered to ChatID %d.", chatID)
-		if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+		if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card, term); err != nil {
 			log.Printf("❌ [WORD_SEND_ERR] Word send failed for ChatID %d: %v", chatID, err)
 		}
 		go checkStreakCelebration(store, notifier, chatID, firstName)
@@ -567,7 +567,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding an idiom for you...</b>")
 
-		card, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), true)
+		card, _, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Idiom generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -785,7 +785,7 @@ func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, n
 		}
 	}
 	log.Printf("✅ [LOOKUP] Delivered %q (resolved %q) to chat %d via %s.", term, word, chatID, provider)
-	if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+	if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card, word); err != nil {
 		log.Printf("❌ [LOOKUP_ERR] Send failed for chat %d term %q: %v", chatID, term, err)
 	}
 }
@@ -1035,7 +1035,7 @@ func handleTip(ctx context.Context, chain *ProviderChain, store *Store, notifier
 
 	log.Printf("💡 [TIP] /tip requested by ChatID %d.", chatID)
 	_ = notifier.Send(chatID, "🔄 <b>Fetching your grammar tip...</b>")
-	tip, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, true)
+	tip, _, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, true)
 	if err != nil {
 		log.Printf("❌ [TIP] On-demand tip failed for chat %d: %v", chatID, err)
 		_ = notifier.Send(chatID, "❌ Sorry, I couldn't fetch a tip right now. Please try again.")

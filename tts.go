@@ -23,13 +23,19 @@ var ttsHTTPClient = &http.Client{Timeout: 45 * time.Second}
 
 // sendWordCardWithTTS sends a word card, attaches a bookmark button, and then
 // (best-effort) a pronunciation voice note as a reply to that card.
-func sendWordCardWithTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string) error {
+// term is the known vocabulary term; when non-empty it is used for the bookmark
+// button so the button still appears even on legacy cards where parseWord fails.
+func sendWordCardWithTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card, term string) error {
 	msgID, err := notifier.SendWithMessageID(chatID, card)
 	if err != nil {
 		return err
 	}
 	// Attach a ⭐ Bookmark inline button to the card.
-	if word := strings.TrimSpace(parseWord(card)); word != "" {
+	word := strings.TrimSpace(parseWord(card))
+	if word == "" {
+		word = strings.TrimSpace(term) // fallback to caller-supplied term
+	}
+	if word != "" {
 		isBookmarked := store.IsBookmarked(chatID, word)
 		_ = notifier.EditMessage(chatID, msgID, card, bookmarkButton(word, isBookmarked))
 	}

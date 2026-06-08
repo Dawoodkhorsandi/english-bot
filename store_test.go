@@ -314,7 +314,7 @@ func TestServeContentRotatesWhenExhausted(t *testing.T) {
 	seen := map[string]bool{}
 	prev := ""
 	for i := 0; i < 30; i++ {
-		text, err := serveContent(ctx, chain, s, chatID, kindDrill, defaultLevel, false)
+		text, _, err := serveContent(ctx, chain, s, chatID, kindDrill, defaultLevel, false)
 		if err != nil {
 			t.Fatalf("serveContent iteration %d: %v", i, err)
 		}

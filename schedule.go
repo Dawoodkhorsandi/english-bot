@@ -209,7 +209,7 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 
 		sendPendingChangelogs(store, notifier, chatID)
 
-		text, err := serveContent(ctx, chain, store, chatID, kind, prefs.Level, false)
+		text, term, err := serveContent(ctx, chain, store, chatID, kind, prefs.Level, false)
 		if err != nil {
 			log.Printf("❌ [BROADCAST] %s for chat %d failed: %v", kind, chatID, err)
 			continue
@@ -219,7 +219,7 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 		if kind == kindDrill {
 			sendErr = sendDrill(notifier, chatID, text)
 		} else {
-			sendErr = sendWordCardWithTTS(ctx, store, notifier, chatID, text)
+			sendErr = sendWordCardWithTTS(ctx, store, notifier, chatID, text, term)
 		}
 		if sendErr != nil {
 			log.Printf("❌ [BROADCAST] Send to chat %d failed: %v", chatID, sendErr)
@@ -450,7 +450,7 @@ func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, not
 		if delivered {
 			continue
 		}
-		text, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), false)
+		text, _, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), false)
 		if err != nil {
 			log.Printf("⚠️  [IDIOM] No idiom available for chat %d: %v", chatID, err)
 			continue
@@ -537,7 +537,7 @@ func sendDailyTip(ctx context.Context, chain *ProviderChain, store *Store, notif
 		}
 
 		// Best effort: pool-first, no inline generation on scheduler path.
-		tipText, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, false)
+		tipText, _, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, false)
 		if err != nil {
 			log.Printf("⚠️  [TIP] Could not get tip for chat %d: %v", chatID, err)
 			continue
