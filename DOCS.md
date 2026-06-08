@@ -94,11 +94,12 @@ The bot has a built-in mechanism to notify existing subscribers when a new versi
 
 ### How it works
 
-1. The `Changelogs` slice in `main.go` is the append-only release history. Each entry has a `Version` string and an HTML-formatted `Text` message.
+1. The `Changelogs` slice in `main.go` is the append-only release history. Each entry has a `Version` string, an HTML-formatted `Text` message, and an optional `Silent` flag.
 2. When a **new user** runs `/start`, all existing changelog versions are immediately marked as seen — they only receive notes for versions released after they joined.
 3. **Existing users** receive any unseen changelog entries:
    - At the start of each half-hourly broadcast cycle (before their drill)
    - When they run `/start` again
+4. **Silent entries** (`Silent: true`) are marked as seen without sending any message to regular users. The **maintainer** (identified by `MaintainerChatID`) still receives silent entries with a `🔧 [Internal Deploy vX.Y.Z]` prefix so they know exactly when a deploy landed. This is useful for internal fixes and housekeeping releases that don't warrant a user-facing notification.
 
 The `changelog_delivery` table tracks which versions each user has already received, so each entry is delivered exactly once per user.
 
@@ -343,6 +344,7 @@ On first run, if a `subscribers.json` file exists (the old flat-file format), `m
 type ChangelogEntry struct {
     Version string
     Text    string   // Telegram HTML-formatted message
+    Silent  bool     // when true, mark as seen without sending (v1.21.1)
 }
 ```
 
@@ -421,6 +423,7 @@ type Store struct { db *sql.DB }
 | `RemoveBookmark` | `(chatID int64, word string) error` | Removes a bookmark for a word (v1.21.0) |
 | `IsBookmarked` | `(chatID int64, word string) (bool, error)` | Reports whether a word is bookmarked by the user (v1.21.0) |
 | `BookmarkCount` | `(chatID int64) (int, error)` | Total bookmarks for a user (v1.21.0) |
+| `UpdatePoolText` | `(kind, level, term, meaning, text string) error` | Overwrites the text and meaning of an existing pool entry (lazy card refresh, v1.21.1) |
 
 ---
 
@@ -732,7 +735,7 @@ Ordered so page 1 leads with the forms learners use most (v1.12.0):
 ### Content Delivery — `serveContent`
 
 `serveContent` is the single read-path for both on-demand commands and broadcasts.
-It returns ready-to-send text of a given kind for a user, recording the chosen term:
+It returns ready-to-send text and the resolved term for a user, recording the chosen term:
 
 1. Tries an unseen pooled item at the user's level (`PooledUnseen`, randomized).
 2. On a miss with `allowGenerate=true` (on-demand `/drill`, `/word`): generates
@@ -742,6 +745,11 @@ It returns ready-to-send text of a given kind for a user, recording the chosen t
    history via `PooledRecycled` (random item excluding the most recently served),
    so no item is ever repeated back-to-back. Falls back to `PooledOldest` only as a
    final safety net (e.g. single-item pool).
+4. For word cards (kind=word): after serving a pooled item, `maybeRefreshCard` checks
+   if the card is missing sections that current prompts produce (e.g. Persian
+   definition). If stale, a background goroutine regenerates the card via
+   `generateWordFor` and updates the pool entry via `UpdatePoolText`. The old card is
+   served immediately; the refreshed version is used on the next request. (v1.21.1)
 
 `generateContent` builds the appropriate prompt (`buildDrillPrompt` / `buildWordPrompt`),
 calls the provider chain, and parses the term (and meaning, for words) from the output.

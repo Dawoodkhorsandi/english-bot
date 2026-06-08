@@ -58,6 +58,27 @@ func (s *Store) AddToPool(kind, level, term, meaning, text string) error {
 	return err
 }
 
+// UpdatePoolText overwrites the text (and optionally meaning) of an existing
+// pool entry. Used by the lazy card refresh to update stale cards in place.
+func (s *Store) UpdatePoolText(kind, level, term, meaning, text string) error {
+	_, err := s.db.Exec(
+		"UPDATE content_pool SET text = ?, meaning = ? WHERE kind = ? AND level = ? AND term = ?",
+		text, meaning, kind, level, strings.ToLower(strings.TrimSpace(term)),
+	)
+	return err
+}
+
+// cardNeedsRefresh reports whether a word card is missing sections that
+// current prompts produce. This drives lazy backfill: stale cards are served
+// immediately and regenerated in the background for next time.
+func cardNeedsRefresh(text string) bool {
+	// Persian definition added in v1.20.0.
+	if !strings.Contains(text, "🇮🇷") {
+		return true
+	}
+	return false
+}
+
 // PooledUnseen returns a random pooled item for kind+level whose term the user has
 // not seen yet. Selection is randomized (rather than oldest-first) so subscribers
 // don't all receive pooled content in the same lock-step order. Returns ok=false if
@@ -340,7 +361,7 @@ func (s *Store) WeeklyQuizStats(chatID int64, startUTC, endUTC string) (answered
 //     adds the result to the pool, and serves it.
 //   - On a miss with allowGenerate=false (broadcasts) it falls back to the oldest
 //     pooled item so broadcasts never call the AI directly.
-func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatID int64, kind, level string, allowGenerate bool) (string, error) {
+func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatID int64, kind, level string, allowGenerate bool) (string, string, error) {
 	term, _, text, ok, err := store.PooledUnseen(kind, level, chatID)
 	if err != nil {
 		log.Printf("⚠️  [POOL] Unseen lookup failed for kind=%s level=%s chat=%d: %v", kind, level, chatID, err)
@@ -350,7 +371,8 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 		if err := store.recordSentFor(kind, chatID, term); err != nil {
 			log.Printf("⚠️  [POOL] Could not record %s %q for chat %d: %v", kind, term, chatID, err)
 		}
-		return text, nil
+		maybeRefreshCard(chain, store, kind, level, term, text)
+		return text, term, nil
 	}
 
 	if allowGenerate {
@@ -358,7 +380,7 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 		exclude, _ := store.PoolTerms(kind, level)
 		genText, genTerm, meaning, provider, gErr := generateContent(ctx, chain, kind, level, exclude)
 		if gErr != nil {
-			return "", gErr
+			return "", "", gErr
 		}
 		log.Printf("🧠 [POOL] Generated %s/%s %q via %s (inline).", kind, level, genTerm, provider)
 		if genTerm != "" {
@@ -369,7 +391,7 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 				log.Printf("⚠️  [POOL] Could not record %s %q for chat %d: %v", kind, genTerm, chatID, err)
 			}
 		}
-		return genText, nil
+		return genText, genTerm, nil
 	}
 
 	// Broadcast fallback: the user has seen every pooled item at this level. Rotate
@@ -384,17 +406,44 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 		// filter excludes everything): re-serve the oldest pooled item.
 		term, _, text, ok, err = store.PooledOldest(kind, level)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	if !ok {
-		return "", fmt.Errorf("content pool empty for kind %s level %s", kind, level)
+		return "", "", fmt.Errorf("content pool empty for kind %s level %s", kind, level)
 	}
 	log.Printf("📦 [POOL] No unseen %s/%s for chat %d; re-serving pooled %q (rotation).", kind, level, chatID, term)
 	if err := store.recordSentFor(kind, chatID, term); err != nil {
 		log.Printf("⚠️  [POOL] Could not record %s %q for chat %d: %v", kind, term, chatID, err)
 	}
-	return text, nil
+	maybeRefreshCard(chain, store, kind, level, term, text)
+	return text, term, nil
+}
+
+// maybeRefreshCard checks if a pooled word card is stale (missing sections that
+// current prompts produce, e.g. Persian definition). If so it spawns a
+// background goroutine to regenerate the card and update the pool entry.
+// The caller serves the old card immediately — the refreshed version will be
+// used on the next request.
+func maybeRefreshCard(chain *ProviderChain, store *Store, kind, level, term, text string) {
+	if kind != kindWord || !cardNeedsRefresh(text) {
+		return
+	}
+	log.Printf("🔄 [POOL] Card %q (%s/%s) is stale; scheduling background refresh.", term, kind, level)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		newText, _, meaning, provider, err := generateWordFor(ctx, chain, level, term)
+		if err != nil {
+			log.Printf("⚠️  [POOL] Background refresh failed for %q: %v", term, err)
+			return
+		}
+		if err := store.UpdatePoolText(kind, level, term, meaning, newText); err != nil {
+			log.Printf("⚠️  [POOL] Could not update pool for %q: %v", term, err)
+			return
+		}
+		log.Printf("✅ [POOL] Refreshed card %q (%s/%s) via %s.", term, kind, level, provider)
+	}()
 }
 
 // poolTargetFor returns how many items to keep stocked for a level. The default

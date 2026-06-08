@@ -314,7 +314,7 @@ func TestServeContentRotatesWhenExhausted(t *testing.T) {
 	seen := map[string]bool{}
 	prev := ""
 	for i := 0; i < 30; i++ {
-		text, err := serveContent(ctx, chain, s, chatID, kindDrill, defaultLevel, false)
+		text, _, err := serveContent(ctx, chain, s, chatID, kindDrill, defaultLevel, false)
 		if err != nil {
 			t.Fatalf("serveContent iteration %d: %v", i, err)
 		}
@@ -736,5 +736,48 @@ func TestStoreTotalMasteredCount(t *testing.T) {
 	}
 	if n != 2 {
 		t.Errorf("TotalMasteredCount = %d, want 2", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// cardNeedsRefresh
+// ---------------------------------------------------------------------------
+
+func TestCardNeedsRefresh(t *testing.T) {
+	modern := "📘 <b>Word of the Session: apple</b>\n🇮🇷 <b>Persian</b>\n<tg-spoiler>سیب</tg-spoiler>"
+	if cardNeedsRefresh(modern) {
+		t.Error("modern card with Persian should not need refresh")
+	}
+
+	old := "📘 <b>Word of the Session: apple</b>\nmeaning: a fruit"
+	if !cardNeedsRefresh(old) {
+		t.Error("old card without Persian should need refresh")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpdatePoolText
+// ---------------------------------------------------------------------------
+
+func TestUpdatePoolText(t *testing.T) {
+	s := testStoreHelper(t)
+
+	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "old card text")
+
+	err := s.UpdatePoolText(kindWord, defaultLevel, "apple", "a delicious fruit", "new card text with 🇮🇷")
+	if err != nil {
+		t.Fatalf("UpdatePoolText: %v", err)
+	}
+
+	// Verify the text was updated by reading it back via PooledCardText.
+	got := s.PooledCardText("apple")
+	if got != "new card text with 🇮🇷" {
+		t.Errorf("after UpdatePoolText, PooledCardText = %q, want %q", got, "new card text with 🇮🇷")
+	}
+
+	// Verify meaning was updated.
+	gotMeaning := s.MeaningForWord("apple")
+	if gotMeaning != "a delicious fruit" {
+		t.Errorf("after UpdatePoolText, MeaningForWord = %q, want %q", gotMeaning, "a delicious fruit")
 	}
 }

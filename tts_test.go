@@ -128,7 +128,7 @@ func TestSendWordCardWithTTS_SendsCardAndVoice(t *testing.T) {
 	store.AddSubscriber(chatID)
 
 	card := "Just a plain card with no Word of the Session label"
-	err := sendWordCardWithTTS(context.Background(), store, mock, chatID, card)
+	err := sendWordCardWithTTS(context.Background(), store, mock, chatID, card, "")
 	if err != nil {
 		t.Fatalf("sendWordCardWithTTS returned error: %v", err)
 	}

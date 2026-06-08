@@ -37,9 +37,12 @@ const (
 
 // ChangelogEntry holds the version tag and the HTML-formatted message that is
 // delivered once to each subscriber who hasn't seen it yet.
+// When Silent is true the version is marked as seen without sending a message,
+// useful for internal fixes that shouldn't spam users.
 type ChangelogEntry struct {
 	Version string
 	Text    string
+	Silent  bool
 }
 
 // Changelogs is the append-only release history. Add a new entry on each
@@ -200,6 +203,14 @@ var Changelogs = []ChangelogEntry{
 			"• ⭐ <b>Bookmarks!</b> Tap ⭐ on any word card or use /bookmark to save important words\n" +
 			"• Use /mywords bookmarks to see only your bookmarked words\n" +
 			"• 🎚️ <b>Smoother difficulty levels!</b> Intermediate (B1) and Upper-Intermediate (B2) are better calibrated",
+	},
+	{
+		Version: "1.21.1",
+		Silent:  true,
+		Text: "• Fixed /bookmark empty state showing misleading pagination\n" +
+			"• Bookmark button now appears on all word cards including old pool entries\n" +
+			"• Stale word cards (missing Persian) are auto-refreshed in the background\n" +
+			"• Added silent changelog support for internal deploys",
 	},
 }
 
@@ -533,7 +544,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Generating your drill...</b>")
 
-		drill, err := serveContent(ctx, chain, store, chatID, kindDrill, store.GetLevel(chatID), true)
+		drill, _, err := serveContent(ctx, chain, store, chatID, kindDrill, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -549,7 +560,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding a fresh word for you...</b>")
 
-		card, err := serveContent(ctx, chain, store, chatID, kindWord, store.GetLevel(chatID), true)
+		card, term, err := serveContent(ctx, chain, store, chatID, kindWord, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Word generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -557,7 +568,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Word delivered to ChatID %d.", chatID)
-		if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+		if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card, term); err != nil {
 			log.Printf("❌ [WORD_SEND_ERR] Word send failed for ChatID %d: %v", chatID, err)
 		}
 		go checkStreakCelebration(store, notifier, chatID, firstName)
@@ -567,7 +578,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding an idiom for you...</b>")
 
-		card, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), true)
+		card, _, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Idiom generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -785,7 +796,7 @@ func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, n
 		}
 	}
 	log.Printf("✅ [LOOKUP] Delivered %q (resolved %q) to chat %d via %s.", term, word, chatID, provider)
-	if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+	if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card, word); err != nil {
 		log.Printf("❌ [LOOKUP_ERR] Send failed for chat %d term %q: %v", chatID, term, err)
 	}
 }
@@ -1035,7 +1046,7 @@ func handleTip(ctx context.Context, chain *ProviderChain, store *Store, notifier
 
 	log.Printf("💡 [TIP] /tip requested by ChatID %d.", chatID)
 	_ = notifier.Send(chatID, "🔄 <b>Fetching your grammar tip...</b>")
-	tip, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, true)
+	tip, _, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, true)
 	if err != nil {
 		log.Printf("❌ [TIP] On-demand tip failed for chat %d: %v", chatID, err)
 		_ = notifier.Send(chatID, "❌ Sorry, I couldn't fetch a tip right now. Please try again.")
@@ -2120,6 +2131,8 @@ func (n *telegramNotifier) SendWithReplyKeyboard(chatID int64, text string, rows
 
 // sendPendingChangelogs delivers any changelog entries the user has not yet
 // seen and marks them as delivered immediately after each successful send.
+// Silent entries are marked as seen without sending a message to regular users,
+// but the maintainer still receives them with an internal-deploy indicator.
 func sendPendingChangelogs(store *Store, notifier Notifier, chatID int64) {
 	unseen, err := store.UnseenChangelogs(chatID)
 	if err != nil {
@@ -2127,6 +2140,17 @@ func sendPendingChangelogs(store *Store, notifier Notifier, chatID int64) {
 		return
 	}
 	for _, entry := range unseen {
+		if entry.Silent {
+			// Maintainer receives a private deploy notice.
+			if isMaintainer(chatID) {
+				msg := fmt.Sprintf("🔧 <b>[Internal Deploy v%s]</b>\n\n%s", entry.Version, entry.Text)
+				_ = notifier.Send(chatID, msg)
+			}
+			if err := store.MarkChangelogSeen(chatID, entry.Version); err != nil {
+				log.Printf("⚠️  [CHANGELOG] Could not mark silent v%s seen for ChatID %d: %v", entry.Version, chatID, err)
+			}
+			continue
+		}
 		if err := notifier.Send(chatID, entry.Text); err != nil {
 			log.Printf("❌ [CHANGELOG] Failed to deliver v%s to ChatID %d: %v", entry.Version, chatID, err)
 			continue

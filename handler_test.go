@@ -890,6 +890,87 @@ func TestSendPendingChangelogs(t *testing.T) {
 	}
 }
 
+func TestSendPendingChangelogs_SilentSkipped(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	store.AddSubscriber(200)
+
+	// Mark all existing changelogs as seen first.
+	for _, entry := range Changelogs {
+		store.MarkChangelogSeen(200, entry.Version)
+	}
+
+	// Temporarily append a silent entry.
+	orig := Changelogs
+	Changelogs = append(Changelogs, ChangelogEntry{
+		Version: "99.0.0",
+		Text:    "internal fix: backfill cards",
+		Silent:  true,
+	})
+	defer func() { Changelogs = orig }()
+
+	sendPendingChangelogs(store, mock, 200)
+
+	// Regular user should NOT receive a message.
+	if mock.sentCount() != 0 {
+		t.Errorf("silent changelog should not send a message to regular user, got %d sends", mock.sentCount())
+	}
+
+	// But it should be marked as seen.
+	unseen, _ := store.UnseenChangelogs(200)
+	for _, u := range unseen {
+		if u.Version == "99.0.0" {
+			t.Error("silent changelog should have been marked as seen")
+		}
+	}
+}
+
+func TestSendPendingChangelogs_SilentSentToMaintainer(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	saveMaintainer(t)
+	MaintainerChatID = "300"
+	store.AddSubscriber(300)
+
+	// Mark all existing changelogs as seen.
+	for _, entry := range Changelogs {
+		store.MarkChangelogSeen(300, entry.Version)
+	}
+
+	orig := Changelogs
+	Changelogs = append(Changelogs, ChangelogEntry{
+		Version: "99.0.0",
+		Text:    "internal fix: backfill cards",
+		Silent:  true,
+	})
+	defer func() { Changelogs = orig }()
+
+	sendPendingChangelogs(store, mock, 300)
+
+	// Maintainer SHOULD receive the silent changelog.
+	if mock.sentCount() != 1 {
+		t.Fatalf("maintainer should receive silent changelog, got %d sends", mock.sentCount())
+	}
+
+	// Verify the message has the internal deploy prefix.
+	msg := mock.lastSentText()
+	if !strings.Contains(msg, "[Internal Deploy v99.0.0]") {
+		t.Errorf("maintainer message should contain internal deploy indicator, got %q", msg)
+	}
+	if !strings.Contains(msg, "internal fix: backfill cards") {
+		t.Errorf("maintainer message should contain the changelog text, got %q", msg)
+	}
+
+	// Should also be marked as seen.
+	unseen, _ := store.UnseenChangelogs(300)
+	for _, u := range unseen {
+		if u.Version == "99.0.0" {
+			t.Error("silent changelog should have been marked as seen for maintainer")
+		}
+	}
+}
+
 func TestHandleQuiz(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
@@ -986,7 +1067,7 @@ func TestServeContentFromPool(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddToPool(kindDrill, defaultLevel, "walk", "", "drill text for walk")
 
-	text, err := serveContent(context.Background(), emptyProviderChain(), store, 100, kindDrill, defaultLevel, false)
+	text, _, err := serveContent(context.Background(), emptyProviderChain(), store, 100, kindDrill, defaultLevel, false)
 	if err != nil {
 		t.Fatalf("serveContent: %v", err)
 	}
@@ -1001,7 +1082,7 @@ func TestServeContentInlineGenerate(t *testing.T) {
 	store.AddSubscriber(100)
 	chain := mockProviderChain("📘 <b>Word of the Session: ephemeral</b>\n\n<b>Meaning:</b> short-lived")
 
-	text, err := serveContent(context.Background(), chain, store, 100, kindWord, defaultLevel, true)
+	text, _, err := serveContent(context.Background(), chain, store, 100, kindWord, defaultLevel, true)
 	if err != nil {
 		t.Fatalf("serveContent: %v", err)
 	}
@@ -1019,6 +1100,75 @@ func TestServeContentInlineGenerate(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected 'ephemeral' to be added to pool")
+	}
+}
+
+func TestMaybeRefreshCard_StaleCard(t *testing.T) {
+	store := testStoreHelper(t)
+
+	// Pool a word card WITHOUT Persian (old format).
+	oldCard := "📘 <b>Word of the Session: apple</b>\n<b>Meaning:</b> a fruit"
+	store.AddToPool(kindWord, defaultLevel, "apple", "a fruit", oldCard)
+
+	// Provide a chain that returns a modern card with Persian.
+	modernCard := "📘 <b>Word of the Session: apple</b>\n🇮🇷 <b>Persian</b>\n<tg-spoiler>سیب</tg-spoiler>"
+	chain := mockProviderChain(modernCard)
+
+	// Call maybeRefreshCard — it should detect the stale card and refresh it.
+	maybeRefreshCard(chain, store, kindWord, defaultLevel, "apple", oldCard)
+
+	// Wait briefly for the background goroutine to finish.
+	time.Sleep(500 * time.Millisecond)
+
+	// The pool should now contain the refreshed card.
+	got := store.PooledCardText("apple")
+	if !strings.Contains(got, "🇮🇷") {
+		t.Errorf("expected refreshed card with Persian flag, got %q", got)
+	}
+}
+
+func TestMaybeRefreshCard_FreshCard(t *testing.T) {
+	store := testStoreHelper(t)
+
+	// Pool a word card WITH Persian (modern format).
+	modernCard := "📘 <b>Word of the Session: banana</b>\n🇮🇷 <b>Persian</b>\n<tg-spoiler>موز</tg-spoiler>"
+	store.AddToPool(kindWord, defaultLevel, "banana", "a fruit", modernCard)
+
+	// Chain that would return something different if called.
+	chain := mockProviderChain("SHOULD NOT BE CALLED")
+
+	maybeRefreshCard(chain, store, kindWord, defaultLevel, "banana", modernCard)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Card should be unchanged — no refresh needed.
+	got := store.PooledCardText("banana")
+	if got != modernCard {
+		t.Errorf("fresh card should not be modified, got %q", got)
+	}
+}
+
+func TestMaybeRefreshCard_DrillSkipped(t *testing.T) {
+	store := testStoreHelper(t)
+
+	// Pool a drill without Persian — drills should never be refreshed.
+	drillText := "drill text without persian"
+	store.AddToPool(kindDrill, defaultLevel, "run", "", drillText)
+
+	chain := mockProviderChain("SHOULD NOT BE CALLED")
+
+	maybeRefreshCard(chain, store, kindDrill, defaultLevel, "run", drillText)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify the drill was not touched by querying the pool directly.
+	var got string
+	_ = store.db.QueryRow(
+		"SELECT text FROM content_pool WHERE kind = ? AND term = ?",
+		kindDrill, "run",
+	).Scan(&got)
+	if got != drillText {
+		t.Errorf("drill card should not be modified, got %q", got)
 	}
 }
 
@@ -1152,8 +1302,17 @@ func TestBroadcastChangelogsOnStartup_DeliversToAll(t *testing.T) {
 
 	broadcastChangelogsOnStartup(store, mock)
 
-	// Each subscriber should have received len(Changelogs) messages.
-	expectedTotal := len(Changelogs) * 2
+	// Count only non-silent entries (silent ones are marked seen but not sent
+	// to regular users).
+	visible := 0
+	for _, e := range Changelogs {
+		if !e.Silent {
+			visible++
+		}
+	}
+
+	// Each subscriber should have received visible changelog messages.
+	expectedTotal := visible * 2
 	if got := mock.sentCount(); got != expectedTotal {
 		t.Errorf("expected %d sends, got %d", expectedTotal, got)
 	}
@@ -1164,8 +1323,8 @@ func TestBroadcastChangelogsOnStartup_DeliversToAll(t *testing.T) {
 		gotChats[s.chatID]++
 	}
 	for _, id := range []int64{100, 200} {
-		if gotChats[id] != len(Changelogs) {
-			t.Errorf("chat %d: expected %d sends, got %d", id, len(Changelogs), gotChats[id])
+		if gotChats[id] != visible {
+			t.Errorf("chat %d: expected %d sends, got %d", id, visible, gotChats[id])
 		}
 	}
 }
@@ -1195,16 +1354,30 @@ func TestBroadcastChangelogsOnStartup_SkipsAlreadySeen(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	// Mark all but the last changelog as seen.
-	for i := 0; i < len(Changelogs)-1; i++ {
-		store.MarkChangelogSeen(100, Changelogs[i].Version)
+	// Find the last visible (non-silent) changelog entry.
+	lastVisibleIdx := -1
+	for i := len(Changelogs) - 1; i >= 0; i-- {
+		if !Changelogs[i].Silent {
+			lastVisibleIdx = i
+			break
+		}
+	}
+	if lastVisibleIdx < 0 {
+		t.Fatal("no visible changelog entries found")
+	}
+
+	// Mark everything except the last visible entry as seen.
+	for i, e := range Changelogs {
+		if i != lastVisibleIdx {
+			store.MarkChangelogSeen(100, e.Version)
+		}
 	}
 
 	broadcastChangelogsOnStartup(store, mock)
 
-	// Should send only the last changelog entry.
+	// Should send only the last visible changelog entry.
 	if got := mock.sentCount(); got != 1 {
-		t.Errorf("expected 1 send (only latest unseen), got %d", got)
+		t.Errorf("expected 1 send (only latest unseen visible), got %d", got)
 	}
 	if got := mock.lastSentText(); !strings.Contains(got, "What's New") {
 		t.Error("expected changelog text containing \"What's New\"")

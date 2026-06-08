@@ -209,7 +209,7 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 
 		sendPendingChangelogs(store, notifier, chatID)
 
-		text, err := serveContent(ctx, chain, store, chatID, kind, prefs.Level, false)
+		text, term, err := serveContent(ctx, chain, store, chatID, kind, prefs.Level, false)
 		if err != nil {
 			log.Printf("❌ [BROADCAST] %s for chat %d failed: %v", kind, chatID, err)
 			continue
@@ -219,7 +219,7 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 		if kind == kindDrill {
 			sendErr = sendDrill(notifier, chatID, text)
 		} else {
-			sendErr = sendWordCardWithTTS(ctx, store, notifier, chatID, text)
+			sendErr = sendWordCardWithTTS(ctx, store, notifier, chatID, text, term)
 		}
 		if sendErr != nil {
 			log.Printf("❌ [BROADCAST] Send to chat %d failed: %v", chatID, sendErr)
@@ -260,6 +260,17 @@ func broadcastChangelogsOnStartup(store *Store, notifier Notifier) {
 			continue
 		}
 		for _, entry := range unseen {
+			if entry.Silent {
+				// Maintainer receives a private deploy notice.
+				if isMaintainer(chatID) {
+					msg := fmt.Sprintf("🔧 <b>[Internal Deploy v%s]</b>\n\n%s", entry.Version, entry.Text)
+					_ = notifier.Send(chatID, msg)
+				}
+				if err := store.MarkChangelogSeen(chatID, entry.Version); err != nil {
+					log.Printf("⚠️  [CHANGELOG-BOOT] Could not mark silent v%s seen for ChatID %d: %v", entry.Version, chatID, err)
+				}
+				continue
+			}
 			if err := notifier.Send(chatID, entry.Text); err != nil {
 				log.Printf("❌ [CHANGELOG-BOOT] Failed to deliver v%s to ChatID %d: %v", entry.Version, chatID, err)
 				continue
@@ -450,7 +461,7 @@ func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, not
 		if delivered {
 			continue
 		}
-		text, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), false)
+		text, _, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), false)
 		if err != nil {
 			log.Printf("⚠️  [IDIOM] No idiom available for chat %d: %v", chatID, err)
 			continue
@@ -537,7 +548,7 @@ func sendDailyTip(ctx context.Context, chain *ProviderChain, store *Store, notif
 		}
 
 		// Best effort: pool-first, no inline generation on scheduler path.
-		tipText, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, false)
+		tipText, _, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, false)
 		if err != nil {
 			log.Printf("⚠️  [TIP] Could not get tip for chat %d: %v", chatID, err)
 			continue
