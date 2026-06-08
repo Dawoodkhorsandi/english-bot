@@ -1056,6 +1056,75 @@ func TestServeContentInlineGenerate(t *testing.T) {
 	}
 }
 
+func TestMaybeRefreshCard_StaleCard(t *testing.T) {
+	store := testStoreHelper(t)
+
+	// Pool a word card WITHOUT Persian (old format).
+	oldCard := "📘 <b>Word of the Session: apple</b>\n<b>Meaning:</b> a fruit"
+	store.AddToPool(kindWord, defaultLevel, "apple", "a fruit", oldCard)
+
+	// Provide a chain that returns a modern card with Persian.
+	modernCard := "📘 <b>Word of the Session: apple</b>\n🇮🇷 <b>Persian</b>\n<tg-spoiler>سیب</tg-spoiler>"
+	chain := mockProviderChain(modernCard)
+
+	// Call maybeRefreshCard — it should detect the stale card and refresh it.
+	maybeRefreshCard(chain, store, kindWord, defaultLevel, "apple", oldCard)
+
+	// Wait briefly for the background goroutine to finish.
+	time.Sleep(500 * time.Millisecond)
+
+	// The pool should now contain the refreshed card.
+	got := store.PooledCardText("apple")
+	if !strings.Contains(got, "🇮🇷") {
+		t.Errorf("expected refreshed card with Persian flag, got %q", got)
+	}
+}
+
+func TestMaybeRefreshCard_FreshCard(t *testing.T) {
+	store := testStoreHelper(t)
+
+	// Pool a word card WITH Persian (modern format).
+	modernCard := "📘 <b>Word of the Session: banana</b>\n🇮🇷 <b>Persian</b>\n<tg-spoiler>موز</tg-spoiler>"
+	store.AddToPool(kindWord, defaultLevel, "banana", "a fruit", modernCard)
+
+	// Chain that would return something different if called.
+	chain := mockProviderChain("SHOULD NOT BE CALLED")
+
+	maybeRefreshCard(chain, store, kindWord, defaultLevel, "banana", modernCard)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Card should be unchanged — no refresh needed.
+	got := store.PooledCardText("banana")
+	if got != modernCard {
+		t.Errorf("fresh card should not be modified, got %q", got)
+	}
+}
+
+func TestMaybeRefreshCard_DrillSkipped(t *testing.T) {
+	store := testStoreHelper(t)
+
+	// Pool a drill without Persian — drills should never be refreshed.
+	drillText := "drill text without persian"
+	store.AddToPool(kindDrill, defaultLevel, "run", "", drillText)
+
+	chain := mockProviderChain("SHOULD NOT BE CALLED")
+
+	maybeRefreshCard(chain, store, kindDrill, defaultLevel, "run", drillText)
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify the drill was not touched by querying the pool directly.
+	var got string
+	_ = store.db.QueryRow(
+		"SELECT text FROM content_pool WHERE kind = ? AND term = ?",
+		kindDrill, "run",
+	).Scan(&got)
+	if got != drillText {
+		t.Errorf("drill card should not be modified, got %q", got)
+	}
+}
+
 func TestBroadcastSweep(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
