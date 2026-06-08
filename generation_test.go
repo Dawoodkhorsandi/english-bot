@@ -260,6 +260,63 @@ func TestLevelInstruction(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// drillLengthDirective
+// ---------------------------------------------------------------------------
+
+func TestDrillLengthDirective(t *testing.T) {
+	results := map[string]string{
+		levelBeginner:     drillLengthDirective(levelBeginner),
+		levelIntermediate: drillLengthDirective(levelIntermediate),
+		levelUpperInt:     drillLengthDirective(levelUpperInt),
+		levelAdvanced:     drillLengthDirective(levelAdvanced),
+	}
+	for level, result := range results {
+		if result == "" {
+			t.Errorf("drillLengthDirective(%q) returned empty string", level)
+		}
+	}
+	seen := map[string]string{}
+	for level, result := range results {
+		if prev, dup := seen[result]; dup {
+			t.Errorf("drillLengthDirective(%q) == drillLengthDirective(%q); all levels must be distinct", level, prev)
+		}
+		seen[result] = level
+	}
+	// Beginner should mention 8 words, upper-int 14.
+	if !strings.Contains(results[levelBeginner], "8") {
+		t.Error("beginner drill length should mention 8 words")
+	}
+	if !strings.Contains(results[levelUpperInt], "14") {
+		t.Error("upper-intermediate drill length should mention 14 words")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// tipLevelInstruction
+// ---------------------------------------------------------------------------
+
+func TestTipLevelInstruction(t *testing.T) {
+	results := map[string]string{
+		levelBeginner:     tipLevelInstruction(levelBeginner),
+		levelIntermediate: tipLevelInstruction(levelIntermediate),
+		levelUpperInt:     tipLevelInstruction(levelUpperInt),
+		levelAdvanced:     tipLevelInstruction(levelAdvanced),
+	}
+	for level, result := range results {
+		if result == "" {
+			t.Errorf("tipLevelInstruction(%q) returned empty string", level)
+		}
+	}
+	seen := map[string]string{}
+	for level, result := range results {
+		if prev, dup := seen[result]; dup {
+			t.Errorf("tipLevelInstruction(%q) == tipLevelInstruction(%q); all levels must be distinct", level, prev)
+		}
+		seen[result] = level
+	}
+}
+
+// ---------------------------------------------------------------------------
 // buildDrillPrompt
 // ---------------------------------------------------------------------------
 
@@ -268,6 +325,16 @@ func TestBuildDrillPrompt(t *testing.T) {
 		prompt := buildDrillPrompt(levelIntermediate, nil)
 		if strings.Contains(prompt, "Do NOT use any of these verbs") {
 			t.Error("should not contain exclusion clause when exclude list is empty")
+		}
+		if !strings.Contains(prompt, "max 10 words") {
+			t.Error("intermediate drill should include length directive for 10 words")
+		}
+	})
+
+	t.Run("beginner includes length override", func(t *testing.T) {
+		prompt := buildDrillPrompt(levelBeginner, nil)
+		if !strings.Contains(prompt, "max 8 words") {
+			t.Error("beginner drill should include length directive for 8 words")
 		}
 	})
 
@@ -396,16 +463,35 @@ func TestParseTipTopic(t *testing.T) {
 
 func TestBuildTipPrompt(t *testing.T) {
 	t.Run("no exclusions", func(t *testing.T) {
-		prompt := buildTipPrompt(nil)
+		prompt := buildTipPrompt(levelIntermediate, nil)
 		if strings.Contains(prompt, "Avoid these already-pooled grammar topics") {
 			t.Error("should not contain exclusion clause when list is empty")
+		}
+		if !strings.Contains(prompt, "B1") {
+			t.Error("intermediate tip should reference CEFR B1")
 		}
 	})
 
 	t.Run("with exclusions", func(t *testing.T) {
-		prompt := buildTipPrompt([]string{"used to vs would", "since vs for"})
+		prompt := buildTipPrompt(levelIntermediate, []string{"used to vs would", "since vs for"})
 		if !strings.Contains(prompt, "used to vs would, since vs for") {
 			t.Error("should contain excluded topics")
+		}
+	})
+
+	t.Run("level directives are distinct", func(t *testing.T) {
+		results := map[string]string{
+			levelBeginner:     buildTipPrompt(levelBeginner, nil),
+			levelIntermediate: buildTipPrompt(levelIntermediate, nil),
+			levelUpperInt:     buildTipPrompt(levelUpperInt, nil),
+			levelAdvanced:     buildTipPrompt(levelAdvanced, nil),
+		}
+		seen := map[string]string{}
+		for level, result := range results {
+			if prev, dup := seen[result]; dup {
+				t.Errorf("buildTipPrompt(%q) == buildTipPrompt(%q); all levels must produce distinct prompts", level, prev)
+			}
+			seen[result] = level
 		}
 	})
 }

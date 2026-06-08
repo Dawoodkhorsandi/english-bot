@@ -34,7 +34,8 @@ Go application (multi-file, single package main)
 ├── quiz.go           — quiz building (4 types + native poll), quiz_results, poll registry, quiz scheduler
 ├── stats.go          — /stats computation (streaks, activity days, progressBar, formatStats), admin metrics
 ├── admin.go          — admin panel: paginated /users list, user detail view, direct messaging to users
-└── webapp.go         — optional Telegram Mini App HTTP server; HMAC-SHA256 initData validation; /api/stats JSON endpoint
+├── webapp.go         — optional Telegram Mini App HTTP server; HMAC-SHA256 initData validation; /api/stats JSON endpoint
+└── vocab.go          — /mywords (browse learned vocabulary) and /bookmark (save favourite words) features
 ```
 
 The application runs ten concurrent goroutines (plus an optional web server goroutine when `WEB_APP_URL` is set):
@@ -318,6 +319,16 @@ Stores the Telegram `file_id` returned by `sendVoice` so subsequent pronunciatio
 sends for the same word reuse the cached file (zero-cost re-send, no TTS regeneration).
 Inserts are idempotent (`INSERT OR IGNORE`).
 
+#### `bookmarks` (v1.21.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `word` | `TEXT` | Lowercased vocabulary word |
+| `added_at` | `DATETIME` | When the bookmark was created |
+
+Primary key is `(chat_id, word)` — each user can bookmark each word at most once.
+Managed by `AddBookmark`, `RemoveBookmark`, `IsBookmarked`, `BookmarkCount` in `vocab.go`.
+
 ### Legacy Migration
 
 On first run, if a `subscribers.json` file exists (the old flat-file format), `migrateLegacyJSON` imports all active subscribers into SQLite and renames the file to `subscribers.json.migrated` so the migration only runs once.
@@ -404,6 +415,12 @@ type Store struct { db *sql.DB }
 | `CacheAudioFileID` | `(word, fileID string) error` | Stores a Telegram file_id for a word's pronunciation (idempotent) |
 | `AdminListUsers` | `(page, perPage int) ([]AdminUserRow, int, error)` | Paginated subscriber list with prefs joined (admin panel, v1.20.0) |
 | `AdminUserDetail` | `(chatID int64) (AdminUserDetail, error)` | Full user detail snapshot: prefs, counts, quiz, SRS, streaks (admin panel, v1.20.0) |
+| `LearnedWords` | `(chatID int64, offset, limit int) ([]LearnedWord, error)` | Paginated learned vocabulary with mastery status and bookmark flag (v1.21.0) |
+| `LearnedWordsCount` | `(chatID int64) (int, error)` | Total count of learned words for a user (v1.21.0) |
+| `AddBookmark` | `(chatID int64, word string) error` | Adds a bookmark for a word (idempotent, v1.21.0) |
+| `RemoveBookmark` | `(chatID int64, word string) error` | Removes a bookmark for a word (v1.21.0) |
+| `IsBookmarked` | `(chatID int64, word string) (bool, error)` | Reports whether a word is bookmarked by the user (v1.21.0) |
+| `BookmarkCount` | `(chatID int64) (int, error)` | Total bookmarks for a user (v1.21.0) |
 
 ---
 
@@ -463,6 +480,8 @@ All messages use `parse_mode: HTML`.
 | `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/users` | *(Admin only)* Paginated user list with inline keyboard navigation; tap any user for full detail (settings, toggles, progress, quiz, SRS, streaks); send a direct message to any user. Gated by `MAINTAINER_CHAT_ID`. (v1.20.0) |
+| `/mywords` | Browse all learned vocabulary with mastery status (🟢 mastered / 🔵 learning / ⚪ new) and bookmark indicator (⭐). Paginated with inline buttons (`mywords:<page>`). `/mywords bookmarks` shows bookmarked words only (paginated via `mybm:<page>`). (v1.21.0) |
+| `/bookmark [word]` | Toggle a word's bookmark status. With a word argument, adds or removes the bookmark; without an argument, shows the bookmarks page (aliases to `/mywords bookmarks`). Bookmark buttons (`bookmark:add:<word>` / `bookmark:rm:<word>`) also appear on vocabulary word cards. (v1.21.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
 | *(unknown command)* | Replies with a prompt to use /drill, /word, /tip, /quiz, /tts, /stats or /help — or to send any word to look it up. |
 | *(empty text)* | Silently ignored. |

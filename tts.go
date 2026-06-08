@@ -21,12 +21,17 @@ const maxTTSTextLength = 40
 
 var ttsHTTPClient = &http.Client{Timeout: 45 * time.Second}
 
-// sendWordCardWithTTS sends a word card and then (best-effort) a pronunciation
-// voice note as a reply to that card.
+// sendWordCardWithTTS sends a word card, attaches a bookmark button, and then
+// (best-effort) a pronunciation voice note as a reply to that card.
 func sendWordCardWithTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string) error {
 	msgID, err := notifier.SendWithMessageID(chatID, card)
 	if err != nil {
 		return err
+	}
+	// Attach a ⭐ Bookmark inline button to the card.
+	if word := strings.TrimSpace(parseWord(card)); word != "" {
+		isBookmarked := store.IsBookmarked(chatID, word)
+		_ = notifier.EditMessage(chatID, msgID, card, bookmarkButton(word, isBookmarked))
 	}
 	maybeSendTTS(ctx, store, notifier, chatID, card, msgID)
 	return nil

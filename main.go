@@ -193,6 +193,14 @@ var Changelogs = []ChangelogEntry{
 		Text: "📣 <b>What's New in v1.20.0</b>\n\n" +
 			"• 🇮🇷 <b>Persian definition!</b> Every vocabulary card now includes a Persian/Farsi translation — hidden behind a spoiler, tap to reveal",
 	},
+	{
+		Version: "1.21.0",
+		Text: "📣 <b>What's New in v1.21.0</b>\n\n" +
+			"• 📘 <b>Browse your words!</b> Use /mywords to see all vocabulary you've learned, with mastery status\n" +
+			"• ⭐ <b>Bookmarks!</b> Tap ⭐ on any word card or use /bookmark to save important words\n" +
+			"• Use /mywords bookmarks to see only your bookmarked words\n" +
+			"• 🎚️ <b>Smoother difficulty levels!</b> Intermediate (B1) and Upper-Intermediate (B2) are better calibrated",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -513,6 +521,8 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/interval — set how often scheduled practice arrives\n" +
 			"/tts — turn pronunciation audio on or off\n" +
 			"/stats — see your progress, streak and totals\n" +
+			"/mywords — browse all your learned vocabulary\n" +
+			"/bookmark — view or toggle bookmarks on important words\n" +
 			"/pause — stop scheduled sends (on-demand still works)\n" +
 			"/resume — re-enable scheduled sends\n" +
 			"/reset — clear history and see old verbs & words again"
@@ -609,6 +619,12 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 	case "/quiz":
 		log.Printf("🧩 [QUIZ] requested by ChatID %d.", chatID)
 		handleQuiz(store, notifier, chatID)
+
+	case "/mywords":
+		handleMyWords(store, notifier, chatID, args)
+
+	case "/bookmark":
+		handleBookmarkCommand(store, notifier, chatID, args)
 
 	case "/pause":
 		if err := store.SetPaused(chatID, true); err != nil {
@@ -1464,6 +1480,16 @@ func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) 
 		return
 	}
 
+	if strings.HasPrefix(cb.Data, "mywords:") || strings.HasPrefix(cb.Data, "mybm:") {
+		handleMyWordsCallback(store, notifier, cb, chatID)
+		return
+	}
+
+	if strings.HasPrefix(cb.Data, "bookmark:") {
+		handleBookmarkCallback(store, notifier, cb, chatID)
+		return
+	}
+
 	if strings.HasPrefix(cb.Data, "admin:") {
 		if !isMaintainer(chatID) {
 			_ = notifier.AnswerCallback(cb.ID, "🔒 Admin only")
@@ -1980,8 +2006,10 @@ func registerBotCommands() {
 		{"command": "level", "description": "Set difficulty (beginner/intermediate/upper-intermediate/advanced)"},
 		{"command": "interval", "description": "Set how often practice arrives"},
 		{"command": "tts", "description": "Toggle pronunciation audio on/off"},
-		{"command": "stats", "description": "See your progress and streak"},
-		{"command": "pause", "description": "Pause scheduled sends"},
+		{"command": "stats",    "description": "See your progress and streak"},
+		{"command": "mywords",  "description": "Browse your learned vocabulary"},
+		{"command": "bookmark", "description": "Bookmark or view important words"},
+		{"command": "pause",    "description": "Pause scheduled sends"},
 		{"command": "resume", "description": "Resume scheduled sends"},
 		{"command": "reset", "description": "Clear your practiced history"},
 		{"command": "help", "description": "How it works"},
@@ -2242,6 +2270,12 @@ func openStore(path string) (*Store, error) {
 		file_id    TEXT    NOT NULL,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+	CREATE TABLE IF NOT EXISTS bookmarks (
+		chat_id  INTEGER NOT NULL,
+		word     TEXT    NOT NULL,
+		added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, word)
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
@@ -2379,6 +2413,16 @@ func (s *Store) migrate() error {
 				return err
 			}
 		}
+	}
+	// bookmarks table added in v1.21.0; CREATE IF NOT EXISTS is safe for existing DBs.
+	if _, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS bookmarks (
+			chat_id  INTEGER NOT NULL,
+			word     TEXT    NOT NULL,
+			added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (chat_id, word)
+		)`); err != nil {
+		return err
 	}
 	return nil
 }

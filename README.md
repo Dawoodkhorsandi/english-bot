@@ -85,6 +85,8 @@ go test ./... -v
 | `/tip` | Get a grammar tip now; `/tip on` or `/tip off` to control daily tips |
 | `/quiz` | Take a multiple-choice quiz (native Telegram poll) |
 | `/stats` | View progress: streak, words, quiz accuracy with progress bars |
+| `/mywords` | Browse all learned vocabulary with mastery status; `/mywords bookmarks` for bookmarked only |
+| `/bookmark [word]` | Toggle bookmark on a word, or view bookmarks (no argument) |
 | `/level [beginner\|intermediate\|upper-intermediate\|advanced]` | Set difficulty level |
 | `/interval [minutes]` | Set send frequency (30/60/120/180/240/360/480/720) |
 | `/tts [on\|off]` | Toggle pronunciation audio on or off |
@@ -142,7 +144,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 ## Architecture
 
 ```
-Go application (single package main, 13 source files)
+Go application (single package main, 14 source files)
 +-- main.go           -- startup, schema, Telegram types, command router, Store
 +-- config.go         -- timezone, pool & scheduler tuning knobs, WEB_APP_URL/PORT
 +-- providers.go      -- Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
@@ -156,6 +158,7 @@ Go application (single package main, 13 source files)
 +-- stats.go          -- /stats computation (progress bars), admin metrics
 +-- admin.go          -- admin panel: paginated /users, user detail, direct messaging
 +-- webapp.go         -- optional Mini App HTTP server, HMAC initData validation, /api/stats
++-- vocab.go          -- /mywords (browse learned words) and /bookmark (favourites) features
 ```
 
 ### Goroutines (9 concurrent + optional web server)
