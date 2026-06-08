@@ -212,7 +212,7 @@ Rules:
 - Output only the formatted tip card with no preamble.`
 
 func buildDrillPrompt(level string, exclude []string) string {
-	prompt := drillPromptBase + "\n\n" + levelInstruction(level)
+	prompt := drillPromptBase + "\n\n" + levelInstruction(level) + "\n" + drillLengthDirective(level)
 	if len(exclude) == 0 {
 		return prompt
 	}
@@ -220,6 +220,20 @@ func buildDrillPrompt(level string, exclude []string) string {
 		"\n\nIMPORTANT: Do NOT use any of these verbs (already practiced): %s.\nChoose a completely different everyday verb not in that list.",
 		strings.Join(exclude, ", "),
 	)
+}
+
+// drillLengthDirective overrides the base prompt's sentence-length rule per level.
+func drillLengthDirective(level string) string {
+	switch level {
+	case levelBeginner:
+		return "Override the max-words rule above: keep every drill sentence to max 8 words."
+	case levelUpperInt:
+		return "Override the max-words rule above: sentences may be up to 14 words, with natural complexity."
+	case levelAdvanced:
+		return "Override the max-words rule above: sentences may be up to 16 words, with rich structure."
+	default:
+		return "Keep every drill sentence to max 10 words with clear, simple grammar."
+	}
 }
 
 func buildWordPrompt(level string, exclude []string) string {
@@ -246,14 +260,30 @@ func buildIdiomPrompt(level string, exclude []string) string {
 	)
 }
 
-func buildTipPrompt(exclude []string) string {
+func buildTipPrompt(level string, exclude []string) string {
+	prompt := tipPromptBase + "\n\n" + tipLevelInstruction(level)
 	if len(exclude) == 0 {
-		return tipPromptBase
+		return prompt
 	}
-	return tipPromptBase + fmt.Sprintf(
+	return prompt + fmt.Sprintf(
 		"\n\nIMPORTANT: Avoid these already-pooled grammar topics: %s.\nChoose a different grammar topic not in that list.",
 		strings.Join(exclude, ", "),
 	)
+}
+
+// tipLevelInstruction returns a difficulty directive for grammar tips so the
+// chosen topic and examples match the user's selected level.
+func tipLevelInstruction(level string) string {
+	switch level {
+	case levelBeginner:
+		return "DIFFICULTY: Target CEFR A1–A2 (beginner) learners. Pick a basic grammar rule (articles, simple tenses, subject-verb agreement). Keep examples very short and simple."
+	case levelUpperInt:
+		return "DIFFICULTY: Target CEFR B2 (upper-intermediate) learners. Pick a grammar nuance that trips up confident speakers — e.g. subtle tense distinctions, advanced conditionals, cleft sentences, inversion. Keep examples natural and conversational."
+	case levelAdvanced:
+		return "DIFFICULTY: Target CEFR C1–C2 (advanced) learners. Pick a sophisticated grammar point — e.g. subjunctive mood, discourse markers, ellipsis, fronting. Use examples with literary or academic register."
+	default:
+		return "DIFFICULTY: Target CEFR B1 (intermediate) learners. Pick a common grammar topic (present perfect vs past simple, prepositions, modal verbs). Use clear, everyday examples."
+	}
 }
 
 // buildWordLookupPrompt builds a vocabulary-card prompt for a SPECIFIC term the
@@ -271,16 +301,23 @@ LOOKUP MODE — the learner asked about: "%s"
 
 // levelInstruction returns a difficulty directive injected into the prompt so the
 // chosen verb/word and example sentences match the user's selected level.
+//
+// Each level maps to a single CEFR band to avoid overlap:
+//
+//	beginner           → A1-A2  (high-frequency, simple)
+//	intermediate       → B1     (common, practical, clear)
+//	upper-intermediate → B2     (still conversational, but more nuanced)
+//	advanced           → C1-C2  (sophisticated, less common)
 func levelInstruction(level string) string {
 	switch level {
 	case levelBeginner:
-		return "DIFFICULTY: Target CEFR A1–A2 (beginner) learners. Pick a very common, simple, high-frequency word and keep all example sentences short and easy."
+		return "DIFFICULTY: Target CEFR A1–A2 (beginner) learners. Pick a very common, simple, high-frequency word and keep all example sentences short and easy (max 8 words)."
 	case levelUpperInt:
-		return "DIFFICULTY: Target CEFR B2–C1 (upper-intermediate) learners. Pick a word that is common in academic, professional, or media contexts but not everyday conversation. Use example sentences with natural complexity — subordinate clauses, idiomatic phrasing — without being obscure."
+		return "DIFFICULTY: Target CEFR B2 (upper-intermediate) learners. Pick a word that is useful in both everyday and slightly formal contexts — the kind of word a confident speaker uses naturally but a learner might still be acquiring. Use example sentences with moderate complexity: compound sentences, occasional idiomatic expressions, and natural conversational flow. Stay conversational — avoid academic or obscure vocabulary."
 	case levelAdvanced:
-		return "DIFFICULTY: Target CEFR C1–C2 (advanced) learners. Pick a sophisticated, less common word and use richer, more nuanced example sentences."
+		return "DIFFICULTY: Target CEFR C1–C2 (advanced) learners. Pick a sophisticated, less common word found in academic, professional, or literary contexts. Use richer, more nuanced example sentences with subordinate clauses, idiomatic phrasing, and varied registers."
 	default:
-		return "DIFFICULTY: Target CEFR B1–B2 (intermediate) learners. Pick a moderately common, useful word with natural example sentences."
+		return "DIFFICULTY: Target CEFR B1 (intermediate) learners. Pick a common, practical, everyday word. Use clear, simple example sentences (max 10 words) with straightforward grammar — no complex clauses or idioms."
 	}
 }
 
@@ -294,7 +331,7 @@ func generateContent(ctx context.Context, chain *ProviderChain, kind, level stri
 	case kindIdiom:
 		prompt = buildIdiomPrompt(level, exclude)
 	case kindTip:
-		prompt = buildTipPrompt(exclude)
+		prompt = buildTipPrompt(level, exclude)
 	default:
 		prompt = buildDrillPrompt(level, exclude)
 	}
