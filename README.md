@@ -106,6 +106,7 @@ Gated by `MAINTAINER_CHAT_ID` -- other users see "not authorized".
 | `/announce <text>` | Broadcast an HTML message to all active subscribers |
 | `/health` | List enabled AI providers |
 | `/users` | Paginated user list with inline buttons; tap any user to see full detail (settings, toggles, progress, quiz accuracy, SRS state, streaks); send a direct message to any user from the detail view |
+| `/backup` | Send a point-in-time SQLite backup file to the maintainer chat immediately |
 
 ## Configuration
 
@@ -137,6 +138,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `DIGEST_DAY` | `Sunday` | Day of week for weekly digest (`off` to disable) |
 | `DIGEST_TIME` | `20:00` | Local time to send the weekly digest |
 | `IDIOM_TIME` | `09:00` | Local time to send the daily idiom (`off` to disable) |
+| `BACKUP_TIME` | `02:00` | Local time to send nightly SQLite backup to the maintainer (`off` to disable) |
 | `AI_PROVIDER_ORDER` | `gemini,groq,...` | Comma-separated provider priority |
 | `WEB_APP_URL` | *(unset)* | Public HTTPS URL of the bot server (e.g. `https://bot.example.com`). When set, `/stats` includes a "📊 Full Dashboard" button opening the Telegram Mini App stats page. Leave unset to disable. |
 | `WEB_APP_PORT` | `8090` | TCP port for the embedded Mini App HTTP server (only used when `WEB_APP_URL` is set). |

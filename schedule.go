@@ -595,6 +595,42 @@ func runWeeklyDigestScheduler(ctx context.Context, store *Store, notifier Notifi
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Nightly SQLite backup scheduler (maintainer-only)
+// ---------------------------------------------------------------------------
+
+// runDBBackupScheduler sends one SQLite backup per day to the maintainer at
+// BACKUP_TIME (local). Set BACKUP_TIME=off to disable.
+func runDBBackupScheduler(ctx context.Context, store *Store, notifier Notifier) {
+	if strings.EqualFold(strings.TrimSpace(backupTime), "off") {
+		log.Println("🗄️  [BACKUP] Nightly backup scheduler disabled (BACKUP_TIME=off).")
+		return
+	}
+	hh, mm := parseHourMinute(backupTime)
+	log.Printf("🗄️  [BACKUP] Nightly backup scheduler started (fires daily at %02d:%02d local).", hh, mm)
+	for {
+		next := nextDailyTime(time.Now(), hh, mm)
+		wait := time.Until(next)
+		log.Printf("🗄️  [BACKUP] Next backup at %s (in %s).", next.Format("2006-01-02 15:04 MST"), wait.Truncate(time.Second))
+
+		select {
+		case <-ctx.Done():
+			log.Println("🗄️  [BACKUP] Nightly backup scheduler stopped.")
+			return
+		case <-time.After(wait):
+		}
+
+		runNightlyDBBackup(store, notifier)
+	}
+}
+
+// runNightlyDBBackup executes one scheduled backup attempt.
+func runNightlyDBBackup(store *Store, notifier Notifier) {
+	if err := sendMaintainerDBBackup(store, notifier, "nightly schedule"); err != nil {
+		log.Printf("❌ [BACKUP] Nightly backup failed: %v", err)
+	}
+}
+
 // nextWeekdayTime returns the next occurrence of the given weekday at the given
 // local time (HH:MM format, parsed via parseHourMinute) after t.
 func nextWeekdayTime(t time.Time, weekday time.Weekday, timeStr string) time.Time {
