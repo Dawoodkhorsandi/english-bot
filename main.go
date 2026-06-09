@@ -213,6 +213,13 @@ var Changelogs = []ChangelogEntry{
 			"• Stale word cards (missing Persian) are auto-refreshed in the background\n" +
 			"• Added silent changelog support for internal deploys",
 	},
+	{
+		Version: "1.21.2",
+		Silent:  true,
+		Text: "• Added nightly SQLite backup delivery to maintainer chat\n" +
+			"• Added maintainer-only /backup command for on-demand backups\n" +
+			"• Added BACKUP_TIME config for daily backup scheduling",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
