@@ -220,6 +220,13 @@ var Changelogs = []ChangelogEntry{
 			"• Added maintainer-only /backup command for on-demand backups\n" +
 			"• Added BACKUP_TIME config for daily backup scheduling",
 	},
+	{
+		Version: "1.22.0",
+		Silent:  true,
+		Text: "• Added /config admin panel for runtime bot settings\n" +
+			"• Configurable: pool target, pool min, quiet hours, global TTS, gen spacing, review batch max\n" +
+			"• Settings persisted in bot_config table and survive restarts",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -300,6 +307,9 @@ func main() {
 		log.Fatalf("❌ [CRITICAL] Failed to initialize SQLite store: %v", err)
 	}
 	defer store.Close()
+
+	// Load persisted admin config overrides before any scheduling decisions.
+	store.LoadBotConfig()
 
 	notifier := &telegramNotifier{}
 
@@ -730,6 +740,13 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 		handleAdminUsers(store, notifier, chatID)
 
+	case "/config":
+		if !isMaintainer(chatID) {
+			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
+			return
+		}
+		handleAdminConfig(store, notifier, chatID)
+
 	default:
 		if strings.HasPrefix(command, "/") {
 			log.Printf("ℹ️  [ROUTER_UNHANDLED] Unknown command %q from ChatID %d.", msg.Text, chatID)
@@ -947,6 +964,363 @@ func handleBackup(store *Store, notifier Notifier, chatID int64) {
 		_ = notifier.Send(chatID, "❌ Backup failed. Check logs and try again.")
 		return
 	}
+}
+
+// handleAdminConfig lets the maintainer tweak selected runtime settings via an
+// interactive inline-keyboard panel. All changes are persisted in bot_config
+// and survive restarts.
+func handleAdminConfig(store *Store, notifier Notifier, chatID int64) {
+	log.Printf("⚙️  [ADMIN] /config requested by ChatID %d.", chatID)
+	if err := notifier.SendKeyboard(chatID, configText(), configKeyboard()); err != nil {
+		log.Printf("❌ [CONFIG] Could not send config panel to ChatID %d: %v", chatID, err)
+	}
+}
+
+// configText formats the admin config panel body.
+func configText() string {
+	onOff := "ON"
+	if !ttsEnabled {
+		onOff = "OFF"
+	}
+	return fmt.Sprintf(
+		"⚙️ <b>Bot Config</b> (Admin)\n\n"+
+			"📦 <b>Pool target:</b> %d  •  <b>Pool min:</b> %d\n"+
+			"🌙 <b>Quiet hours:</b> %s – %s\n"+
+			"🔊 <b>Global TTS:</b> %s\n"+
+			"⏱ <b>Gen spacing:</b> %s\n"+
+			"🧠 <b>Review batch max:</b> %d\n\n"+
+			"Tap a setting to change it.",
+		poolTarget, poolMin,
+		quietStart, quietEnd,
+		onOff,
+		genSpacing,
+		reviewBatchMax,
+	)
+}
+
+// configKeyboard builds the admin config panel inline keyboard.
+func configKeyboard() [][]inlineButton {
+	ttsLabel := "🔊 Global TTS: ON"
+	if !ttsEnabled {
+		ttsLabel = "🔊 Global TTS: OFF"
+	}
+	return [][]inlineButton{
+		{
+			{Text: fmt.Sprintf("📦 Pool target: %d", poolTarget), CallbackData: "cfg:goto:pool_target"},
+			{Text: fmt.Sprintf("📦 Pool min: %d", poolMin), CallbackData: "cfg:goto:pool_min"},
+		},
+		{
+			{Text: fmt.Sprintf("🌙 Quiet start: %s", quietStart), CallbackData: "cfg:goto:quiet_start"},
+			{Text: fmt.Sprintf("🌙 Quiet end: %s", quietEnd), CallbackData: "cfg:goto:quiet_end"},
+		},
+		{
+			{Text: ttsLabel, CallbackData: "cfg:toggle:tts"},
+			{Text: fmt.Sprintf("⏱ Gen spacing: %s", genSpacing), CallbackData: "cfg:goto:gen_spacing"},
+		},
+		{
+			{Text: fmt.Sprintf("🧠 Review batch: %d", reviewBatchMax), CallbackData: "cfg:goto:review_batch"},
+		},
+	}
+}
+
+// configPoolTargetKeyboard builds the pool target selection sub-keyboard.
+func configPoolTargetKeyboard() [][]inlineButton {
+	presets := []int{200, 300, 400, 500, 600, 800, 1000, 1500}
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, v := range presets {
+		label := fmt.Sprintf("%d", v)
+		if v == poolTarget {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:pool_target:%d", v)})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	return rows
+}
+
+// configPoolMinKeyboard builds the pool min selection sub-keyboard.
+func configPoolMinKeyboard() [][]inlineButton {
+	presets := []int{100, 150, 200, 300, 400, 500}
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, v := range presets {
+		label := fmt.Sprintf("%d", v)
+		if v == poolMin {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:pool_min:%d", v)})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	return rows
+}
+
+// configQuietStartKeyboard builds the quiet-hours start time sub-keyboard.
+func configQuietStartKeyboard() [][]inlineButton {
+	presets := []string{"21:00", "22:00", "23:00", "00:00", "01:00", "02:00"}
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, v := range presets {
+		label := v
+		if v == quietStart {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: "cfg:quiet_start:" + v})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	return rows
+}
+
+// configQuietEndKeyboard builds the quiet-hours end time sub-keyboard.
+func configQuietEndKeyboard() [][]inlineButton {
+	presets := []string{"06:00", "07:00", "08:00", "09:00", "10:00", "11:00"}
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, v := range presets {
+		label := v
+		if v == quietEnd {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: "cfg:quiet_end:" + v})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	return rows
+}
+
+// configGenSpacingKeyboard builds the generation spacing sub-keyboard.
+func configGenSpacingKeyboard() [][]inlineButton {
+	presets := []time.Duration{
+		1 * time.Second, 2 * time.Second, 3 * time.Second,
+		5 * time.Second, 8 * time.Second, 10 * time.Second,
+	}
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, v := range presets {
+		label := v.String()
+		if v == genSpacing {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: "cfg:gen_spacing:" + v.String()})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	return rows
+}
+
+// configReviewBatchKeyboard builds the review batch max sub-keyboard.
+func configReviewBatchKeyboard() [][]inlineButton {
+	presets := []int{1, 2, 3, 5}
+	var row []inlineButton
+	for _, v := range presets {
+		label := fmt.Sprintf("%d", v)
+		if v == reviewBatchMax {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:review_batch:%d", v)})
+	}
+	return [][]inlineButton{
+		row,
+		{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}},
+	}
+}
+
+// handleConfigCallback processes all "cfg:*" inline button taps from the admin
+// config panel. It handles show, goto (sub-keyboard), set, and toggle operations,
+// then edits the message in place.
+func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+	rest := strings.TrimPrefix(cb.Data, "cfg:")
+
+	// Helper: refresh back to the main config panel.
+	refresh := func(toast string) {
+		_ = notifier.AnswerCallback(cb.ID, toast)
+		if cb.Message != nil {
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID, configText(), configKeyboard())
+		}
+	}
+
+	// cfg:show — refresh the main config panel.
+	if rest == "show" {
+		refresh("")
+		return
+	}
+
+	// cfg:toggle:tts — flip global TTS.
+	if rest == "toggle:tts" {
+		ttsEnabled = !ttsEnabled
+		val := "false"
+		if ttsEnabled {
+			val = "true"
+		}
+		_ = store.SetBotConfig("tts_enabled", val)
+		label := "OFF"
+		if ttsEnabled {
+			label = "ON"
+		}
+		log.Printf("⚙️  [ADMIN] /config toggled tts_enabled -> %s by ChatID %d.", label, chatID)
+		refresh("Global TTS: " + label)
+		return
+	}
+
+	// cfg:goto:<key> — show sub-keyboard for a config key.
+	if strings.HasPrefix(rest, "goto:") {
+		_ = notifier.AnswerCallback(cb.ID, "")
+		if cb.Message == nil {
+			return
+		}
+		key := strings.TrimPrefix(rest, "goto:")
+		switch key {
+		case "pool_target":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("📦 <b>Pool Target</b>\n\nCurrent: <b>%d</b>\nTap to change:", poolTarget),
+				configPoolTargetKeyboard(),
+			)
+		case "pool_min":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("📦 <b>Pool Min</b>\n\nCurrent: <b>%d</b>\nTap to change:", poolMin),
+				configPoolMinKeyboard(),
+			)
+		case "quiet_start":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("🌙 <b>Quiet Hours Start</b>\n\nCurrent: <b>%s</b>\nTap to change:", quietStart),
+				configQuietStartKeyboard(),
+			)
+		case "quiet_end":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("🌙 <b>Quiet Hours End</b>\n\nCurrent: <b>%s</b>\nTap to change:", quietEnd),
+				configQuietEndKeyboard(),
+			)
+		case "gen_spacing":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("⏱ <b>AI Generation Spacing</b>\n\nCurrent: <b>%s</b>\nTap to change:", genSpacing),
+				configGenSpacingKeyboard(),
+			)
+		case "review_batch":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("🧠 <b>Review Batch Max</b>\n\nCurrent: <b>%d</b>\nTap to change:", reviewBatchMax),
+				configReviewBatchKeyboard(),
+			)
+		}
+		return
+	}
+
+	// cfg:pool_target:<n> — set pool target.
+	if strings.HasPrefix(rest, "pool_target:") {
+		n, err := strconv.Atoi(strings.TrimPrefix(rest, "pool_target:"))
+		if err != nil || n <= 0 {
+			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
+			return
+		}
+		old := poolTarget
+		poolTarget = n
+		_ = store.SetBotConfig("pool_target", strconv.Itoa(n))
+		log.Printf("⚙️  [ADMIN] /config pool_target %d -> %d by ChatID %d.", old, n, chatID)
+		refresh(fmt.Sprintf("Pool target: %d", n))
+		return
+	}
+
+	// cfg:pool_min:<n> — set pool min.
+	if strings.HasPrefix(rest, "pool_min:") {
+		n, err := strconv.Atoi(strings.TrimPrefix(rest, "pool_min:"))
+		if err != nil || n <= 0 {
+			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
+			return
+		}
+		old := poolMin
+		poolMin = n
+		_ = store.SetBotConfig("pool_min", strconv.Itoa(n))
+		log.Printf("⚙️  [ADMIN] /config pool_min %d -> %d by ChatID %d.", old, n, chatID)
+		refresh(fmt.Sprintf("Pool min: %d", n))
+		return
+	}
+
+	// cfg:quiet_start:<v> — set quiet hours start.
+	if strings.HasPrefix(rest, "quiet_start:") {
+		v := strings.TrimPrefix(rest, "quiet_start:")
+		old := quietStart
+		quietStart = v
+		_ = store.SetBotConfig("quiet_start", v)
+		log.Printf("⚙️  [ADMIN] /config quiet_start %s -> %s by ChatID %d.", old, v, chatID)
+		refresh("Quiet start: " + v)
+		return
+	}
+
+	// cfg:quiet_end:<v> — set quiet hours end.
+	if strings.HasPrefix(rest, "quiet_end:") {
+		v := strings.TrimPrefix(rest, "quiet_end:")
+		old := quietEnd
+		quietEnd = v
+		_ = store.SetBotConfig("quiet_end", v)
+		log.Printf("⚙️  [ADMIN] /config quiet_end %s -> %s by ChatID %d.", old, v, chatID)
+		refresh("Quiet end: " + v)
+		return
+	}
+
+	// cfg:gen_spacing:<v> — set generation spacing.
+	if strings.HasPrefix(rest, "gen_spacing:") {
+		v := strings.TrimPrefix(rest, "gen_spacing:")
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			_ = notifier.AnswerCallback(cb.ID, "Invalid duration")
+			return
+		}
+		old := genSpacing
+		genSpacing = d
+		_ = store.SetBotConfig("gen_spacing", v)
+		log.Printf("⚙️  [ADMIN] /config gen_spacing %s -> %s by ChatID %d.", old, d, chatID)
+		refresh("Gen spacing: " + d.String())
+		return
+	}
+
+	// cfg:review_batch:<n> — set review batch max.
+	if strings.HasPrefix(rest, "review_batch:") {
+		n, err := strconv.Atoi(strings.TrimPrefix(rest, "review_batch:"))
+		if err != nil || n <= 0 {
+			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
+			return
+		}
+		old := reviewBatchMax
+		reviewBatchMax = n
+		_ = store.SetBotConfig("review_batch_max", strconv.Itoa(n))
+		log.Printf("⚙️  [ADMIN] /config review_batch_max %d -> %d by ChatID %d.", old, n, chatID)
+		refresh(fmt.Sprintf("Review batch: %d", n))
+		return
+	}
+
+	_ = notifier.AnswerCallback(cb.ID, "")
 }
 
 // levelKeyboard builds a two-row inline keyboard of the four levels, marking the
@@ -1543,6 +1917,15 @@ func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) 
 			return
 		}
 		handleAdminCallback(store, notifier, cb, chatID)
+		return
+	}
+
+	if strings.HasPrefix(cb.Data, "cfg:") {
+		if !isMaintainer(chatID) {
+			_ = notifier.AnswerCallback(cb.ID, "🔒 Admin only")
+			return
+		}
+		handleConfigCallback(store, notifier, cb, chatID)
 		return
 	}
 
@@ -2430,6 +2813,11 @@ func openStore(path string) (*Store, error) {
 		added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, word)
 	);
+	CREATE TABLE IF NOT EXISTS bot_config (
+		key        TEXT PRIMARY KEY,
+		value      TEXT NOT NULL,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
@@ -2447,6 +2835,83 @@ func openStore(path string) (*Store, error) {
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// ---------------------------------------------------------------------------
+// bot_config — persistent key-value runtime configuration
+// ---------------------------------------------------------------------------
+
+// SetBotConfig upserts a key-value pair in bot_config.
+func (s *Store) SetBotConfig(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO bot_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+		key, value,
+	)
+	return err
+}
+
+// GetBotConfig reads a single config value. Returns ("", false) if not set.
+func (s *Store) GetBotConfig(key string) (string, bool) {
+	var v string
+	err := s.db.QueryRow("SELECT value FROM bot_config WHERE key = ?", key).Scan(&v)
+	if err != nil {
+		return "", false
+	}
+	return v, true
+}
+
+// LoadBotConfig reads all rows from bot_config and overwrites the corresponding
+// global variables. Environment variables act as defaults; DB values (set via
+// /config) override them and survive restarts.
+func (s *Store) LoadBotConfig() {
+	rows, err := s.db.Query("SELECT key, value FROM bot_config")
+	if err != nil {
+		log.Printf("⚠️  [CONFIG] Could not load bot_config: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			continue
+		}
+		switch k {
+		case "pool_target":
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				poolTarget = n
+			}
+		case "pool_min":
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				poolMin = n
+			}
+		case "quiet_start":
+			quietStart = v
+		case "quiet_end":
+			quietEnd = v
+		case "tts_enabled":
+			switch strings.ToLower(v) {
+			case "true", "1", "on":
+				ttsEnabled = true
+			case "false", "0", "off":
+				ttsEnabled = false
+			}
+		case "gen_spacing":
+			if d, err := time.ParseDuration(v); err == nil {
+				genSpacing = d
+			}
+		case "review_batch_max":
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				reviewBatchMax = n
+			}
+		}
+		count++
+	}
+	if count > 0 {
+		log.Printf("⚙️  [CONFIG] Loaded %d setting(s) from bot_config (override env defaults).", count)
+	}
 }
 
 // migrate applies additive column migrations to pre-existing databases so older

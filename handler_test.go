@@ -28,6 +28,35 @@ func saveAppLocation(t *testing.T) {
 	t.Cleanup(func() { appLocation = orig })
 }
 
+// savePoolConfig saves and restores pool target knobs around a test.
+func savePoolConfig(t *testing.T) {
+	t.Helper()
+	origTarget, origMin := poolTarget, poolMin
+	t.Cleanup(func() {
+		poolTarget = origTarget
+		poolMin = origMin
+	})
+}
+
+// saveBotConfig saves and restores all runtime config globals around a test.
+func saveBotConfig(t *testing.T) {
+	t.Helper()
+	origTarget, origMin := poolTarget, poolMin
+	origQS, origQE := quietStart, quietEnd
+	origTTS := ttsEnabled
+	origGS := genSpacing
+	origRBM := reviewBatchMax
+	t.Cleanup(func() {
+		poolTarget = origTarget
+		poolMin = origMin
+		quietStart = origQS
+		quietEnd = origQE
+		ttsEnabled = origTTS
+		genSpacing = origGS
+		reviewBatchMax = origRBM
+	})
+}
+
 // resetHourlyLimiter clears the global rate-limiter state before a test and
 // restores an empty state after, so rate-limit decisions in one test never
 // bleed into another.
@@ -902,6 +931,221 @@ func TestHandleBackupMaintainer(t *testing.T) {
 	}
 	if !strings.Contains(doc.caption, "manual /backup") {
 		t.Errorf("backup caption should include manual trigger, got %q", doc.caption)
+	}
+}
+
+func TestHandleConfigNotMaintainer(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	MaintainerChatID = "999"
+
+	msg := &TelegramMessage{
+		MessageID: 1,
+		Chat:      TelegramChat{ID: 1},
+		Text:      "/config",
+	}
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+
+	if !strings.Contains(mock.lastSentText(), "only available to the bot maintainer") {
+		t.Errorf("expected 'not authorized' reply, got %q", mock.lastSentText())
+	}
+}
+
+func TestHandleConfigShowsPanel(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	saveBotConfig(t)
+	MaintainerChatID = "300"
+
+	msg := &TelegramMessage{
+		MessageID: 1,
+		Chat:      TelegramChat{ID: 300},
+		Text:      "/config",
+	}
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+
+	if len(mock.keyboard) == 0 {
+		t.Fatal("expected keyboard for config panel")
+	}
+	kb := mock.keyboard[0]
+	if !strings.Contains(kb.text, "Bot Config") {
+		t.Errorf("expected 'Bot Config' in panel text, got %q", kb.text)
+	}
+	if !strings.Contains(kb.text, "Pool target") {
+		t.Errorf("expected 'Pool target' in panel text, got %q", kb.text)
+	}
+}
+
+func TestConfigCallbackPoolTarget(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	saveBotConfig(t)
+	MaintainerChatID = "300"
+	poolTarget = 300
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb-cfg-1",
+		From:    &TelegramUser{ID: 300},
+		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		Data:    "cfg:pool_target:500",
+	}
+	handleCallback(store, mock, cb)
+
+	if poolTarget != 500 {
+		t.Fatalf("poolTarget = %d, want 500", poolTarget)
+	}
+	// Verify persisted to DB.
+	if v, ok := store.GetBotConfig("pool_target"); !ok || v != "500" {
+		t.Errorf("bot_config pool_target = %q (ok=%v), want '500'", v, ok)
+	}
+	// Should have answered callback.
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery")
+	}
+}
+
+func TestConfigCallbackPoolMin(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	saveBotConfig(t)
+	MaintainerChatID = "300"
+	poolMin = 100
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb-cfg-2",
+		From:    &TelegramUser{ID: 300},
+		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		Data:    "cfg:pool_min:200",
+	}
+	handleCallback(store, mock, cb)
+
+	if poolMin != 200 {
+		t.Fatalf("poolMin = %d, want 200", poolMin)
+	}
+	if v, ok := store.GetBotConfig("pool_min"); !ok || v != "200" {
+		t.Errorf("bot_config pool_min = %q (ok=%v), want '200'", v, ok)
+	}
+}
+
+func TestConfigCallbackToggleTTS(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	saveBotConfig(t)
+	MaintainerChatID = "300"
+	ttsEnabled = true
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb-cfg-tts",
+		From:    &TelegramUser{ID: 300},
+		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		Data:    "cfg:toggle:tts",
+	}
+	handleCallback(store, mock, cb)
+
+	if ttsEnabled {
+		t.Fatal("expected ttsEnabled = false after toggle")
+	}
+	if v, ok := store.GetBotConfig("tts_enabled"); !ok || v != "false" {
+		t.Errorf("bot_config tts_enabled = %q (ok=%v), want 'false'", v, ok)
+	}
+
+	// Toggle again.
+	cb.ID = "cb-cfg-tts-2"
+	handleCallback(store, mock, cb)
+	if !ttsEnabled {
+		t.Fatal("expected ttsEnabled = true after second toggle")
+	}
+}
+
+func TestConfigCallbackQuietHours(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	saveBotConfig(t)
+	MaintainerChatID = "300"
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb-cfg-qs",
+		From:    &TelegramUser{ID: 300},
+		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		Data:    "cfg:quiet_start:23:00",
+	}
+	handleCallback(store, mock, cb)
+	if quietStart != "23:00" {
+		t.Fatalf("quietStart = %q, want '23:00'", quietStart)
+	}
+
+	cb.ID = "cb-cfg-qe"
+	cb.Data = "cfg:quiet_end:10:00"
+	handleCallback(store, mock, cb)
+	if quietEnd != "10:00" {
+		t.Fatalf("quietEnd = %q, want '10:00'", quietEnd)
+	}
+}
+
+func TestConfigCallbackNotMaintainer(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	MaintainerChatID = "999"
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb-cfg-blocked",
+		From:    &TelegramUser{ID: 1},
+		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 1}},
+		Data:    "cfg:pool_target:500",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.answers) == 0 {
+		t.Fatal("expected answerCallbackQuery")
+	}
+	if !strings.Contains(mock.answers[0].text, "Admin only") {
+		t.Errorf("expected 'Admin only' toast, got %q", mock.answers[0].text)
+	}
+}
+
+func TestLoadBotConfig(t *testing.T) {
+	store := testStoreHelper(t)
+	saveBotConfig(t)
+
+	// Set some values in the DB.
+	store.SetBotConfig("pool_target", "777")
+	store.SetBotConfig("pool_min", "222")
+	store.SetBotConfig("quiet_start", "22:00")
+	store.SetBotConfig("quiet_end", "10:00")
+	store.SetBotConfig("tts_enabled", "false")
+	store.SetBotConfig("gen_spacing", "5s")
+	store.SetBotConfig("review_batch_max", "3")
+
+	// Load and verify all globals are overwritten.
+	store.LoadBotConfig()
+
+	if poolTarget != 777 {
+		t.Errorf("poolTarget = %d, want 777", poolTarget)
+	}
+	if poolMin != 222 {
+		t.Errorf("poolMin = %d, want 222", poolMin)
+	}
+	if quietStart != "22:00" {
+		t.Errorf("quietStart = %q, want '22:00'", quietStart)
+	}
+	if quietEnd != "10:00" {
+		t.Errorf("quietEnd = %q, want '10:00'", quietEnd)
+	}
+	if ttsEnabled {
+		t.Error("expected ttsEnabled = false")
+	}
+	if genSpacing.String() != "5s" {
+		t.Errorf("genSpacing = %s, want 5s", genSpacing)
+	}
+	if reviewBatchMax != 3 {
+		t.Errorf("reviewBatchMax = %d, want 3", reviewBatchMax)
 	}
 }
 

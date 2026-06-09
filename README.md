@@ -25,7 +25,7 @@ A Telegram bot that sends subscribers AI-generated English practice on a configu
 - **Pre-Generated Pool** -- background worker keeps a content pool topped up; broadcasts never block on AI calls
 - **Quiet Hours** -- no broadcasts during configurable overnight window (default 00:00--09:00 Tehran)
 - **Daily Review** -- compact bedtime recap of the day's vocabulary at midnight
-- **Admin Tools** -- `/metrics`, `/health`, `/announce`, `/users` (paginated user list with detail view and direct messaging) gated by maintainer chat ID
+- **Admin Tools** -- `/metrics`, `/health`, `/announce`, `/users` (paginated user list with detail view and direct messaging), `/config` (runtime settings panel) gated by maintainer chat ID
 
 ## Quick Start
 
@@ -107,6 +107,7 @@ Gated by `MAINTAINER_CHAT_ID` -- other users see "not authorized".
 | `/health` | List enabled AI providers |
 | `/users` | Paginated user list with inline buttons; tap any user to see full detail (settings, toggles, progress, quiz accuracy, SRS state, streaks); send a direct message to any user from the detail view |
 | `/backup` | Send a point-in-time SQLite backup file to the maintainer chat immediately |
+| `/config` | Interactive panel to tweak runtime bot settings (pool size, quiet hours, TTS, gen spacing, review batch); persisted across restarts |
 
 ## Configuration
 
