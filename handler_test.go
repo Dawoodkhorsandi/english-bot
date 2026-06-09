@@ -856,6 +856,55 @@ func TestHandleMetricsNotMaintainer(t *testing.T) {
 	}
 }
 
+func TestHandleBackupNotMaintainer(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	MaintainerChatID = "999"
+
+	msg := &TelegramMessage{
+		MessageID: 1,
+		Chat:      TelegramChat{ID: 1},
+		Text:      "/backup",
+	}
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+
+	if !strings.Contains(mock.lastSentText(), "only available to the bot maintainer") {
+		t.Errorf("expected 'not authorized' reply, got %q", mock.lastSentText())
+	}
+	if len(mock.docs) != 0 {
+		t.Fatalf("expected no backup document for non-maintainer, got %d", len(mock.docs))
+	}
+}
+
+func TestHandleBackupMaintainer(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	MaintainerChatID = "300"
+
+	msg := &TelegramMessage{
+		MessageID: 1,
+		Chat:      TelegramChat{ID: 300},
+		Text:      "/backup",
+	}
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
+
+	if len(mock.docs) != 1 {
+		t.Fatalf("expected 1 backup document, got %d", len(mock.docs))
+	}
+	doc := mock.docs[0]
+	if doc.chatID != 300 {
+		t.Fatalf("backup sent to chat %d, want 300", doc.chatID)
+	}
+	if !strings.HasPrefix(doc.filename, "english-bot-backup-") || !strings.HasSuffix(doc.filename, ".sqlite") {
+		t.Errorf("unexpected backup filename: %q", doc.filename)
+	}
+	if !strings.Contains(doc.caption, "manual /backup") {
+		t.Errorf("backup caption should include manual trigger, got %q", doc.caption)
+	}
+}
+
 func TestSendPendingChangelogs(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}

@@ -651,3 +651,20 @@ func TestSendWeeklyDigest_NoActivity(t *testing.T) {
 		t.Error("expected no digest when there's no activity")
 	}
 }
+
+func TestRunNightlyDBBackup_SendsToMaintainer(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	origMaintainer := MaintainerChatID
+	t.Cleanup(func() { MaintainerChatID = origMaintainer })
+	MaintainerChatID = "777"
+
+	runNightlyDBBackup(store, mock)
+
+	if len(mock.docs) != 1 {
+		t.Fatalf("expected 1 backup document, got %d", len(mock.docs))
+	}
+	if mock.docs[0].chatID != 777 {
+		t.Fatalf("backup sent to chat %d, want 777", mock.docs[0].chatID)
+	}
+}

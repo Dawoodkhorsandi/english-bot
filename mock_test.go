@@ -13,6 +13,7 @@ type mockNotifier struct {
 	mu       sync.Mutex
 	sent     []sentMsg
 	voices   []sentVoice
+	docs     []sentDoc
 	keyboard []sentKeyboard
 	edits    []sentEdit
 	answers  []sentAnswer
@@ -34,6 +35,13 @@ type sentVoice struct {
 	filename         string
 	replyToMessageID int64
 	size             int
+}
+
+type sentDoc struct {
+	chatID   int64
+	filename string
+	caption  string
+	size     int
 }
 
 type sentEdit struct {
@@ -80,6 +88,18 @@ func (m *mockNotifier) SendVoiceByFileID(chatID int64, fileID string, replyToMes
 		filename:         fileID,
 		replyToMessageID: replyToMessageID,
 		size:             -1, // sentinel: indicates a cached re-send
+	})
+	return nil
+}
+
+func (m *mockNotifier) SendDocument(chatID int64, doc []byte, filename, caption string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.docs = append(m.docs, sentDoc{
+		chatID:   chatID,
+		filename: filename,
+		caption:  caption,
+		size:     len(doc),
 	})
 	return nil
 }

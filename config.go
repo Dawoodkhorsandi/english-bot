@@ -53,6 +53,9 @@ var (
 	// Daily grammar tip scheduler.
 	tipTime = getEnv("TIP_TIME", "10:00")
 
+	// SQLite backup scheduler (maintainer-only delivery).
+	backupTime = getEnv("BACKUP_TIME", "02:00")
+
 	// Mini App stats dashboard. Set WEB_APP_URL to the public HTTPS URL where the
 	// bot's web server is reachable (e.g. "https://bot.example.com"). When set,
 	// /stats includes a "📊 Full Dashboard" button that opens the web app.
@@ -73,7 +76,7 @@ func loadLocation() {
 		return
 	}
 	appLocation = loc
-	log.Printf("⚙️  [CONFIG] Timezone=%s | quiet hours %s–%s | tip time=%s | pool target=%d min=%d", appTimezone, quietStart, quietEnd, tipTime, poolTarget, poolMin)
+	log.Printf("⚙️  [CONFIG] Timezone=%s | quiet hours %s–%s | tip time=%s | backup time=%s | pool target=%d min=%d", appTimezone, quietStart, quietEnd, tipTime, backupTime, poolTarget, poolMin)
 }
 
 func getEnvInt(key string, fallback int) int {

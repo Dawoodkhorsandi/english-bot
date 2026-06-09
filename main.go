@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -212,6 +213,13 @@ var Changelogs = []ChangelogEntry{
 			"• Stale word cards (missing Persian) are auto-refreshed in the background\n" +
 			"• Added silent changelog support for internal deploys",
 	},
+	{
+		Version: "1.21.2",
+		Silent:  true,
+		Text: "• Added nightly SQLite backup delivery to maintainer chat\n" +
+			"• Added maintainer-only /backup command for on-demand backups\n" +
+			"• Added BACKUP_TIME config for daily backup scheduling",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -261,9 +269,9 @@ type TelegramPollAnswer struct {
 
 // inlineButton is one button in an inline keyboard.
 type inlineButton struct {
-	Text         string       `json:"text"`
-	CallbackData string       `json:"callback_data,omitempty"`
-	WebApp       *webAppInfo  `json:"web_app,omitempty"`
+	Text         string      `json:"text"`
+	CallbackData string      `json:"callback_data,omitempty"`
+	WebApp       *webAppInfo `json:"web_app,omitempty"`
 }
 
 type webAppInfo struct {
@@ -314,6 +322,7 @@ func main() {
 	//   5. quiz scheduler periodically tests learned words (Change E).
 	//   6. weekly digest scheduler sends a recap every DIGEST_DAY at DIGEST_TIME (Change K).
 	//   7. daily tip scheduler sends one grammar tip at TIP_TIME.
+	//   8. nightly backup scheduler sends SQLite snapshot to maintainer at BACKUP_TIME.
 	go poolFiller(ctx, chain, store)
 	go runBroadcastScheduler(ctx, chain, store, notifier)
 	go runDailyReviewScheduler(ctx, store, notifier)
@@ -322,6 +331,7 @@ func main() {
 	go runWeeklyDigestScheduler(ctx, store, notifier)
 	go runIdiomScheduler(ctx, chain, store, notifier)
 	go runDailyTipScheduler(ctx, chain, store, notifier)
+	go runDBBackupScheduler(ctx, store, notifier)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store, notifier)
@@ -706,6 +716,13 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 		handleHealth(store, chain, notifier, chatID)
 
+	case "/backup":
+		if !isMaintainer(chatID) {
+			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
+			return
+		}
+		handleBackup(store, notifier, chatID)
+
 	case "/users":
 		if !isMaintainer(chatID) {
 			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
@@ -807,11 +824,20 @@ func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, n
 
 // isMaintainer reports whether chatID matches the configured maintainer.
 func isMaintainer(chatID int64) bool {
-	mID, err := strconv.ParseInt(MaintainerChatID, 10, 64)
-	if err != nil {
+	mID, ok := maintainerID()
+	if !ok {
 		return false
 	}
 	return chatID == mID
+}
+
+// maintainerID parses MAINTAINER_CHAT_ID and reports whether it's usable.
+func maintainerID() (int64, bool) {
+	mID, err := strconv.ParseInt(MaintainerChatID, 10, 64)
+	if err != nil || mID == 0 {
+		return 0, false
+	}
+	return mID, true
 }
 
 // handleMetrics sends an operational summary to the maintainer (/metrics).
@@ -911,6 +937,16 @@ func handleHealth(store *Store, chain *ProviderChain, notifier Notifier, chatID 
 	b.WriteString("\n")
 
 	_ = notifier.Send(chatID, b.String())
+}
+
+// handleBackup creates a point-in-time SQLite backup and sends it to the maintainer.
+func handleBackup(store *Store, notifier Notifier, chatID int64) {
+	log.Printf("🗄️  [ADMIN] /backup requested by ChatID %d.", chatID)
+	if err := sendMaintainerDBBackup(store, notifier, "manual /backup"); err != nil {
+		log.Printf("❌ [BACKUP] Manual backup failed: %v", err)
+		_ = notifier.Send(chatID, "❌ Backup failed. Check logs and try again.")
+		return
+	}
 }
 
 // levelKeyboard builds a two-row inline keyboard of the four levels, marking the
@@ -1061,16 +1097,16 @@ func handleTip(ctx context.Context, chain *ProviderChain, store *Store, notifier
 
 // timeBudgetPreset defines the settings applied for a given daily-time budget.
 type timeBudgetPreset struct {
-	label             string // human-readable button label
-	minutesPerDay     int    // key used in callback data
-	interval          int    // broadcast interval (minutes)
-	quizIntervalHours int    // per-user quiz interval (hours)
-	quizEnabled       bool
-	idiomEnabled      bool
-	tipsEnabled       bool
-	reviewEnabled     bool   // SRS word reviews
+	label              string // human-readable button label
+	minutesPerDay      int    // key used in callback data
+	interval           int    // broadcast interval (minutes)
+	quizIntervalHours  int    // per-user quiz interval (hours)
+	quizEnabled        bool
+	idiomEnabled       bool
+	tipsEnabled        bool
+	reviewEnabled      bool // SRS word reviews
 	dailyReviewEnabled bool
-	digestEnabled     bool
+	digestEnabled      bool
 }
 
 // timeBudgetPresets is the ordered list of selectable daily-time presets.
@@ -1861,6 +1897,7 @@ type Notifier interface {
 	SendWithMessageID(chatID int64, text string) (int64, error)
 	SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (fileID string, err error)
 	SendVoiceByFileID(chatID int64, fileID string, replyToMessageID int64) error
+	SendDocument(chatID int64, doc []byte, filename, caption string) error
 	SendKeyboard(chatID int64, text string, keyboard [][]inlineButton) error
 	EditMessage(chatID, messageID int64, text string, keyboard [][]inlineButton) error
 	AnswerCallback(callbackID, text string) error
@@ -1982,6 +2019,52 @@ func (n *telegramNotifier) SendVoiceByFileID(chatID int64, fileID string, replyT
 	return telegramPost("sendVoice", payload)
 }
 
+func (n *telegramNotifier) SendDocument(chatID int64, doc []byte, filename, caption string) error {
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendDocument", TelegramBotToken)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
+		return err
+	}
+	if strings.TrimSpace(caption) != "" {
+		if err := writer.WriteField("caption", caption); err != nil {
+			return err
+		}
+		if err := writer.WriteField("parse_mode", "HTML"); err != nil {
+			return err
+		}
+	}
+
+	part, err := writer.CreateFormFile("document", filename)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(doc); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, apiURL, &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := telegramHTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("telegram sendDocument returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
 // telegramPost marshals payload and POSTs it to the given Bot API method.
 func telegramPost(method string, payload map[string]interface{}) error {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", TelegramBotToken, method)
@@ -1997,6 +2080,53 @@ func telegramPost(method string, payload map[string]interface{}) error {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("telegram %s returned status %d: %s", method, resp.StatusCode, string(respBody))
 	}
+	return nil
+}
+
+// SQLiteBackup creates a point-in-time SQLite snapshot at destPath.
+func (s *Store) SQLiteBackup(destPath string) error {
+	if strings.TrimSpace(destPath) == "" {
+		return fmt.Errorf("backup destination path is empty")
+	}
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return err
+	}
+	escaped := strings.ReplaceAll(destPath, "'", "''")
+	_, err := s.db.Exec("VACUUM INTO '" + escaped + "'")
+	return err
+}
+
+// sendMaintainerDBBackup snapshots the SQLite DB and sends it privately to the maintainer.
+func sendMaintainerDBBackup(store *Store, notifier Notifier, trigger string) error {
+	mID, ok := maintainerID()
+	if !ok {
+		return fmt.Errorf("invalid MAINTAINER_CHAT_ID")
+	}
+
+	now := time.Now().In(appLocation)
+	filename := fmt.Sprintf("english-bot-backup-%s.sqlite", now.Format("20060102-150405"))
+	destPath := filepath.Join(os.TempDir(), filename)
+
+	if err := store.SQLiteBackup(destPath); err != nil {
+		return fmt.Errorf("sqlite backup snapshot: %w", err)
+	}
+	defer os.Remove(destPath)
+
+	doc, err := os.ReadFile(destPath)
+	if err != nil {
+		return fmt.Errorf("read backup file: %w", err)
+	}
+
+	caption := fmt.Sprintf(
+		"🗄️ <b>SQLite Backup</b>\n<b>Trigger:</b> %s\n<b>Time:</b> %s\n<b>Size:</b> %d bytes",
+		trigger,
+		now.Format("2006-01-02 15:04:05 MST"),
+		len(doc),
+	)
+	if err := notifier.SendDocument(mID, doc, filename, caption); err != nil {
+		return fmt.Errorf("send backup document: %w", err)
+	}
+	log.Printf("✅ [BACKUP] Sent SQLite backup to maintainer (trigger=%s, size=%d bytes).", trigger, len(doc))
 	return nil
 }
 
@@ -2017,10 +2147,10 @@ func registerBotCommands() {
 		{"command": "level", "description": "Set difficulty (beginner/intermediate/upper-intermediate/advanced)"},
 		{"command": "interval", "description": "Set how often practice arrives"},
 		{"command": "tts", "description": "Toggle pronunciation audio on/off"},
-		{"command": "stats",    "description": "See your progress and streak"},
-		{"command": "mywords",  "description": "Browse your learned vocabulary"},
+		{"command": "stats", "description": "See your progress and streak"},
+		{"command": "mywords", "description": "Browse your learned vocabulary"},
 		{"command": "bookmark", "description": "Bookmark or view important words"},
-		{"command": "pause",    "description": "Pause scheduled sends"},
+		{"command": "pause", "description": "Pause scheduled sends"},
 		{"command": "resume", "description": "Resume scheduled sends"},
 		{"command": "reset", "description": "Clear your practiced history"},
 		{"command": "help", "description": "How it works"},
@@ -2123,8 +2253,8 @@ func (n *telegramNotifier) SendWithReplyKeyboard(chatID int64, text string, rows
 		"text":       text,
 		"parse_mode": "HTML",
 		"reply_markup": map[string]interface{}{
-			"keyboard":          btns,
-			"resize_keyboard":   true,
+			"keyboard":        btns,
+			"resize_keyboard": true,
 		},
 	})
 }

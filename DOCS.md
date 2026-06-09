@@ -60,7 +60,7 @@ All configuration is read from environment variables at startup. There are no co
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | `YOUR_TELEGRAM_BOT_TOKEN` | Telegram Bot API token from @BotFather |
 | `GEMINI_API_KEY` | `YOUR_GEMINI_API_KEY` | Google Gemini API key |
-| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/metrics`, `/announce`, `/health`, `/users`) |
+| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/metrics`, `/announce`, `/health`, `/users`, `/backup`) |
 | `TIMEZONE` | `Asia/Tehran` | IANA timezone for quiet hours, daily review, and digest scheduling |
 | `QUIET_START` | `00:00` | Start of the quiet window (no scheduled sends) |
 | `QUIET_END` | `09:00` | End of the quiet window |
@@ -77,6 +77,7 @@ All configuration is read from environment variables at startup. There are no co
 | `DIGEST_DAY` | `Sunday` | Weekday the weekly digest is sent |
 | `DIGEST_TIME` | `20:00` | Time of day the weekly digest is sent |
 | `IDIOM_TIME` | `09:00` | Local time the daily idiom of the day is sent; `off` disables it |
+| `BACKUP_TIME` | `02:00` | Local time the nightly SQLite backup is sent to maintainer; `off` disables it |
 | `WEB_APP_URL` | *(unset)* | Public HTTPS base URL where the bot's web server is reachable (e.g. `https://bot.example.com`). When set, `/stats` shows a `📊 Full Dashboard` button that opens the Telegram Mini App. Leave unset to disable the web server entirely. (v1.18.0) |
 | `WEB_APP_PORT` | `8090` | Local TCP port for the embedded Mini App HTTP server. Only used when `WEB_APP_URL` is set. (v1.18.0) |
 
@@ -483,6 +484,7 @@ All messages use `parse_mode: HTML`.
 | `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/users` | *(Admin only)* Paginated user list with inline keyboard navigation; tap any user for full detail (settings, toggles, progress, quiz, SRS, streaks); send a direct message to any user. Gated by `MAINTAINER_CHAT_ID`. (v1.20.0) |
+| `/backup` | *(Admin only)* Creates a point-in-time SQLite snapshot (`VACUUM INTO`) and sends the `.sqlite` file to maintainer chat. Also runs nightly via `BACKUP_TIME`. Gated by `MAINTAINER_CHAT_ID`. |
 | `/mywords` | Browse all learned vocabulary with mastery status (🟢 mastered / 🔵 learning / ⚪ new) and bookmark indicator (⭐). Paginated with inline buttons (`mywords:<page>`). `/mywords bookmarks` shows bookmarked words only (paginated via `mybm:<page>`). (v1.21.0) |
 | `/bookmark [word]` | Toggle a word's bookmark status. With a word argument, adds or removes the bookmark; without an argument, shows the bookmarks page (aliases to `/mywords bookmarks`). Bookmark buttons (`bookmark:add:<word>` / `bookmark:rm:<word>`) also appear on vocabulary word cards. (v1.21.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
@@ -832,9 +834,10 @@ later: user taps ◀️/▶️  →  callback "drill:<page>:<verb>"
 9. Start quiz scheduler goroutine (every QUIZ_INTERVAL)
 10. Start weekly digest scheduler goroutine (fires weekly, default Sunday 20:00)
 11. Start idiom-of-the-day scheduler goroutine (fires daily at IDIOM_TIME, default 09:00)
-12. Start Telegram long-poll goroutine
-13. Block on OS signal (SIGINT / SIGTERM)
-14. On signal: cancel context → goroutines exit, deferred store.Close() runs
+12. Start nightly backup scheduler goroutine (fires daily at BACKUP_TIME, default 02:00)
+13. Start Telegram long-poll goroutine
+14. Block on OS signal (SIGINT / SIGTERM)
+15. On signal: cancel context → goroutines exit, deferred store.Close() runs
 ```
 
 ---
@@ -1430,6 +1433,7 @@ Maintainer-only operational tooling (gated by `chat_id == MAINTAINER_CHAT_ID`).
 | `/announce <text>` | Push a one-off HTML message to all (non-paused) subscribers. |
 | `/health` | Quick check: which providers are enabled and their count. |
 | `/users` | Paginated user list (8 per page) with inline navigation and per-user detail view. (v1.20.0) |
+| `/backup` | Trigger an immediate SQLite backup snapshot and send it as a document to maintainer chat. |
 
 - All admin commands reply "not authorized" for non-maintainer chat IDs
   (`isMaintainer` parses `MAINTAINER_CHAT_ID` to `int64` and compares).
