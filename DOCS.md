@@ -331,6 +331,18 @@ Inserts are idempotent (`INSERT OR IGNORE`).
 Primary key is `(chat_id, word)` — each user can bookmark each word at most once.
 Managed by `AddBookmark`, `RemoveBookmark`, `IsBookmarked`, `BookmarkCount` in `vocab.go`.
 
+#### `bot_config` (v1.22.0)
+| Column | Type | Description |
+|---|---|---|
+| `key` | `TEXT` | Config key (primary key) |
+| `value` | `TEXT` | Config value |
+| `updated_at` | `DATETIME` | Last update timestamp |
+
+Simple key-value store for runtime config overrides set via `/config`. Loaded on startup
+by `LoadBotConfig()` which overwrites the corresponding global variables (env vars act as
+defaults). Supported keys: `pool_target`, `pool_min`, `quiet_start`, `quiet_end`,
+`tts_enabled`, `gen_spacing`, `review_batch_max`.
+
 ### Legacy Migration
 
 On first run, if a `subscribers.json` file exists (the old flat-file format), `migrateLegacyJSON` imports all active subscribers into SQLite and renames the file to `subscribers.json.migrated` so the migration only runs once.
@@ -425,6 +437,9 @@ type Store struct { db *sql.DB }
 | `IsBookmarked` | `(chatID int64, word string) (bool, error)` | Reports whether a word is bookmarked by the user (v1.21.0) |
 | `BookmarkCount` | `(chatID int64) (int, error)` | Total bookmarks for a user (v1.21.0) |
 | `UpdatePoolText` | `(kind, level, term, meaning, text string) error` | Overwrites the text and meaning of an existing pool entry (lazy card refresh, v1.21.1) |
+| `SetBotConfig` | `(key, value string) error` | Upserts a key-value pair in `bot_config` (v1.22.0) |
+| `GetBotConfig` | `(key string) (string, bool)` | Reads a single config value; returns `("", false)` if not set (v1.22.0) |
+| `LoadBotConfig` | `()` | Reads all `bot_config` rows and overwrites corresponding global variables (v1.22.0) |
 
 ---
 
@@ -485,6 +500,7 @@ All messages use `parse_mode: HTML`.
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/users` | *(Admin only)* Paginated user list with inline keyboard navigation; tap any user for full detail (settings, toggles, progress, quiz, SRS, streaks); send a direct message to any user. Gated by `MAINTAINER_CHAT_ID`. (v1.20.0) |
 | `/backup` | *(Admin only)* Creates a point-in-time SQLite snapshot (`VACUUM INTO`) and sends the `.sqlite` file to maintainer chat. Also runs nightly via `BACKUP_TIME`. Gated by `MAINTAINER_CHAT_ID`. |
+| `/config` | *(Admin only)* Interactive inline-keyboard panel to tweak runtime bot settings: pool target/min, quiet hours, global TTS, gen spacing, review batch max. Changes are persisted in `bot_config` table and survive restarts. Callbacks use the `cfg:` prefix. Gated by `MAINTAINER_CHAT_ID`. (v1.22.0) |
 | `/mywords` | Browse all learned vocabulary with mastery status (🟢 mastered / 🔵 learning / ⚪ new) and bookmark indicator (⭐). Paginated with inline buttons (`mywords:<page>`). `/mywords bookmarks` shows bookmarked words only (paginated via `mybm:<page>`). (v1.21.0) |
 | `/bookmark [word]` | Toggle a word's bookmark status. With a word argument, adds or removes the bookmark; without an argument, shows the bookmarks page (aliases to `/mywords bookmarks`). Bookmark buttons (`bookmark:add:<word>` / `bookmark:rm:<word>`) also appear on vocabulary word cards. (v1.21.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
@@ -827,17 +843,18 @@ later: user taps ◀️/▶️  →  callback "drill:<page>:<verb>"
 2. Load timezone (Asia/Tehran by default)
 3. Build AI provider chain (Gemini + any configured OpenAI-compatible backends)
 4. Open SQLite store (apply schema, run migrations, run legacy JSON migration if needed)
-5. Start pool filler goroutine (background content generation)
-6. Start broadcast scheduler goroutine (half-hourly, per-user interval + quiet-hour aware)
-7. Start daily review scheduler goroutine (fires at local midnight)
-8. Start spaced-repetition review scheduler goroutine (hourly)
-9. Start quiz scheduler goroutine (every QUIZ_INTERVAL)
-10. Start weekly digest scheduler goroutine (fires weekly, default Sunday 20:00)
-11. Start idiom-of-the-day scheduler goroutine (fires daily at IDIOM_TIME, default 09:00)
-12. Start nightly backup scheduler goroutine (fires daily at BACKUP_TIME, default 02:00)
-13. Start Telegram long-poll goroutine
-14. Block on OS signal (SIGINT / SIGTERM)
-15. On signal: cancel context → goroutines exit, deferred store.Close() runs
+5. Load persisted admin config overrides from `bot_config` table (v1.22.0)
+6. Start pool filler goroutine (background content generation)
+7. Start broadcast scheduler goroutine (half-hourly, per-user interval + quiet-hour aware)
+8. Start daily review scheduler goroutine (fires at local midnight)
+9. Start spaced-repetition review scheduler goroutine (hourly)
+10. Start quiz scheduler goroutine (every QUIZ_INTERVAL)
+11. Start weekly digest scheduler goroutine (fires weekly, default Sunday 20:00)
+12. Start idiom-of-the-day scheduler goroutine (fires daily at IDIOM_TIME, default 09:00)
+13. Start nightly backup scheduler goroutine (fires daily at BACKUP_TIME, default 02:00)
+14. Start Telegram long-poll goroutine
+15. Block on OS signal (SIGINT / SIGTERM)
+16. On signal: cancel context → goroutines exit, deferred store.Close() runs
 ```
 
 ---
@@ -1476,6 +1493,20 @@ admin receives delivery confirmation or an error report.
 | `admin:msg:<chatID>` | Enter message mode for a user |
 | `admin:msgcancel` | Cancel message mode |
 | `admin:noop` | Page indicator button (no action) |
+
+#### `cfg:` — Admin config panel (v1.22.0)
+
+| Data | Action |
+|---|---|
+| `cfg:show` | Refresh the main config panel |
+| `cfg:goto:<key>` | Show sub-keyboard for a config key |
+| `cfg:pool_target:<n>` | Set pool target |
+| `cfg:pool_min:<n>` | Set pool min |
+| `cfg:quiet_start:<v>` | Set quiet hours start |
+| `cfg:quiet_end:<v>` | Set quiet hours end |
+| `cfg:gen_spacing:<v>` | Set AI generation spacing |
+| `cfg:review_batch:<n>` | Set review batch max |
+| `cfg:toggle:tts` | Toggle global TTS on/off |
 
 **New Store methods** (`admin.go`):
 
