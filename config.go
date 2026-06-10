@@ -4,6 +4,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,93 @@ var (
 	poolMin        = getEnvInt("POOL_MIN", 100)
 	refillInterval = getEnvDuration("REFILL_INTERVAL", 20*time.Second)
 	genSpacing     = getEnvDuration("GEN_SPACING", 3*time.Second)
+
+	// Per-kind and per-level pool-size overrides, set by the admin via /config and
+	// persisted in bot_config (keys "pool_kind_<kind>" / "pool_level_<level>").
+	// When an override exists it replaces the global poolTarget/poolMin rule for
+	// that content kind or difficulty level. Resolution precedence (most specific
+	// wins): per-kind override → per-level override → global rule. Guarded by
+	// poolOverrideMu because the pool filler goroutine reads them while the admin
+	// config callback (poller goroutine) writes them.
+	poolOverrideMu   sync.RWMutex
+	poolKindTargets  = map[string]int{}
+	poolLevelTargets = map[string]int{}
+)
+
+// configurableKinds is the set of content kinds whose pool size the admin can
+// override individually via /config.
+var configurableKinds = []string{kindDrill, kindWord, kindIdiom, kindCollocation, kindStory, kindTip}
+
+// isConfigurableKind reports whether kind is one the admin may override.
+func isConfigurableKind(kind string) bool {
+	for _, k := range configurableKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// resolvePoolTarget returns the effective pool target for a (kind, level) pair,
+// applying per-kind then per-level overrides before falling back to the global
+// rule (poolTarget at the default level, poolMin elsewhere).
+func resolvePoolTarget(kind, level string) int {
+	poolOverrideMu.RLock()
+	if v, ok := poolKindTargets[kind]; ok {
+		poolOverrideMu.RUnlock()
+		return v
+	}
+	if v, ok := poolLevelTargets[level]; ok {
+		poolOverrideMu.RUnlock()
+		return v
+	}
+	poolOverrideMu.RUnlock()
+	if level == defaultLevel {
+		return poolTarget
+	}
+	return poolMin
+}
+
+// poolKindOverride returns the per-kind pool target override and whether one is set.
+func poolKindOverride(kind string) (int, bool) {
+	poolOverrideMu.RLock()
+	defer poolOverrideMu.RUnlock()
+	v, ok := poolKindTargets[kind]
+	return v, ok
+}
+
+// poolLevelOverride returns the per-level pool target override and whether one is set.
+func poolLevelOverride(level string) (int, bool) {
+	poolOverrideMu.RLock()
+	defer poolOverrideMu.RUnlock()
+	v, ok := poolLevelTargets[level]
+	return v, ok
+}
+
+// setPoolKindOverride sets (n > 0) or clears (n <= 0) the per-kind pool override
+// in memory. Returns the cleared/updated state. Persistence is the caller's job.
+func setPoolKindOverride(kind string, n int) {
+	poolOverrideMu.Lock()
+	defer poolOverrideMu.Unlock()
+	if n <= 0 {
+		delete(poolKindTargets, kind)
+		return
+	}
+	poolKindTargets[kind] = n
+}
+
+// setPoolLevelOverride sets (n > 0) or clears (n <= 0) the per-level pool override.
+func setPoolLevelOverride(level string, n int) {
+	poolOverrideMu.Lock()
+	defer poolOverrideMu.Unlock()
+	if n <= 0 {
+		delete(poolLevelTargets, level)
+		return
+	}
+	poolLevelTargets[level] = n
+}
+
+var (
 
 	// Provider chain order (Change A). Comma-separated provider names; any
 	// provider whose key/config is unset at runtime is skipped automatically.

@@ -506,13 +506,12 @@ func maybeRefreshCard(chain *ProviderChain, store *Store, kind, level, term, tex
 	}()
 }
 
-// poolTargetFor returns how many items to keep stocked for a level. The default
-// level keeps the full pool; non-default levels keep a smaller pool.
-func poolTargetFor(level string) int {
-	if level == defaultLevel {
-		return poolTarget
-	}
-	return poolMin
+// poolTargetFor returns how many items to keep stocked for a (kind, level) pair.
+// It honours per-kind and per-level admin overrides (set via /config), falling
+// back to the global rule: the default level keeps the full pool, non-default
+// levels keep a smaller pool. See resolvePoolTarget for precedence.
+func poolTargetFor(kind, level string) int {
+	return resolvePoolTarget(kind, level)
 }
 
 // ---------------------------------------------------------------------------
@@ -579,7 +578,7 @@ func runRefillCycle(ctx context.Context, chain *ProviderChain, store *Store) {
 // pool is below target. It de-duplicates against all terms already in the pool.
 // Returns true if a generation was attempted (so the caller can space them out).
 func refillKind(ctx context.Context, chain *ProviderChain, store *Store, kind, level string) bool {
-	target := poolTargetFor(level)
+	target := poolTargetFor(kind, level)
 	count, err := store.PoolCount(kind, level)
 	if err != nil {
 		log.Printf("⚠️  [POOL_FILLER] Count failed for kind=%s level=%s: %v", kind, level, err)

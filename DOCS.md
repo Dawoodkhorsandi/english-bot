@@ -388,7 +388,17 @@ Managed by `AddBookmark`, `RemoveBookmark`, `IsBookmarked`, `BookmarkCount` in `
 Simple key-value store for runtime config overrides set via `/config`. Loaded on startup
 by `LoadBotConfig()` which overwrites the corresponding global variables (env vars act as
 defaults). Supported keys: `pool_target`, `pool_min`, `quiet_start`, `quiet_end`,
-`tts_enabled`, `gen_spacing`, `review_batch_max`.
+`tts_enabled`, `gen_spacing`, `review_batch_max`, plus per-kind (`pool_kind_<kind>`) and
+per-level (`pool_level_<level>`) pool-size overrides (v1.23.2).
+
+**Pool-size override resolution (v1.23.2):** `poolTargetFor(kind, level)` resolves the
+effective target via `resolvePoolTarget` with precedence **per-kind → per-level → global
+rule** (the global rule being `pool_target` at the default level, `pool_min` elsewhere). A
+per-kind override (e.g. `pool_kind_story = 80`) wins for that kind at every level; a per-level
+override (e.g. `pool_level_advanced = 50`) applies to all kinds at that level unless a per-kind
+override exists. Setting a value of `0` via `/config` clears the override (key deleted). The
+overrides live in the `poolKindTargets` / `poolLevelTargets` maps, guarded by `poolOverrideMu`
+because the pool-filler goroutine reads them while the admin callback writes them.
 
 ### Legacy Migration
 
@@ -549,7 +559,7 @@ All messages use `parse_mode: HTML`.
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/users` | *(Admin only)* Paginated user list with inline keyboard navigation; tap any user for full detail (settings, toggles, progress, quiz, SRS, streaks); send a direct message to any user. Gated by `MAINTAINER_CHAT_ID`. (v1.20.0) |
 | `/backup` | *(Admin only)* Creates a point-in-time SQLite snapshot (`VACUUM INTO`) and sends the `.sqlite` file to maintainer chat. Also runs nightly via `BACKUP_TIME`. Gated by `MAINTAINER_CHAT_ID`. |
-| `/config` | *(Admin only)* Interactive inline-keyboard panel to tweak runtime bot settings: pool target/min, quiet hours, global TTS, gen spacing, review batch max. Changes are persisted in `bot_config` table and survive restarts. Callbacks use the `cfg:` prefix. Gated by `MAINTAINER_CHAT_ID`. (v1.22.0) |
+| `/config` | *(Admin only)* Interactive inline-keyboard panel to tweak runtime bot settings: pool target/min, **per-kind and per-level pool-size overrides** (v1.23.2), quiet hours, global TTS, gen spacing, review batch max. Changes are persisted in `bot_config` table and survive restarts. Callbacks use the `cfg:` prefix (`cfg:pk:<kind>:<n>`, `cfg:pl:<level>:<n>`; `n=0` clears). Gated by `MAINTAINER_CHAT_ID`. (v1.22.0) |
 | `/mywords` | Browse all learned vocabulary with mastery status (🟢 mastered / 🔵 learning / ⚪ new) and bookmark indicator (⭐). Paginated with inline buttons (`mywords:<page>`). `/mywords bookmarks` shows bookmarked words only (paginated via `mybm:<page>`). (v1.21.0) |
 | `/bookmark [word]` | Toggle a word's bookmark status. With a word argument, adds or removes the bookmark; without an argument, shows the bookmarks page (aliases to `/mywords bookmarks`). Bookmark buttons (`bookmark:add:<word>` / `bookmark:rm:<word>`) also appear on vocabulary word cards. (v1.21.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
@@ -1604,6 +1614,9 @@ admin receives delivery confirmation or an error report.
 | `cfg:gen_spacing:<v>` | Set AI generation spacing |
 | `cfg:review_batch:<n>` | Set review batch max |
 | `cfg:toggle:tts` | Toggle global TTS on/off |
+| `cfg:goto:pool_kinds` / `cfg:goto:pool_levels` | Show the per-kind / per-level pool-size submenu (v1.23.2) |
+| `cfg:goto:pk:<kind>` / `cfg:goto:pl:<level>` | Show the value picker for one kind / level (v1.23.2) |
+| `cfg:pk:<kind>:<n>` / `cfg:pl:<level>:<n>` | Set (`n>0`) or clear (`n=0`) a per-kind / per-level pool override (v1.23.2) |
 
 **New Store methods** (`admin.go`):
 

@@ -111,7 +111,7 @@ Gated by `MAINTAINER_CHAT_ID` -- other users see "not authorized".
 | `/health` | List enabled AI providers |
 | `/users` | Paginated user list with inline buttons; tap any user to see full detail (settings, toggles, progress, quiz accuracy, SRS state, streaks); send a direct message to any user from the detail view |
 | `/backup` | Send a point-in-time SQLite backup file to the maintainer chat immediately |
-| `/config` | Interactive panel to tweak runtime bot settings (pool size, quiet hours, TTS, gen spacing, review batch); persisted across restarts |
+| `/config` | Interactive panel to tweak runtime bot settings (global pool target/min, per-kind and per-level pool-size overrides, quiet hours, TTS, gen spacing, review batch); persisted across restarts |
 
 ## Configuration
 
