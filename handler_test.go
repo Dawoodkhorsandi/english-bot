@@ -741,6 +741,72 @@ func TestHandleCallbackSrsForgot(t *testing.T) {
 	}
 }
 
+// TestReviewCardHidesMeaning verifies the memory-check card does NOT reveal the
+// meaning up front (the user must recall it before answering).
+func TestReviewCardHidesMeaning(t *testing.T) {
+	card := formatReviewReminder(dueReview{term: "tedious", meaning: "boring or tiresome"})
+	if strings.Contains(card, "boring or tiresome") {
+		t.Errorf("review card should not reveal the meaning, got %q", card)
+	}
+	if !strings.Contains(card, "tedious") {
+		t.Errorf("review card should ask about the term, got %q", card)
+	}
+}
+
+// TestSrsKnownRevealsMeaning verifies that tapping "Knew it" reveals the stored
+// meaning in the edited confirmation message.
+func TestSrsKnownRevealsMeaning(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+	store.AddToPool(kindWord, defaultLevel, "tedious", "boring or tiresome", "FULL WORD CARD for tedious")
+	store.SeedReview(100, "tedious", time.Now().Add(-time.Hour))
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb-known-reveal",
+		From:    &TelegramUser{ID: 100},
+		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 100}},
+		Data:    "srs:known:tedious",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.edits) == 0 {
+		t.Fatal("expected an edited confirmation message")
+	}
+	got := mock.edits[len(mock.edits)-1].text
+	if !strings.Contains(got, "boring or tiresome") {
+		t.Errorf("Knew-it confirmation should reveal the meaning, got %q", got)
+	}
+}
+
+// TestSrsForgotRevealsFullCard verifies that tapping "Forgot" reveals the full
+// (detailed) vocabulary card, not just the one-line meaning.
+func TestSrsForgotRevealsFullCard(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+
+	store.AddSubscriber(100)
+	store.AddToPool(kindWord, defaultLevel, "tedious", "boring or tiresome", "FULL WORD CARD for tedious")
+	store.SeedReview(100, "tedious", time.Now().Add(-time.Hour))
+
+	cb := &TelegramCallbackQuery{
+		ID:      "cb-forgot-reveal",
+		From:    &TelegramUser{ID: 100},
+		Message: &TelegramMessage{MessageID: 11, Chat: TelegramChat{ID: 100}},
+		Data:    "srs:forgot:tedious",
+	}
+	handleCallback(store, mock, cb)
+
+	if len(mock.edits) == 0 {
+		t.Fatal("expected an edited confirmation message")
+	}
+	got := mock.edits[len(mock.edits)-1].text
+	if !strings.Contains(got, "FULL WORD CARD for tedious") {
+		t.Errorf("Forgot confirmation should reveal the full card, got %q", got)
+	}
+}
+
 func TestHandleCallbackQuizCorrect(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}

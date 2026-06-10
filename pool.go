@@ -168,6 +168,23 @@ func (s *Store) DrillText(term string) (string, bool, error) {
 	return text, true, nil
 }
 
+// WordCard returns the stored meaning and full vocabulary-card text for a word
+// (kind=word) from the content pool, across any level. Used to reveal a word's
+// meaning/details after the user answers a spaced-repetition memory check.
+func (s *Store) WordCard(term string) (meaning, text string, ok bool, err error) {
+	row := s.db.QueryRow(
+		"SELECT COALESCE(meaning,''), text FROM content_pool WHERE kind = ? AND term = ? LIMIT 1",
+		kindWord, strings.ToLower(strings.TrimSpace(term)),
+	)
+	if err = row.Scan(&meaning, &text); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	return meaning, text, true, nil
+}
+
 // recordSentFor records a sent term in the appropriate per-user history table.
 // For vocabulary words it also seeds the spaced-repetition schedule (Change D),
 // so every word a user receives is enrolled for future review.

@@ -310,6 +310,8 @@ func TestFormatReview(t *testing.T) {
 }
 
 func TestFormatReviewReminder(t *testing.T) {
+	// The card must ask about the term but deliberately HIDE the meaning until the
+	// user answers (it is revealed in the Knew-it / Forgot confirmation instead).
 	withMeaning := dueReview{term: "serendipity", meaning: "happy accident", intervalDays: 3, ease: 2.5}
 	got := formatReviewReminder(withMeaning)
 	if !strings.Contains(got, "Memory check") {
@@ -318,17 +320,8 @@ func TestFormatReviewReminder(t *testing.T) {
 	if !strings.Contains(got, "<b>serendipity</b>") {
 		t.Error("missing bolded term")
 	}
-	if !strings.Contains(got, "happy accident") {
-		t.Error("missing meaning")
-	}
-
-	without := dueReview{term: "aplomb", meaning: "", intervalDays: 1, ease: 2.5}
-	got2 := formatReviewReminder(without)
-	if !strings.Contains(got2, "<b>aplomb</b>") {
-		t.Error("missing bolded term for no-meaning case")
-	}
-	if strings.Contains(got2, "💬") {
-		t.Error("meaning icon should not appear when meaning is empty")
+	if strings.Contains(got, "happy accident") {
+		t.Error("meaning must NOT be revealed on the memory-check card")
 	}
 }
 

@@ -1360,9 +1360,12 @@ on-demand `/word`, or a Change-M lookup — is enrolled, idempotently. `runRevie
 ticks every `REVIEW_CHECK_INTERVAL` (default 1h), skips quiet hours and paused users, and
 sends up to `REVIEW_BATCH_MAX` (default 3) compact "memory check" cards per user with a
 `✅ Knew it` / `❌ Forgot` inline keyboard; each reminded word is snoozed so it isn't
-re-sent before the user answers. The button tap routes through the `srs:` callback branch
-(`handleReviewCallback`) which applies the promote/reset and reschedules from the user's
-response. Timestamps are stored as UTC strings (`2006-01-02 15:04:05`) so lexicographic
+re-sent before the user answers. The card **hides the meaning** (`formatReviewReminder`
+no longer prints it) so the user must recall it first. The button tap routes through the
+`srs:` callback branch (`handleReviewCallback`) which applies the promote/reset, reschedules
+from the user's response, and **reveals the answer**: `✅ Knew it` shows a one-line meaning,
+`❌ Forgot` shows the full stored vocabulary card (`Store.WordCard`) so the user can relearn
+it in detail. (Reveal behaviour added in v1.23.3.) Timestamps are stored as UTC strings (`2006-01-02 15:04:05`) so lexicographic
 `due_at <= now` comparison is correct. `/stats` gained a **Words mastered** line
 (`interval_days >= srsMasteredIntervalDays = 21`). Tests: `srs_smoke_test.go`.
 
