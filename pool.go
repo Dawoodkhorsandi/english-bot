@@ -186,6 +186,34 @@ func (s *Store) WordCard(term string) (meaning, text string, ok bool, err error)
 	return meaning, text, true, nil
 }
 
+// PoolUsageLeader returns the chat that has consumed the most of the items
+// currently pooled for (kind, level), along with how many of those pooled items
+// it has seen. This is the "most active user" for that pool: dividing seen by the
+// pool size gives that user's consumption percentage, which signals how close the
+// pool is to exhaustion (the point where the user starts seeing repeats).
+// ok=false when the pool is empty or no user has seen any of its current items.
+func (s *Store) PoolUsageLeader(kind, level string) (chatID int64, seen int, ok bool, err error) {
+	sentTable := sentTableFor(kind)
+	// Count only currently-pooled terms so the percentage is bounded by the live
+	// pool (a user's history may also hold terms long since recycled out).
+	query := fmt.Sprintf(`
+		SELECT chat_id, COUNT(*) AS seen
+		FROM %s
+		WHERE word IN (SELECT term FROM content_pool WHERE kind = ? AND level = ?)
+		GROUP BY chat_id
+		ORDER BY seen DESC, chat_id ASC
+		LIMIT 1`, sentTable)
+
+	row := s.db.QueryRow(query, kind, level)
+	if err = row.Scan(&chatID, &seen); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, 0, false, nil
+		}
+		return 0, 0, false, err
+	}
+	return chatID, seen, true, nil
+}
+
 // recordSentFor records a sent term in the appropriate per-user history table.
 // For vocabulary words it also seeds the spaced-repetition schedule (Change D),
 // so every word a user receives is enrolled for future review.
