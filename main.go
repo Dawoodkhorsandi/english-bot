@@ -272,6 +272,12 @@ var Changelogs = []ChangelogEntry{
 			"• Precedence: per-(kind,level) → per-kind → per-level → global; ♻️ Default clears it\n" +
 			"• New /admin command lists every maintainer command so they're easy to find",
 	},
+	{
+		Version: "1.23.7",
+		Silent:  true,
+		Text: "• /poolusage now shows \"pool <depth>/<target>\" per line so a raised target is visible immediately\n" +
+			"• Clarifies that the percentage is consumption of items generated so far, not of the configured target",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -1006,15 +1012,18 @@ func handleMetrics(store *Store, chain *ProviderChain, notifier Notifier, chatID
 // handlePoolUsage sends the maintainer a per-kind/level breakdown of how heavily
 // each pool is being consumed. For every (kind, level) it finds the single most
 // active user — the one who has seen the most of the items currently pooled — and
-// reports that user's consumption as a percentage of the pool size. A pool near
-// 100% means its busiest user is about to start seeing repeats and the target
-// should be raised via /config.
+// reports that user's consumption as a percentage of the items currently pooled.
+// Each line also shows "pool <depth>/<target>": the depth is how many items exist
+// right now, the target is the configured size (raised via /config). When depth is
+// below target the background filler is still generating, so a high percentage of a
+// not-yet-full pool is expected and self-resolves as the pool grows.
 func handlePoolUsage(store *Store, notifier Notifier, chatID int64) {
 	log.Printf("📈 [ADMIN] /poolusage requested by ChatID %d.", chatID)
 
 	var b strings.Builder
 	b.WriteString("📈 <b>Pool usage</b>\n")
-	b.WriteString("<i>Most active user's consumption per pool.</i>\n\n")
+	b.WriteString("<i>Busiest user's consumption vs current pool depth.\n")
+	b.WriteString("\"pool X/Y\" = items generated so far / configured target.</i>\n\n")
 
 	levels, _ := store.ActiveLevels()
 
@@ -1031,21 +1040,22 @@ func handlePoolUsage(store *Store, notifier Notifier, chatID int64) {
 
 	for _, k := range keys {
 		count, _ := store.PoolCount(k.kind, k.level)
+		target := poolTargetFor(k.kind, k.level)
 		label := k.kind + "/" + k.level
 		if k.kind == kindTip {
 			label = kindTip
 		}
 		if count == 0 {
-			b.WriteString(fmt.Sprintf("  %s: <i>pool empty</i>\n", label))
+			b.WriteString(fmt.Sprintf("  %s: <i>empty</i> · pool 0/%d\n", label, target))
 			continue
 		}
 		leader, seen, ok, _ := store.PoolUsageLeader(k.kind, k.level)
 		if !ok || seen == 0 {
-			b.WriteString(fmt.Sprintf("  %s: <b>0%%</b> (%d pooled, no usage)\n", label, count))
+			b.WriteString(fmt.Sprintf("  %s: <b>0%%</b> no usage · pool %d/%d\n", label, count, target))
 			continue
 		}
 		pct := seen * 100 / count
-		b.WriteString(fmt.Sprintf("  %s: <b>%d%%</b> (%d/%d, top chat %d)\n", label, pct, seen, count, leader))
+		b.WriteString(fmt.Sprintf("  %s: <b>%d%%</b> (chat %d saw %d/%d) · pool %d/%d\n", label, pct, leader, seen, count, count, target))
 	}
 
 	_ = notifier.Send(chatID, b.String())

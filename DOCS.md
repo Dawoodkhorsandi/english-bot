@@ -575,7 +575,7 @@ All messages use `parse_mode: HTML`.
 | `/settings` | Shows all per-user settings in one inline-keyboard hub. Tap any button to toggle a feature or open a level/interval/quiz-interval sub-keyboard. All individual setting commands still work as shortcuts. Button taps use the `settings:` callback prefix. (v1.17.0) |
 | `/tts [on/off]` | With `on`/`off`, toggles pronunciation audio in `user_prefs.tts_enabled`; without an argument, shows current TTS status. (v1.14.0) |
 | `/metrics` | *(Admin only)* Subscriber stats (total/active/paused), pool depth per kind+level, quiz volume, mastered count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
-| `/poolusage` | *(Admin only)* Per (kind, level), finds the single most active user — the one who has seen the most of the items currently pooled — and reports that user's consumption as a percentage of the pool size (`seen/count`). Surfaces pools nearing exhaustion so the target can be raised via `/config` before users see repeats. Gated by `MAINTAINER_CHAT_ID`. (v1.23.5) |
+| `/poolusage` | *(Admin only)* Per (kind, level), finds the single most active user — the one who has seen the most of the items currently pooled — and reports that user's consumption as a percentage of the items currently pooled (`seen/count`). Each line also shows `pool <depth>/<target>`: items generated so far vs the configured target (v1.23.7), so a target raised via `/config` is visible even before the background filler catches up. Surfaces pools nearing exhaustion. Gated by `MAINTAINER_CHAT_ID`. (v1.23.5) |
 | `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/users` | *(Admin only)* Paginated user list with inline keyboard navigation; tap any user for full detail (settings, toggles, progress, quiz, SRS, streaks); send a direct message to any user. Gated by `MAINTAINER_CHAT_ID`. (v1.20.0) |
@@ -1582,7 +1582,7 @@ Maintainer-only operational tooling (gated by `chat_id == MAINTAINER_CHAT_ID`).
 | Command | Behaviour |
 |---|---|
 | `/metrics` | Subscriber count (total/active/paused), pool depth per (kind, level), total quiz volume (answered/correct), total mastered words. |
-| `/poolusage` | Per (kind, level), the most active user's consumption of the current pool as a percentage. Highlights pools nearing exhaustion. (v1.23.5) |
+| `/poolusage` | Per (kind, level), the most active user's consumption of the current pool as a percentage, plus `pool <depth>/<target>` (generated so far vs configured target, v1.23.7). Highlights pools nearing exhaustion. (v1.23.5) |
 | `/announce <text>` | Push a one-off HTML message to all (non-paused) subscribers. |
 | `/health` | Quick check: which providers are enabled and their count. |
 | `/users` | Paginated user list (8 per page) with inline navigation and per-user detail view. (v1.20.0) |

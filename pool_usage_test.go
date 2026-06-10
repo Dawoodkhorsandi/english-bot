@@ -65,6 +65,8 @@ func TestPoolUsageLeaderEmptyPool(t *testing.T) {
 func TestHandlePoolUsageReport(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
+	saveBotConfig(t)
+	poolTarget, poolMin = 300, 100 // pin the target so "pool 4/300" is deterministic
 
 	// A 4-item word pool at the default level; chat 100 has consumed 2 → 50%.
 	store.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card: apple")
@@ -88,8 +90,10 @@ func TestHandlePoolUsageReport(t *testing.T) {
 	if !strings.Contains(report, "Pool usage") {
 		t.Errorf("report missing title: %q", report)
 	}
-	// word/<level>: 50% (2/4, top chat 100)
-	wantLine := kindWord + "/" + defaultLevel + ": <b>50%</b> (2/4, top chat 100)"
+	// word/<level>: 50% (chat 100 saw 2/4) · pool 4/300
+	// poolTarget defaults to 300 and the word pool here is at the default level,
+	// so the configured target is 300 while only 4 items exist (pool 4/300).
+	wantLine := kindWord + "/" + defaultLevel + ": <b>50%</b> (chat 100 saw 2/4) · pool 4/300"
 	if !strings.Contains(report, wantLine) {
 		t.Errorf("report missing expected usage line %q in:\n%s", wantLine, report)
 	}
