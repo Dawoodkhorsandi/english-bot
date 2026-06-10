@@ -787,6 +787,8 @@ func TestHandleMetrics(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddSubscriber(200)
 	store.AddToPool(kindDrill, defaultLevel, "run", "", "drill text")
+	store.AddToPool(kindCollocation, defaultLevel, "make a decision", "", "collocation card")
+	store.AddToPool(kindStory, defaultLevel, "the lost ticket", "", "mini story text")
 
 	chain := mockProviderChain("test")
 	handleMetrics(store, chain, mock, 100)
@@ -797,6 +799,13 @@ func TestHandleMetrics(t *testing.T) {
 	}
 	if !strings.Contains(text, "2") {
 		t.Errorf("expected subscriber count in metrics, got %q", text)
+	}
+	// Pool depth must report every pooled content kind, including the v1.23.0
+	// collocation and story kinds (and tips).
+	for _, kind := range []string{kindDrill, kindWord, kindIdiom, kindCollocation, kindStory, kindTip} {
+		if !strings.Contains(text, kind) {
+			t.Errorf("expected %q in pool-depth metrics, got %q", kind, text)
+		}
 	}
 }
 
