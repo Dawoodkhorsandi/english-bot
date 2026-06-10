@@ -247,6 +247,12 @@ var Changelogs = []ChangelogEntry{
 			"• Precedence: per-kind → per-level → global target/min; ♻️ Default clears an override\n" +
 			"• Overrides persist in bot_config and survive restarts",
 	},
+	{
+		Version: "1.23.3",
+		Silent:  true,
+		Text: "• Memory-check cards now hide the meaning until you answer (recall first!)\n" +
+			"• Tapping ✅ Knew it reveals a short reminder; ❌ Forgot reveals the full word card to relearn it",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -2404,6 +2410,14 @@ func handleReviewCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 	}
 
 	now := time.Now()
+	// The memory-check card hides the meaning until the user answers. Fetch the
+	// stored meaning and full vocabulary card so we can reveal it now: a brief
+	// reminder on "Knew it", the full detailed card on "Forgot".
+	meaning, card, _, lookupErr := store.WordCard(word)
+	if lookupErr != nil {
+		log.Printf("⚠️  [SRS] Could not load card for %q (chat %d): %v", word, chatID, lookupErr)
+	}
+
 	var (
 		ok      bool
 		err     error
@@ -2414,11 +2428,24 @@ func handleReviewCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 	case "known":
 		ok, err = store.ApplyReviewKnown(chatID, word, now)
 		toast = "Great — pushed further out 👍"
-		confirm = fmt.Sprintf("✅ <b>%s</b> — nice! I'll show it again later, spaced further out.", word)
+		// Reveal a short reminder so they can confirm they had it right.
+		if meaning != "" {
+			confirm = fmt.Sprintf("✅ <b>%s</b> — %s\n\nNice! I'll show it again later, spaced further out.", word, meaning)
+		} else {
+			confirm = fmt.Sprintf("✅ <b>%s</b> — nice! I'll show it again later, spaced further out.", word)
+		}
 	case "forgot":
 		ok, err = store.ApplyReviewForgot(chatID, word, now)
 		toast = "No worries — you'll see it again soon"
-		confirm = fmt.Sprintf("❌ <b>%s</b> — no problem. I'll bring it back soon so it sticks.", word)
+		// Reveal the full detailed card so they can re-learn it properly.
+		switch {
+		case card != "":
+			confirm = fmt.Sprintf("❌ <b>%s</b> — no problem. Here's the full card to refresh it:\n\n%s\n\nI'll bring it back soon so it sticks.", word, card)
+		case meaning != "":
+			confirm = fmt.Sprintf("❌ <b>%s</b> — %s\n\nNo problem. I'll bring it back soon so it sticks.", word, meaning)
+		default:
+			confirm = fmt.Sprintf("❌ <b>%s</b> — no problem. I'll bring it back soon so it sticks.", word)
+		}
 	default:
 		_ = notifier.AnswerCallback(cb.ID, "")
 		return

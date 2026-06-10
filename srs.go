@@ -270,14 +270,13 @@ func runReviewSweep(store *Store, notifier Notifier, now time.Time) {
 }
 
 // formatReviewReminder renders a compact spaced-repetition memory-check card.
+// The meaning is deliberately hidden so the user has to recall it first — it is
+// revealed only after they tap "Knew it" / "Forgot" (see handleReviewCallback).
 func formatReviewReminder(d dueReview) string {
 	var b strings.Builder
 	b.WriteString("🧠 <b>Memory check</b>\n\n")
-	b.WriteString(fmt.Sprintf("Do you still remember <b>%s</b>?\n", d.term))
-	if d.meaning != "" {
-		b.WriteString(fmt.Sprintf("\n💬 %s\n", d.meaning))
-	}
-	b.WriteString("\nBe honest — your answer tunes when you'll see it next.")
+	b.WriteString(fmt.Sprintf("Do you still remember what <b>%s</b> means?\n", d.term))
+	b.WriteString("\nRecall it first, then tap below — be honest, your answer tunes when you'll see it next.")
 	return b.String()
 }
 
