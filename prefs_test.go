@@ -506,17 +506,17 @@ func TestSentTableFor(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPoolTargetFor(t *testing.T) {
-	if got := poolTargetFor(defaultLevel); got != poolTarget {
-		t.Errorf("poolTargetFor(%q) = %d, want %d", defaultLevel, got, poolTarget)
+	if got := poolTargetFor(kindWord, defaultLevel); got != poolTarget {
+		t.Errorf("poolTargetFor(%q,%q) = %d, want %d", kindWord, defaultLevel, got, poolTarget)
 	}
-	if got := poolTargetFor("beginner"); got != poolMin {
-		t.Errorf("poolTargetFor(beginner) = %d, want %d", got, poolMin)
+	if got := poolTargetFor(kindWord, "beginner"); got != poolMin {
+		t.Errorf("poolTargetFor(word,beginner) = %d, want %d", got, poolMin)
 	}
-	if got := poolTargetFor("upper-intermediate"); got != poolMin {
-		t.Errorf("poolTargetFor(upper-intermediate) = %d, want %d", got, poolMin)
+	if got := poolTargetFor(kindWord, "upper-intermediate"); got != poolMin {
+		t.Errorf("poolTargetFor(word,upper-intermediate) = %d, want %d", got, poolMin)
 	}
-	if got := poolTargetFor("advanced"); got != poolMin {
-		t.Errorf("poolTargetFor(advanced) = %d, want %d", got, poolMin)
+	if got := poolTargetFor(kindWord, "advanced"); got != poolMin {
+		t.Errorf("poolTargetFor(word,advanced) = %d, want %d", got, poolMin)
 	}
 }
 

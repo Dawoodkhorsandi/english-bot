@@ -46,6 +46,17 @@ func saveBotConfig(t *testing.T) {
 	origTTS := ttsEnabled
 	origGS := genSpacing
 	origRBM := reviewBatchMax
+	// Snapshot the per-kind / per-level pool override maps.
+	poolOverrideMu.RLock()
+	origKind := make(map[string]int, len(poolKindTargets))
+	for k, v := range poolKindTargets {
+		origKind[k] = v
+	}
+	origLevel := make(map[string]int, len(poolLevelTargets))
+	for k, v := range poolLevelTargets {
+		origLevel[k] = v
+	}
+	poolOverrideMu.RUnlock()
 	t.Cleanup(func() {
 		poolTarget = origTarget
 		poolMin = origMin
@@ -54,6 +65,10 @@ func saveBotConfig(t *testing.T) {
 		ttsEnabled = origTTS
 		genSpacing = origGS
 		reviewBatchMax = origRBM
+		poolOverrideMu.Lock()
+		poolKindTargets = origKind
+		poolLevelTargets = origLevel
+		poolOverrideMu.Unlock()
 	})
 }
 
@@ -1037,6 +1052,115 @@ func TestConfigCallbackPoolMin(t *testing.T) {
 	}
 	if v, ok := store.GetBotConfig("pool_min"); !ok || v != "200" {
 		t.Errorf("bot_config pool_min = %q (ok=%v), want '200'", v, ok)
+	}
+}
+
+func TestConfigCallbackPerKindPool(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	saveBotConfig(t)
+	MaintainerChatID = "300"
+	poolTarget, poolMin = 300, 100
+
+	set := func(data string) {
+		handleCallback(store, mock, &TelegramCallbackQuery{
+			ID:      "cb",
+			From:    &TelegramUser{ID: 300},
+			Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+			Data:    data,
+		})
+	}
+
+	// Set a per-kind override for stories.
+	set("cfg:pk:story:50")
+	if v, ok := poolKindOverride(kindStory); !ok || v != 50 {
+		t.Fatalf("poolKindOverride(story) = %d,%v; want 50,true", v, ok)
+	}
+	if v, ok := store.GetBotConfig("pool_kind_story"); !ok || v != "50" {
+		t.Errorf("bot_config pool_kind_story = %q (ok=%v), want '50'", v, ok)
+	}
+	// Per-kind override beats the global rule at every level.
+	if got := poolTargetFor(kindStory, defaultLevel); got != 50 {
+		t.Errorf("poolTargetFor(story, default) = %d, want 50 (override)", got)
+	}
+	if got := poolTargetFor(kindStory, levelAdvanced); got != 50 {
+		t.Errorf("poolTargetFor(story, advanced) = %d, want 50 (override)", got)
+	}
+	// Other kinds are unaffected.
+	if got := poolTargetFor(kindWord, defaultLevel); got != 300 {
+		t.Errorf("poolTargetFor(word, default) = %d, want 300 (global)", got)
+	}
+
+	// Clearing (n=0) removes the override and the persisted key.
+	set("cfg:pk:story:0")
+	if _, ok := poolKindOverride(kindStory); ok {
+		t.Error("expected per-kind override cleared")
+	}
+	if _, ok := store.GetBotConfig("pool_kind_story"); ok {
+		t.Error("expected pool_kind_story deleted from bot_config")
+	}
+	if got := poolTargetFor(kindStory, defaultLevel); got != 300 {
+		t.Errorf("poolTargetFor(story, default) after clear = %d, want 300", got)
+	}
+}
+
+func TestConfigCallbackPerLevelPool(t *testing.T) {
+	store := testStoreHelper(t)
+	mock := &mockNotifier{}
+	saveMaintainer(t)
+	saveBotConfig(t)
+	MaintainerChatID = "300"
+	poolTarget, poolMin = 300, 100
+
+	handleCallback(store, mock, &TelegramCallbackQuery{
+		ID:      "cb",
+		From:    &TelegramUser{ID: 300},
+		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		Data:    "cfg:pl:advanced:200",
+	})
+
+	if v, ok := poolLevelOverride(levelAdvanced); !ok || v != 200 {
+		t.Fatalf("poolLevelOverride(advanced) = %d,%v; want 200,true", v, ok)
+	}
+	if v, ok := store.GetBotConfig("pool_level_advanced"); !ok || v != "200" {
+		t.Errorf("bot_config pool_level_advanced = %q (ok=%v), want '200'", v, ok)
+	}
+	// Per-level override applies to every kind at that level...
+	if got := poolTargetFor(kindWord, levelAdvanced); got != 200 {
+		t.Errorf("poolTargetFor(word, advanced) = %d, want 200 (level override)", got)
+	}
+	// ...but a per-kind override still wins over it.
+	setPoolKindOverride(kindWord, 75)
+	if got := poolTargetFor(kindWord, levelAdvanced); got != 75 {
+		t.Errorf("poolTargetFor(word, advanced) = %d, want 75 (kind beats level)", got)
+	}
+}
+
+func TestLoadBotConfigPoolOverrides(t *testing.T) {
+	path := t.TempDir() + "/cfg.db"
+	store, err := openStore(path)
+	if err != nil {
+		t.Fatalf("openStore: %v", err)
+	}
+	defer store.Close()
+	saveBotConfig(t)
+
+	_ = store.SetBotConfig("pool_kind_collocation", "120")
+	_ = store.SetBotConfig("pool_level_beginner", "40")
+	_ = store.SetBotConfig("pool_kind_bogus", "999") // ignored: not a real kind
+	_ = store.SetBotConfig("pool_level_bogus", "999") // ignored: not a real level
+
+	store.LoadBotConfig()
+
+	if v, ok := poolKindOverride(kindCollocation); !ok || v != 120 {
+		t.Errorf("after load: poolKindOverride(collocation) = %d,%v; want 120,true", v, ok)
+	}
+	if v, ok := poolLevelOverride(levelBeginner); !ok || v != 40 {
+		t.Errorf("after load: poolLevelOverride(beginner) = %d,%v; want 40,true", v, ok)
+	}
+	if _, ok := poolKindOverride("bogus"); ok {
+		t.Error("bogus kind override should be ignored")
 	}
 }
 
