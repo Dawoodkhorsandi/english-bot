@@ -46,8 +46,12 @@ func saveBotConfig(t *testing.T) {
 	origTTS := ttsEnabled
 	origGS := genSpacing
 	origRBM := reviewBatchMax
-	// Snapshot the per-kind / per-level pool override maps.
+	// Snapshot the per-(kind,level) / per-kind / per-level pool override maps.
 	poolOverrideMu.RLock()
+	origKindLevel := make(map[string]int, len(poolKindLevelTargets))
+	for k, v := range poolKindLevelTargets {
+		origKindLevel[k] = v
+	}
 	origKind := make(map[string]int, len(poolKindTargets))
 	for k, v := range poolKindTargets {
 		origKind[k] = v
@@ -66,6 +70,7 @@ func saveBotConfig(t *testing.T) {
 		genSpacing = origGS
 		reviewBatchMax = origRBM
 		poolOverrideMu.Lock()
+		poolKindLevelTargets = origKindLevel
 		poolKindTargets = origKind
 		poolLevelTargets = origLevel
 		poolOverrideMu.Unlock()

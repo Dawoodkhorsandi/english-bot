@@ -265,6 +265,13 @@ var Changelogs = []ChangelogEntry{
 		Text: "• New /poolusage admin report: per kind/level, shows the most active user's pool consumption as a percentage\n" +
 			"• Surfaces which pools are closest to exhaustion so you can grow them via /config before users see repeats",
 	},
+	{
+		Version: "1.23.6",
+		Silent:  true,
+		Text: "• /config now supports per-(kind, level) pool-size overrides (e.g. upper-intermediate words specifically)\n" +
+			"• Precedence: per-(kind,level) → per-kind → per-level → global; ♻️ Default clears it\n" +
+			"• New /admin command lists every maintainer command so they're easy to find",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -797,6 +804,13 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 		handlePoolUsage(store, notifier, chatID)
 
+	case "/admin":
+		if !isMaintainer(chatID) {
+			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
+			return
+		}
+		handleAdminHelp(notifier, chatID)
+
 	case "/announce":
 		if !isMaintainer(chatID) {
 			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
@@ -1037,6 +1051,27 @@ func handlePoolUsage(store *Store, notifier Notifier, chatID int64) {
 	_ = notifier.Send(chatID, b.String())
 }
 
+// handleAdminHelp lists every maintainer-only command so the admin doesn't have to
+// remember them (they're intentionally hidden from the public /help and the Telegram
+// command menu). Sent only to the maintainer.
+func handleAdminHelp(notifier Notifier, chatID int64) {
+	log.Printf("🛠️  [ADMIN] /admin help requested by ChatID %d.", chatID)
+
+	var b strings.Builder
+	b.WriteString("🛠️ <b>Maintainer Commands</b>\n\n")
+	b.WriteString("📊 /metrics — subscriber stats, pool depth, quiz volume, mastered count\n")
+	b.WriteString("📈 /poolusage — per kind/level, the most active user's pool consumption %\n")
+	b.WriteString("🏥 /health — database + enabled AI providers\n")
+	b.WriteString("⚙️ /config — runtime settings panel (pool sizes, quiet hours, TTS, …)\n")
+	b.WriteString("👥 /users — paginated user list, detail view & direct messaging\n")
+	b.WriteString("📣 /announce &lt;text&gt; — broadcast an HTML message to all active users\n")
+	b.WriteString("🗄️ /backup — send a point-in-time SQLite backup to this chat\n")
+	b.WriteString("🛠️ /admin — show this list\n\n")
+	b.WriteString("<i>These are visible only to you and don't appear in the command menu.</i>")
+
+	_ = notifier.Send(chatID, b.String())
+}
+
 // handleAnnounce broadcasts an HTML message to all non-paused subscribers (/announce).
 func handleAnnounce(store *Store, notifier Notifier, chatID int64, text string) {
 	if text == "" {
@@ -1123,19 +1158,19 @@ func configText() string {
 		onOff = "OFF"
 	}
 	poolOverrideMu.RLock()
-	kindOverrides, levelOverrides := len(poolKindTargets), len(poolLevelTargets)
+	kindOverrides, levelOverrides, klOverrides := len(poolKindTargets), len(poolLevelTargets), len(poolKindLevelTargets)
 	poolOverrideMu.RUnlock()
 	return fmt.Sprintf(
 		"⚙️ <b>Bot Config</b> (Admin)\n\n"+
 			"📦 <b>Pool target:</b> %d  •  <b>Pool min:</b> %d\n"+
-			"📦 <b>Pool overrides:</b> %d per-kind, %d per-level\n"+
+			"📦 <b>Pool overrides:</b> %d kind+level, %d per-kind, %d per-level\n"+
 			"🌙 <b>Quiet hours:</b> %s – %s\n"+
 			"🔊 <b>Global TTS:</b> %s\n"+
 			"⏱ <b>Gen spacing:</b> %s\n"+
 			"🧠 <b>Review batch max:</b> %d\n\n"+
 			"Tap a setting to change it.",
 		poolTarget, poolMin,
-		kindOverrides, levelOverrides,
+		klOverrides, kindOverrides, levelOverrides,
 		quietStart, quietEnd,
 		onOff,
 		genSpacing,
@@ -1164,6 +1199,9 @@ func configKeyboard() [][]inlineButton {
 		},
 		{
 			{Text: fmt.Sprintf("🧠 Review batch: %d", reviewBatchMax), CallbackData: "cfg:goto:review_batch"},
+		},
+		{
+			{Text: "📦 Per kind + level", CallbackData: "cfg:goto:pool_kl"},
 		},
 		{
 			{Text: "📦 Per-kind pools", CallbackData: "cfg:goto:pool_kinds"},
@@ -1362,6 +1400,88 @@ func configPoolLevelsKeyboard() [][]inlineButton {
 	return rows
 }
 
+// configPoolKLKindsKeyboard lists the level-aware content kinds for the per
+// kind+level override flow (tips are excluded — they aren't level-partitioned).
+// Tapping a kind opens its per-level picker.
+func configPoolKLKindsKeyboard() [][]inlineButton {
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, k := range configurableKinds {
+		if k == kindTip {
+			continue // tips have a single, level-independent pool
+		}
+		row = append(row, inlineButton{
+			Text:         k,
+			CallbackData: "cfg:goto:klk:" + k,
+		})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	return rows
+}
+
+// configPoolKLLevelsKeyboard lists every difficulty level for a chosen kind, each
+// showing its current per-(kind,level) override (or "default"), and opening a value
+// picker for that exact pool (e.g. "upper-intermediate words").
+func configPoolKLLevelsKeyboard(kind string) [][]inlineButton {
+	var rows [][]inlineButton
+	var row []inlineButton
+	for _, l := range allLevels {
+		v, ok := poolKindLevelOverride(kind, l)
+		row = append(row, inlineButton{
+			Text:         fmt.Sprintf("%s: %s", levelLabel(l), poolOverrideLabel(v, ok)),
+			CallbackData: "cfg:goto:klv:" + kind + ":" + l,
+		})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows, []inlineButton{{Text: "⬅️ Back", CallbackData: "cfg:goto:pool_kl"}})
+	return rows
+}
+
+// configPoolKLValueKeyboard builds the value picker for a specific (kind, level)
+// pool. The first button clears the override; the rest are preset targets. Back
+// returns to that kind's level picker.
+func configPoolKLValueKeyboard(kind, level string, current int, hasOverride bool) [][]inlineButton {
+	presets := []int{50, 100, 150, 200, 300, 500, 800}
+	var rows [][]inlineButton
+
+	defLabel := "♻️ Default"
+	if !hasOverride {
+		defLabel = "✅ ♻️ Default"
+	}
+	rows = append(rows, []inlineButton{{Text: defLabel, CallbackData: fmt.Sprintf("cfg:kl:%s:%s:0", kind, level)}})
+
+	var row []inlineButton
+	for _, v := range presets {
+		label := fmt.Sprintf("%d", v)
+		if hasOverride && v == current {
+			label = "✅ " + label
+		}
+		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:kl:%s:%s:%d", kind, level, v)})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	rows = append(rows, []inlineButton{{Text: "⬅️ Back", CallbackData: "cfg:goto:klk:" + kind}})
+	return rows
+}
+
 // configPoolValueKeyboard builds a value picker for a per-kind ("pk") or per-level
 // ("pl") override. The first button clears the override (back to the global rule);
 // the rest are preset targets. current/hasOverride drive the ✅ marker. The Back
@@ -1467,7 +1587,37 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 			)
 			return
 		}
+		// "goto:klv:<kind>:<level>" — value picker for one exact (kind, level) pool.
+		if after, ok := strings.CutPrefix(key, "klv:"); ok {
+			kind, level, found := strings.Cut(after, ":")
+			lv, valid := normalizeLevel(level)
+			if !found || !isConfigurableKind(kind) || kind == kindTip || !valid {
+				return
+			}
+			cur, has := poolKindLevelOverride(kind, lv)
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("📦 <b>Pool size — %s %s</b>\n\nCurrent: <b>%s</b>\n♻️ Default falls back to per-kind, then per-level, then the global rule.\nTap to change:", levelLabel(lv), kind, poolOverrideLabel(cur, has)),
+				configPoolKLValueKeyboard(kind, lv, cur, has),
+			)
+			return
+		}
+		// "goto:klk:<kind>" — per-level picker for a chosen kind.
+		if kind, ok := strings.CutPrefix(key, "klk:"); ok {
+			if !isConfigurableKind(kind) || kind == kindTip {
+				return
+			}
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("📦 <b>%s pools by level</b>\n\nSet the target stocked for this kind at a specific level (e.g. upper-intermediate %s). Most specific override — wins over per-kind, per-level and the global rule.\nTap a level:", kind, kind),
+				configPoolKLLevelsKeyboard(kind),
+			)
+			return
+		}
 		switch key {
+		case "pool_kl":
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				"📦 <b>Per kind + level pools</b>\n\nSet the pool size for one content kind at one difficulty level (e.g. upper-intermediate words).\nPick a kind:",
+				configPoolKLKindsKeyboard(),
+			)
 		case "pool_kinds":
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
 				"📦 <b>Per-kind pool sizes</b>\n\nOverride the target stocked per content kind. Per-kind wins over per-level and the global rule.\nTap a kind:",
@@ -1592,6 +1742,41 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 		_ = store.SetBotConfig("review_batch_max", strconv.Itoa(n))
 		log.Printf("⚙️  [ADMIN] /config review_batch_max %d -> %d by ChatID %d.", old, n, chatID)
 		refresh(fmt.Sprintf("Review batch: %d", n))
+		return
+	}
+
+	// cfg:kl:<kind>:<level>:<n> — set (n>0) or clear (n==0) a per-(kind,level) override.
+	if after, ok := strings.CutPrefix(rest, "kl:"); ok {
+		parts := strings.SplitN(after, ":", 3)
+		if len(parts) != 3 {
+			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
+			return
+		}
+		kind, level, nStr := parts[0], parts[1], parts[2]
+		n, err := strconv.Atoi(nStr)
+		lv, valid := normalizeLevel(level)
+		if err != nil || n < 0 || !isConfigurableKind(kind) || kind == kindTip || !valid {
+			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
+			return
+		}
+		setPoolKindLevelOverride(kind, lv, n)
+		key := "pool_kl_" + kind + "_" + lv
+		var toast string
+		if n == 0 {
+			_ = store.DeleteBotConfig(key)
+			toast = fmt.Sprintf("%s %s: default", levelLabel(lv), kind)
+		} else {
+			_ = store.SetBotConfig(key, strconv.Itoa(n))
+			toast = fmt.Sprintf("%s %s: %d", levelLabel(lv), kind, n)
+		}
+		log.Printf("⚙️  [ADMIN] /config %s -> %d by ChatID %d.", key, n, chatID)
+		_ = notifier.AnswerCallback(cb.ID, toast)
+		if cb.Message != nil {
+			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
+				fmt.Sprintf("📦 <b>%s pools by level</b>\n\nSet the target stocked for this kind at a specific level (e.g. upper-intermediate %s). Most specific override — wins over per-kind, per-level and the global rule.\nTap a level:", kind, kind),
+				configPoolKLLevelsKeyboard(kind),
+			)
+		}
 		return
 	}
 
@@ -3333,9 +3518,18 @@ func (s *Store) LoadBotConfig() {
 				reviewBatchMax = n
 			}
 		default:
-			// Per-kind ("pool_kind_<kind>") and per-level ("pool_level_<level>")
-			// pool-size overrides. Unknown keys are ignored.
-			if kind, ok := strings.CutPrefix(k, "pool_kind_"); ok {
+			// Per-(kind,level) ("pool_kl_<kind>_<level>"), per-kind ("pool_kind_<kind>")
+			// and per-level ("pool_level_<level>") pool-size overrides. Unknown keys
+			// are ignored. pool_kl_ is checked first; its key never collides with the
+			// other two prefixes.
+			if rest, ok := strings.CutPrefix(k, "pool_kl_"); ok {
+				kind, level, found := strings.Cut(rest, "_")
+				if n, err := strconv.Atoi(v); found && err == nil && n > 0 && isConfigurableKind(kind) {
+					if lv, valid := normalizeLevel(level); valid {
+						setPoolKindLevelOverride(kind, lv, n)
+					}
+				}
+			} else if kind, ok := strings.CutPrefix(k, "pool_kind_"); ok {
 				if n, err := strconv.Atoi(v); err == nil && n > 0 && isConfigurableKind(kind) {
 					setPoolKindOverride(kind, n)
 				}
