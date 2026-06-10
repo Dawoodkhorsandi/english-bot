@@ -259,6 +259,12 @@ var Changelogs = []ChangelogEntry{
 		Text: "• Maintainer is now alerted when a user has consumed the entire pool for a kind/level and starts seeing repeats\n" +
 			"• Deduped per chat+kind+level; re-alerts only after the pool is grown via /config",
 	},
+	{
+		Version: "1.23.5",
+		Silent:  true,
+		Text: "• New /poolusage admin report: per kind/level, shows the most active user's pool consumption as a percentage\n" +
+			"• Surfaces which pools are closest to exhaustion so you can grow them via /config before users see repeats",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -784,6 +790,13 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 		handleMetrics(store, chain, notifier, chatID)
 
+	case "/poolusage":
+		if !isMaintainer(chatID) {
+			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
+			return
+		}
+		handlePoolUsage(store, notifier, chatID)
+
 	case "/announce":
 		if !isMaintainer(chatID) {
 			_ = notifier.Send(chatID, "🔒 This command is only available to the bot maintainer.")
@@ -971,6 +984,54 @@ func handleMetrics(store *Store, chain *ProviderChain, notifier Notifier, chatID
 	b.WriteString(fmt.Sprintf("\n⚡ Providers enabled: <b>%d</b>\n", len(chain.providers)))
 	for _, p := range chain.providers {
 		b.WriteString(fmt.Sprintf("  • %s\n", p.Name()))
+	}
+
+	_ = notifier.Send(chatID, b.String())
+}
+
+// handlePoolUsage sends the maintainer a per-kind/level breakdown of how heavily
+// each pool is being consumed. For every (kind, level) it finds the single most
+// active user — the one who has seen the most of the items currently pooled — and
+// reports that user's consumption as a percentage of the pool size. A pool near
+// 100% means its busiest user is about to start seeing repeats and the target
+// should be raised via /config.
+func handlePoolUsage(store *Store, notifier Notifier, chatID int64) {
+	log.Printf("📈 [ADMIN] /poolusage requested by ChatID %d.", chatID)
+
+	var b strings.Builder
+	b.WriteString("📈 <b>Pool usage</b>\n")
+	b.WriteString("<i>Most active user's consumption per pool.</i>\n\n")
+
+	levels, _ := store.ActiveLevels()
+
+	// Build the (kind, level) work list: level-aware kinds across every active
+	// level, plus level-independent tips at the default level.
+	type poolKey struct{ kind, level string }
+	var keys []poolKey
+	for _, kind := range []string{kindDrill, kindWord, kindIdiom, kindCollocation, kindStory} {
+		for _, level := range levels {
+			keys = append(keys, poolKey{kind, level})
+		}
+	}
+	keys = append(keys, poolKey{kindTip, defaultLevel})
+
+	for _, k := range keys {
+		count, _ := store.PoolCount(k.kind, k.level)
+		label := k.kind + "/" + k.level
+		if k.kind == kindTip {
+			label = kindTip
+		}
+		if count == 0 {
+			b.WriteString(fmt.Sprintf("  %s: <i>pool empty</i>\n", label))
+			continue
+		}
+		leader, seen, ok, _ := store.PoolUsageLeader(k.kind, k.level)
+		if !ok || seen == 0 {
+			b.WriteString(fmt.Sprintf("  %s: <b>0%%</b> (%d pooled, no usage)\n", label, count))
+			continue
+		}
+		pct := seen * 100 / count
+		b.WriteString(fmt.Sprintf("  %s: <b>%d%%</b> (%d/%d, top chat %d)\n", label, pct, seen, count, leader))
 	}
 
 	_ = notifier.Send(chatID, b.String())

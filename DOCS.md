@@ -63,7 +63,7 @@ All configuration is read from environment variables at startup. There are no co
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | `YOUR_TELEGRAM_BOT_TOKEN` | Telegram Bot API token from @BotFather |
 | `GEMINI_API_KEY` | `YOUR_GEMINI_API_KEY` | Google Gemini API key |
-| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/metrics`, `/announce`, `/health`, `/users`, `/backup`) |
+| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/metrics`, `/poolusage`, `/announce`, `/health`, `/users`, `/backup`) |
 | `TIMEZONE` | `Asia/Tehran` | IANA timezone for quiet hours, daily review, and digest scheduling |
 | `QUIET_START` | `00:00` | Start of the quiet window (no scheduled sends) |
 | `QUIET_END` | `09:00` | End of the quiet window |
@@ -496,6 +496,7 @@ type Store struct { db *sql.DB }
 | `SubscriberStats` | `() (total, active, paused int)` | Aggregate subscriber counts for admin `/metrics` |
 | `TotalQuizStats` | `() (answered, correct int)` | Global quiz answer tallies for admin `/metrics` |
 | `TotalMasteredCount` | `() int` | Total mastered words across all users for admin `/metrics` |
+| `PoolUsageLeader` | `(kind, level string) (chatID int64, seen int, ok bool, err error)` | Busiest user for a pool and how many of its current items they've seen, for admin `/poolusage` |
 | `GetTTSEnabled` | `(chatID int64) bool` | Whether pronunciation audio is enabled for the user (default true) |
 | `SetTTSEnabled` | `(chatID int64, enabled bool) error` | Upserts the user's TTS preference |
 | `CachedAudioFileID` | `(word string) string` | Returns cached Telegram file_id for a word's pronunciation, or "" |
@@ -570,6 +571,7 @@ All messages use `parse_mode: HTML`.
 | `/settings` | Shows all per-user settings in one inline-keyboard hub. Tap any button to toggle a feature or open a level/interval/quiz-interval sub-keyboard. All individual setting commands still work as shortcuts. Button taps use the `settings:` callback prefix. (v1.17.0) |
 | `/tts [on/off]` | With `on`/`off`, toggles pronunciation audio in `user_prefs.tts_enabled`; without an argument, shows current TTS status. (v1.14.0) |
 | `/metrics` | *(Admin only)* Subscriber stats (total/active/paused), pool depth per kind+level, quiz volume, mastered count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
+| `/poolusage` | *(Admin only)* Per (kind, level), finds the single most active user — the one who has seen the most of the items currently pooled — and reports that user's consumption as a percentage of the pool size (`seen/count`). Surfaces pools nearing exhaustion so the target can be raised via `/config` before users see repeats. Gated by `MAINTAINER_CHAT_ID`. (v1.23.5) |
 | `/announce <text>` | *(Admin only)* Push a one-off HTML message to all non-paused subscribers. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/users` | *(Admin only)* Paginated user list with inline keyboard navigation; tap any user for full detail (settings, toggles, progress, quiz, SRS, streaks); send a direct message to any user. Gated by `MAINTAINER_CHAT_ID`. (v1.20.0) |
@@ -1575,6 +1577,7 @@ Maintainer-only operational tooling (gated by `chat_id == MAINTAINER_CHAT_ID`).
 | Command | Behaviour |
 |---|---|
 | `/metrics` | Subscriber count (total/active/paused), pool depth per (kind, level), total quiz volume (answered/correct), total mastered words. |
+| `/poolusage` | Per (kind, level), the most active user's consumption of the current pool as a percentage. Highlights pools nearing exhaustion. (v1.23.5) |
 | `/announce <text>` | Push a one-off HTML message to all (non-paused) subscribers. |
 | `/health` | Quick check: which providers are enabled and their count. |
 | `/users` | Paginated user list (8 per page) with inline navigation and per-user detail view. (v1.20.0) |
