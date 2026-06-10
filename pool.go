@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -427,6 +428,40 @@ func (s *Store) WeeklyQuizStats(chatID int64, startUTC, endUTC string) (answered
 }
 
 // ---------------------------------------------------------------------------
+// pool_exhaustion_notice store methods
+// ---------------------------------------------------------------------------
+
+// PoolExhaustionNotice returns the pool size recorded the last time the
+// maintainer was alerted that chatID had exhausted the (kind, level) pool, and
+// whether any such notice exists.
+func (s *Store) PoolExhaustionNotice(chatID int64, kind, level string) (poolCount int, ok bool, err error) {
+	err = s.db.QueryRow(
+		"SELECT pool_count FROM pool_exhaustion_notice WHERE chat_id = ? AND kind = ? AND level = ?",
+		chatID, kind, level,
+	).Scan(&poolCount)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return poolCount, true, nil
+}
+
+// MarkPoolExhaustionNotice records that the maintainer was alerted about chatID
+// exhausting the (kind, level) pool at the given pool size, upserting the row.
+func (s *Store) MarkPoolExhaustionNotice(chatID int64, kind, level string, poolCount int) error {
+	_, err := s.db.Exec(
+		`INSERT INTO pool_exhaustion_notice (chat_id, kind, level, pool_count, notified_at)
+		 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(chat_id, kind, level)
+		 DO UPDATE SET pool_count = excluded.pool_count, notified_at = CURRENT_TIMESTAMP`,
+		chatID, kind, level, poolCount,
+	)
+	return err
+}
+
+// ---------------------------------------------------------------------------
 // serveContent: pool-first delivery (Change B)
 // ---------------------------------------------------------------------------
 
@@ -438,7 +473,7 @@ func (s *Store) WeeklyQuizStats(chatID int64, startUTC, endUTC string) (answered
 //     adds the result to the pool, and serves it.
 //   - On a miss with allowGenerate=false (broadcasts) it falls back to the oldest
 //     pooled item so broadcasts never call the AI directly.
-func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatID int64, kind, level string, allowGenerate bool) (string, string, error) {
+func serveContent(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, chatID int64, kind, level string, allowGenerate bool) (string, string, error) {
 	term, _, text, ok, err := store.PooledUnseen(kind, level, chatID)
 	if err != nil {
 		log.Printf("⚠️  [POOL] Unseen lookup failed for kind=%s level=%s chat=%d: %v", kind, level, chatID, err)
@@ -471,9 +506,13 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 		return genText, genTerm, nil
 	}
 
-	// Broadcast fallback: the user has seen every pooled item at this level. Rotate
-	// through their history by re-serving a random item other than the one served
-	// most recently, instead of pinning the single oldest pooled item forever.
+	// Broadcast fallback: the user has seen every pooled item at this level. This
+	// means they will now start seeing repeats, so alert the maintainer (once per
+	// exhaustion, until the pool grows) to consider raising the pool size.
+	maybeNotifyPoolExhausted(store, notifier, chatID, kind, level)
+
+	// Rotate through their history by re-serving a random item other than the one
+	// served most recently, instead of pinning the single oldest pooled item forever.
 	term, _, text, ok, err = store.PooledRecycled(kind, level, chatID)
 	if err != nil {
 		log.Printf("⚠️  [POOL] Recycle lookup failed for kind=%s level=%s chat=%d: %v", kind, level, chatID, err)
@@ -495,6 +534,51 @@ func serveContent(ctx context.Context, chain *ProviderChain, store *Store, chatI
 	}
 	maybeRefreshCard(chain, store, kind, level, term, text)
 	return text, term, nil
+}
+
+// maybeNotifyPoolExhausted alerts the maintainer when a user has seen every
+// pooled item for a (kind, level) and is now getting repeats — a cue to raise
+// the pool size via /config. It is deduped per (chat, kind, level): a notice is
+// sent only the first time, or again after the pool has grown since the last
+// notice (so a bump that the user then re-exhausts re-alerts). Best-effort:
+// any error is logged and swallowed, and a nil notifier disables it (tests).
+func maybeNotifyPoolExhausted(store *Store, notifier Notifier, chatID int64, kind, level string) {
+	if notifier == nil {
+		return
+	}
+	mID, err := strconv.ParseInt(strings.TrimSpace(MaintainerChatID), 10, 64)
+	if err != nil {
+		return // maintainer not configured
+	}
+
+	count, cErr := store.PoolCount(kind, level)
+	if cErr != nil {
+		log.Printf("⚠️  [POOL] Exhaustion count failed for %s/%s: %v", kind, level, cErr)
+		return
+	}
+
+	prev, seen, nErr := store.PoolExhaustionNotice(chatID, kind, level)
+	if nErr != nil {
+		log.Printf("⚠️  [POOL] Exhaustion notice lookup failed for chat %d %s/%s: %v", chatID, kind, level, nErr)
+		return
+	}
+	// Already alerted at this (or larger) pool size — stay quiet until it grows.
+	if seen && count <= prev {
+		return
+	}
+
+	msg := fmt.Sprintf(
+		"⚠️ <b>Pool exhausted</b>\n\nChat <code>%d</code> has now seen all <b>%d</b> pooled <b>%s</b>/<b>%s</b> items and is starting to get repeats.\n\nConsider raising the pool size via /config (per-kind or per-level) so they keep seeing fresh content.",
+		chatID, count, kind, level,
+	)
+	if err := notifier.Send(mID, msg); err != nil {
+		log.Printf("⚠️  [POOL] Could not send exhaustion notice to maintainer: %v", err)
+		return
+	}
+	if err := store.MarkPoolExhaustionNotice(chatID, kind, level, count); err != nil {
+		log.Printf("⚠️  [POOL] Could not record exhaustion notice for chat %d %s/%s: %v", chatID, kind, level, err)
+	}
+	log.Printf("⚠️  [POOL] Notified maintainer: chat %d exhausted %s/%s pool (%d items).", chatID, kind, level, count)
 }
 
 // maybeRefreshCard checks if a pooled word card is stale (missing sections that

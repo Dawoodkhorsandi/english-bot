@@ -296,6 +296,21 @@ Primary key is `(chat_id, collocation_date)` — one scheduled collocation per u
 
 Primary key is `(chat_id, story_date)` — one scheduled mini story per user per day.
 
+#### `pool_exhaustion_notice` (v1.23.4)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `kind` | `TEXT` | Content kind that was exhausted |
+| `level` | `TEXT` | Difficulty level that was exhausted |
+| `pool_count` | `INTEGER` | Pool size at the time the maintainer was last alerted |
+| `notified_at` | `DATETIME` | When the alert was last sent |
+
+Primary key is `(chat_id, kind, level)`. Dedupes the maintainer pool-exhaustion
+alert: `maybeNotifyPoolExhausted` (pool.go) fires from `serveContent`'s recycle
+branch (the user has seen everything and is getting repeats) and sends at most one
+alert per (chat, kind, level) until the pool grows beyond `pool_count`, at which
+point a re-exhaustion re-alerts. Best-effort and nil-notifier-safe.
+
 #### `user_prefs` (v1.4.0)
 | Column | Type | Description |
 |---|---|---|
@@ -864,10 +879,13 @@ It returns ready-to-send text and the resolved term for a user, recording the ch
 2. On a miss with `allowGenerate=true` (on-demand `/drill`, `/word`): generates
    inline via `generateContent` → `ProviderChain.Generate`, adds the result to the
    pool, and serves it.
-3. On a miss with `allowGenerate=false` (broadcasts): rotates through the user's
-   history via `PooledRecycled` (random item excluding the most recently served),
-   so no item is ever repeated back-to-back. Falls back to `PooledOldest` only as a
-   final safety net (e.g. single-item pool).
+3. On a miss with `allowGenerate=false` (broadcasts): the user has seen the whole
+   pool, so `maybeNotifyPoolExhausted` alerts the maintainer (deduped via
+   `pool_exhaustion_notice`, v1.23.4), then it rotates through the user's history
+   via `PooledRecycled` (random item excluding the most recently served), so no item
+   is ever repeated back-to-back. Falls back to `PooledOldest` only as a final safety
+   net (e.g. single-item pool). `serveContent` takes a `Notifier` for this alert;
+   on-demand callers never reach this branch (they generate instead).
 4. For word cards (kind=word): after serving a pooled item, `maybeRefreshCard` checks
    if the card is missing sections that current prompts produce (e.g. Persian
    definition). If stale, a background goroutine regenerates the card via
