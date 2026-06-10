@@ -63,7 +63,7 @@ All configuration is read from environment variables at startup. There are no co
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | `YOUR_TELEGRAM_BOT_TOKEN` | Telegram Bot API token from @BotFather |
 | `GEMINI_API_KEY` | `YOUR_GEMINI_API_KEY` | Google Gemini API key |
-| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/metrics`, `/poolusage`, `/announce`, `/health`, `/users`, `/backup`) |
+| `MAINTAINER_CHAT_ID` | `YOUR_PERSONAL_CHAT_ID` | Chat ID that receives new-user join notifications; also gates admin commands (`/admin`, `/metrics`, `/poolusage`, `/announce`, `/health`, `/users`, `/backup`) |
 | `TIMEZONE` | `Asia/Tehran` | IANA timezone for quiet hours, daily review, and digest scheduling |
 | `QUIET_START` | `00:00` | Start of the quiet window (no scheduled sends) |
 | `QUIET_END` | `09:00` | End of the quiet window |
@@ -403,17 +403,21 @@ Managed by `AddBookmark`, `RemoveBookmark`, `IsBookmarked`, `BookmarkCount` in `
 Simple key-value store for runtime config overrides set via `/config`. Loaded on startup
 by `LoadBotConfig()` which overwrites the corresponding global variables (env vars act as
 defaults). Supported keys: `pool_target`, `pool_min`, `quiet_start`, `quiet_end`,
-`tts_enabled`, `gen_spacing`, `review_batch_max`, plus per-kind (`pool_kind_<kind>`) and
+`tts_enabled`, `gen_spacing`, `review_batch_max`, plus per-(kind,level)
+(`pool_kl_<kind>_<level>`, v1.23.6), per-kind (`pool_kind_<kind>`) and
 per-level (`pool_level_<level>`) pool-size overrides (v1.23.2).
 
-**Pool-size override resolution (v1.23.2):** `poolTargetFor(kind, level)` resolves the
-effective target via `resolvePoolTarget` with precedence **per-kind → per-level → global
-rule** (the global rule being `pool_target` at the default level, `pool_min` elsewhere). A
-per-kind override (e.g. `pool_kind_story = 80`) wins for that kind at every level; a per-level
-override (e.g. `pool_level_advanced = 50`) applies to all kinds at that level unless a per-kind
-override exists. Setting a value of `0` via `/config` clears the override (key deleted). The
-overrides live in the `poolKindTargets` / `poolLevelTargets` maps, guarded by `poolOverrideMu`
-because the pool-filler goroutine reads them while the admin callback writes them.
+**Pool-size override resolution (v1.23.2, extended v1.23.6):** `poolTargetFor(kind, level)`
+resolves the effective target via `resolvePoolTarget` with precedence **per-(kind,level) →
+per-kind → per-level → global rule** (the global rule being `pool_target` at the default
+level, `pool_min` elsewhere). A per-(kind,level) override (e.g. `pool_kl_word_upper-intermediate
+= 400`) is the most specific and wins outright; a per-kind override (e.g. `pool_kind_story = 80`)
+wins for that kind at every level lacking a per-(kind,level) entry; a per-level override (e.g.
+`pool_level_advanced = 50`) applies to all kinds at that level unless a more specific override
+exists. Setting a value of `0` via `/config` clears the override (key deleted). The overrides
+live in the `poolKindLevelTargets` / `poolKindTargets` / `poolLevelTargets` maps, guarded by
+`poolOverrideMu` because the pool-filler goroutine reads them while the admin callback writes
+them.
 
 ### Legacy Migration
 
@@ -576,7 +580,8 @@ All messages use `parse_mode: HTML`.
 | `/health` | *(Admin only)* Quick check: enabled AI providers and their count. Gated by `MAINTAINER_CHAT_ID`. (v1.10.0) |
 | `/users` | *(Admin only)* Paginated user list with inline keyboard navigation; tap any user for full detail (settings, toggles, progress, quiz, SRS, streaks); send a direct message to any user. Gated by `MAINTAINER_CHAT_ID`. (v1.20.0) |
 | `/backup` | *(Admin only)* Creates a point-in-time SQLite snapshot (`VACUUM INTO`) and sends the `.sqlite` file to maintainer chat. Also runs nightly via `BACKUP_TIME`. Gated by `MAINTAINER_CHAT_ID`. |
-| `/config` | *(Admin only)* Interactive inline-keyboard panel to tweak runtime bot settings: pool target/min, **per-kind and per-level pool-size overrides** (v1.23.2), quiet hours, global TTS, gen spacing, review batch max. Changes are persisted in `bot_config` table and survive restarts. Callbacks use the `cfg:` prefix (`cfg:pk:<kind>:<n>`, `cfg:pl:<level>:<n>`; `n=0` clears). Gated by `MAINTAINER_CHAT_ID`. (v1.22.0) |
+| `/config` | *(Admin only)* Interactive inline-keyboard panel to tweak runtime bot settings: pool target/min, **per-(kind, level)** (v1.23.6), **per-kind and per-level pool-size overrides** (v1.23.2), quiet hours, global TTS, gen spacing, review batch max. Changes are persisted in `bot_config` table and survive restarts. Callbacks use the `cfg:` prefix (`cfg:kl:<kind>:<level>:<n>`, `cfg:pk:<kind>:<n>`, `cfg:pl:<level>:<n>`; `n=0` clears). Gated by `MAINTAINER_CHAT_ID`. (v1.22.0) |
+| `/admin` | *(Admin only)* Lists every maintainer command (they're hidden from the public `/help` and the Telegram command menu). Gated by `MAINTAINER_CHAT_ID`. (v1.23.6) |
 | `/mywords` | Browse all learned vocabulary with mastery status (🟢 mastered / 🔵 learning / ⚪ new) and bookmark indicator (⭐). Paginated with inline buttons (`mywords:<page>`). `/mywords bookmarks` shows bookmarked words only (paginated via `mybm:<page>`). (v1.21.0) |
 | `/bookmark [word]` | Toggle a word's bookmark status. With a word argument, adds or removes the bookmark; without an argument, shows the bookmarks page (aliases to `/mywords bookmarks`). Bookmark buttons (`bookmark:add:<word>` / `bookmark:rm:<word>`) also appear on vocabulary word cards. (v1.21.0) |
 | `/reset` | Clears both verb (`ResetSentWords`) and vocabulary (`ResetSentVocab`) history; reports how many of each were cleared. |
@@ -1582,6 +1587,7 @@ Maintainer-only operational tooling (gated by `chat_id == MAINTAINER_CHAT_ID`).
 | `/health` | Quick check: which providers are enabled and their count. |
 | `/users` | Paginated user list (8 per page) with inline navigation and per-user detail view. (v1.20.0) |
 | `/backup` | Trigger an immediate SQLite backup snapshot and send it as a document to maintainer chat. |
+| `/admin` | List every maintainer command (hidden from public `/help` and the Telegram command menu). (v1.23.6) |
 
 - All admin commands reply "not authorized" for non-maintainer chat IDs
   (`isMaintainer` parses `MAINTAINER_CHAT_ID` to `int64` and compares).
@@ -1641,6 +1647,10 @@ admin receives delivery confirmation or an error report.
 | `cfg:goto:pool_kinds` / `cfg:goto:pool_levels` | Show the per-kind / per-level pool-size submenu (v1.23.2) |
 | `cfg:goto:pk:<kind>` / `cfg:goto:pl:<level>` | Show the value picker for one kind / level (v1.23.2) |
 | `cfg:pk:<kind>:<n>` / `cfg:pl:<level>:<n>` | Set (`n>0`) or clear (`n=0`) a per-kind / per-level pool override (v1.23.2) |
+| `cfg:goto:pool_kl` | Show the per-(kind,level) flow: pick a kind (v1.23.6) |
+| `cfg:goto:klk:<kind>` | Show the per-level picker for a chosen kind (v1.23.6) |
+| `cfg:goto:klv:<kind>:<level>` | Show the value picker for one exact (kind, level) pool (v1.23.6) |
+| `cfg:kl:<kind>:<level>:<n>` | Set (`n>0`) or clear (`n=0`) a per-(kind,level) pool override (v1.23.6) |
 
 **New Store methods** (`admin.go`):
 

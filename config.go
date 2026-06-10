@@ -24,17 +24,21 @@ var (
 	refillInterval = getEnvDuration("REFILL_INTERVAL", 20*time.Second)
 	genSpacing     = getEnvDuration("GEN_SPACING", 3*time.Second)
 
-	// Per-kind and per-level pool-size overrides, set by the admin via /config and
-	// persisted in bot_config (keys "pool_kind_<kind>" / "pool_level_<level>").
-	// When an override exists it replaces the global poolTarget/poolMin rule for
-	// that content kind or difficulty level. Resolution precedence (most specific
-	// wins): per-kind override → per-level override → global rule. Guarded by
-	// poolOverrideMu because the pool filler goroutine reads them while the admin
+	// Per-(kind,level), per-kind and per-level pool-size overrides, set by the admin
+	// via /config and persisted in bot_config (keys "pool_kl_<kind>_<level>",
+	// "pool_kind_<kind>", "pool_level_<level>"). When an override exists it replaces
+	// the global poolTarget/poolMin rule for that pool. Resolution precedence (most
+	// specific wins): per-(kind,level) → per-kind → per-level → global rule. Guarded
+	// by poolOverrideMu because the pool filler goroutine reads them while the admin
 	// config callback (poller goroutine) writes them.
-	poolOverrideMu   sync.RWMutex
-	poolKindTargets  = map[string]int{}
-	poolLevelTargets = map[string]int{}
+	poolOverrideMu       sync.RWMutex
+	poolKindLevelTargets = map[string]int{}
+	poolKindTargets      = map[string]int{}
+	poolLevelTargets     = map[string]int{}
 )
+
+// klKey builds the map key for a per-(kind,level) pool override.
+func klKey(kind, level string) string { return kind + "\x00" + level }
 
 // configurableKinds is the set of content kinds whose pool size the admin can
 // override individually via /config.
@@ -51,10 +55,14 @@ func isConfigurableKind(kind string) bool {
 }
 
 // resolvePoolTarget returns the effective pool target for a (kind, level) pair,
-// applying per-kind then per-level overrides before falling back to the global
-// rule (poolTarget at the default level, poolMin elsewhere).
+// applying per-(kind,level) then per-kind then per-level overrides before falling
+// back to the global rule (poolTarget at the default level, poolMin elsewhere).
 func resolvePoolTarget(kind, level string) int {
 	poolOverrideMu.RLock()
+	if v, ok := poolKindLevelTargets[klKey(kind, level)]; ok {
+		poolOverrideMu.RUnlock()
+		return v
+	}
 	if v, ok := poolKindTargets[kind]; ok {
 		poolOverrideMu.RUnlock()
 		return v
@@ -107,6 +115,26 @@ func setPoolLevelOverride(level string, n int) {
 		return
 	}
 	poolLevelTargets[level] = n
+}
+
+// poolKindLevelOverride returns the per-(kind,level) pool override and whether one
+// is set. This is the most specific override tier (e.g. "upper-intermediate words").
+func poolKindLevelOverride(kind, level string) (int, bool) {
+	poolOverrideMu.RLock()
+	defer poolOverrideMu.RUnlock()
+	v, ok := poolKindLevelTargets[klKey(kind, level)]
+	return v, ok
+}
+
+// setPoolKindLevelOverride sets (n > 0) or clears (n <= 0) the per-(kind,level) override.
+func setPoolKindLevelOverride(kind, level string, n int) {
+	poolOverrideMu.Lock()
+	defer poolOverrideMu.Unlock()
+	if n <= 0 {
+		delete(poolKindLevelTargets, klKey(kind, level))
+		return
+	}
+	poolKindLevelTargets[klKey(kind, level)] = n
 }
 
 var (
