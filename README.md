@@ -13,6 +13,8 @@ A Telegram bot that sends subscribers AI-generated English practice on a configu
 - **Vocabulary Cards** -- meaning, pronunciation, synonyms, opposites, examples, and a hidden Persian/Farsi definition (tap to reveal)
 - **Pronunciation Audio** -- best-effort voice note after each vocabulary card and idiom (Gemini TTS with espeak-ng fallback, per-user `/tts` toggle)
 - **Idiom of the Day** -- a common English idiom with meaning and examples, daily and on demand via `/idiom`
+- **Collocation of the Day** -- a natural word partnership (e.g. *make a decision*) with examples and common-mistake warnings, daily and on demand via `/collocation`
+- **Mini Stories** -- a short reading-practice story at the user's level with key vocabulary and a comprehension question, daily and on demand via `/story`
 - **Spaced Repetition (SRS)** -- SM-2-style review scheduler resurfaces words at growing intervals so you remember what you've learned
 - **Native Quiz Polls** -- Telegram's built-in quiz poll format; tap an answer and the correct one is highlighted instantly; four question types (word-to-meaning, meaning-to-word, synonym, fill-in-the-blank)
 - **Weekly Digest** -- Sunday evening recap of the week's words, quiz accuracy, and streaks
@@ -82,6 +84,8 @@ go test ./... -v
 | `/drill` | Get a grammar drill on demand |
 | `/word` | Get a vocabulary card on demand |
 | `/idiom` | Get an idiom with meaning and examples |
+| `/collocation` | Get a collocation (natural word partnership) with examples |
+| `/story` | Get a mini story to read at your level |
 | `/tip` | Get a grammar tip now; `/tip on` or `/tip off` to control daily tips |
 | `/quiz` | Take a multiple-choice quiz (native Telegram poll) |
 | `/stats` | View progress: streak, words, quiz accuracy with progress bars |
@@ -139,6 +143,8 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `DIGEST_DAY` | `Sunday` | Day of week for weekly digest (`off` to disable) |
 | `DIGEST_TIME` | `20:00` | Local time to send the weekly digest |
 | `IDIOM_TIME` | `09:00` | Local time to send the daily idiom (`off` to disable) |
+| `COLLOCATION_TIME` | `13:00` | Local time to send the daily collocation (`off` to disable) |
+| `STORY_TIME` | `17:00` | Local time to send the daily mini story (`off` to disable) |
 | `BACKUP_TIME` | `02:00` | Local time to send nightly SQLite backup to the maintainer (`off` to disable) |
 | `AI_PROVIDER_ORDER` | `gemini,groq,...` | Comma-separated provider priority |
 | `WEB_APP_URL` | *(unset)* | Public HTTPS URL of the bot server (e.g. `https://bot.example.com`). When set, `/stats` includes a "📊 Full Dashboard" button opening the Telegram Mini App stats page. Leave unset to disable. |
@@ -164,7 +170,7 @@ Go application (single package main, 14 source files)
 +-- vocab.go          -- /mywords (browse learned words) and /bookmark (favourites) features
 ```
 
-### Goroutines (9 concurrent + optional web server)
+### Goroutines (13 concurrent + optional web server)
 
 1. **Pool filler** -- background content generation
 2. **Broadcast scheduler** -- half-hourly, per-user interval-aware delivery
@@ -173,13 +179,17 @@ Go application (single package main, 14 source files)
 5. **Quiz scheduler** -- periodic multiple-choice quizzes (native Telegram polls)
 6. **Weekly digest scheduler** -- weekly recap (default Sunday 20:00)
 7. **Idiom-of-the-day scheduler** -- daily idiom at `IDIOM_TIME` (default 09:00)
-8. **Telegram poller** -- long-polls for messages, callbacks, and `poll_answer` updates
-9. **Main goroutine** -- blocks on OS signal for graceful shutdown
-10. **Mini App web server** *(optional)* -- serves the stats dashboard when `WEB_APP_URL` is set
+8. **Daily tip scheduler** -- daily grammar tip at `TIP_TIME` (default 10:00)
+9. **Collocation scheduler** -- daily collocation at `COLLOCATION_TIME` (default 13:00)
+10. **Mini story scheduler** -- daily reading-practice story at `STORY_TIME` (default 17:00)
+11. **Nightly backup scheduler** -- SQLite snapshot to the maintainer at `BACKUP_TIME` (default 02:00)
+12. **Telegram poller** -- long-polls for messages, callbacks, and `poll_answer` updates
+13. **Main goroutine** -- blocks on OS signal for graceful shutdown
+14. **Mini App web server** *(optional)* -- serves the stats dashboard when `WEB_APP_URL` is set
 
 ### Database
 
-SQLite via `modernc.org/sqlite` (pure Go, no CGO). Tables: `subscribers`, `sent_words`, `sent_vocab`, `sent_idioms`, `changelog_delivery`, `content_pool`, `daily_review_delivery`, `user_prefs`, `review_schedule`, `quiz_results`, `weekly_digest_delivery`, `audio_cache`.
+SQLite via `modernc.org/sqlite` (pure Go, no CGO). Tables: `subscribers`, `sent_words`, `sent_vocab`, `sent_idioms`, `sent_tips`, `sent_collocations`, `sent_stories`, `changelog_delivery`, `content_pool`, `daily_review_delivery`, `idiom_delivery`, `daily_tip_delivery`, `collocation_delivery`, `story_delivery`, `user_prefs`, `review_schedule`, `quiz_results`, `weekly_digest_delivery`, `audio_cache`, `bookmarks`, `bot_config`.
 
 ### AI Providers
 

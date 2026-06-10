@@ -53,6 +53,16 @@ var (
 	// Daily grammar tip scheduler.
 	tipTime = getEnv("TIP_TIME", "10:00")
 
+	// Collocation of the day scheduler. One collocation card is broadcast daily
+	// at this local time. Set COLLOCATION_TIME to "off" to disable the scheduled
+	// send (the /collocation command still works).
+	collocationTime = getEnv("COLLOCATION_TIME", "13:00")
+
+	// Daily mini story scheduler. One reading-practice story is broadcast daily
+	// at this local time. Set STORY_TIME to "off" to disable the scheduled send
+	// (the /story command still works).
+	storyTime = getEnv("STORY_TIME", "17:00")
+
 	// SQLite backup scheduler (maintainer-only delivery).
 	backupTime = getEnv("BACKUP_TIME", "02:00")
 

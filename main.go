@@ -227,6 +227,13 @@ var Changelogs = []ChangelogEntry{
 			"• Configurable: pool target, pool min, quiet hours, global TTS, gen spacing, review batch max\n" +
 			"• Settings persisted in bot_config table and survive restarts",
 	},
+	{
+		Version: "1.23.0",
+		Text: "📣 <b>What's New in v1.23.0</b>\n\n" +
+			"• 🔗 <b>Collocations!</b> Learn natural word partnerships (like <i>make a decision</i>, <i>heavy rain</i>) with meaning, examples and common mistakes — one arrives daily, or get one anytime with /collocation\n" +
+			"• 📖 <b>Mini stories!</b> A short reading-practice story at your level with key vocabulary and a comprehension question — one arrives daily, or get one anytime with /story\n" +
+			"• Both can be turned on/off in /settings",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -333,6 +340,8 @@ func main() {
 	//   6. weekly digest scheduler sends a recap every DIGEST_DAY at DIGEST_TIME (Change K).
 	//   7. daily tip scheduler sends one grammar tip at TIP_TIME.
 	//   8. nightly backup scheduler sends SQLite snapshot to maintainer at BACKUP_TIME.
+	//   9. collocation scheduler sends one collocation card at COLLOCATION_TIME.
+	//  10. mini story scheduler sends one reading-practice story at STORY_TIME.
 	go poolFiller(ctx, chain, store)
 	go runBroadcastScheduler(ctx, chain, store, notifier)
 	go runDailyReviewScheduler(ctx, store, notifier)
@@ -342,6 +351,8 @@ func main() {
 	go runIdiomScheduler(ctx, chain, store, notifier)
 	go runDailyTipScheduler(ctx, chain, store, notifier)
 	go runDBBackupScheduler(ctx, store, notifier)
+	go runCollocationScheduler(ctx, chain, store, notifier)
+	go runStoryScheduler(ctx, chain, store, notifier)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store, notifier)
@@ -519,6 +530,8 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/drill — Get a grammar drill right now\n" +
 			"/word — Get a vocabulary word right now\n" +
 			"/idiom — Get an idiom of the day\n" +
+			"/collocation — Get a natural word partnership to learn\n" +
+			"/story — Get a mini story to read at your level\n" +
 			"/tip — Get a grammar tip right now\n" +
 			"/quiz — Test yourself on a word you've learned\n" +
 			"/level — Choose your difficulty (beginner/intermediate/upper-intermediate/advanced)\n" +
@@ -539,6 +552,8 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"present, past & future tenses (Simple, Continuous, Perfect, Perfect Continuous), all four conditionals, plus modals, passive, imperative and <i>used to</i>.\n\n" +
 			"📘 <b>Vocabulary words</b> give you the meaning, pronunciation, synonyms, opposites and real examples for a useful new word.\n\n" +
 			"🗣️ <b>Idiom of the day:</b> a common English expression with its meaning and real examples — sent once a day, or anytime via /idiom.\n\n" +
+			"🔗 <b>Collocation of the day:</b> a natural word partnership (like <i>make a decision</i>) with examples and the mistakes to avoid — sent once a day, or anytime via /collocation.\n\n" +
+			"📖 <b>Mini stories:</b> a short story at your level with key vocabulary and a comprehension question — sent once a day, or anytime via /story.\n\n" +
 			"🧠 <b>Spaced repetition:</b> words you've learned come back as quick <b>memory checks</b> at growing intervals — tap ✅ Knew it / ❌ Forgot and I'll tune when you see each one next.\n\n" +
 			"🧩 <b>Quizzes:</b> multiple-choice questions test your recall — send /quiz anytime, and one pops up now and then. Your answers also tune your review schedule.\n\n" +
 			"💬 <b>Look up any word:</b> just type it (English or Persian) and I'll send a full card for it.\n\n" +
@@ -546,6 +561,8 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/drill — generate a grammar drill on demand\n" +
 			"/word — generate a vocabulary word on demand\n" +
 			"/idiom — get a common idiom with meaning and examples\n" +
+			"/collocation — get a natural word partnership with examples\n" +
+			"/story — get a mini story to read at your level\n" +
 			"/tip — grammar tip now; /tip on or /tip off for daily tips\n" +
 			"/quiz — test yourself on a word you've already learned\n" +
 			"/level — set difficulty: beginner, intermediate, upper-intermediate or advanced\n" +
@@ -606,8 +623,42 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 		log.Printf("✅ [AI_SUCCESS] Idiom delivered to ChatID %d.", chatID)
-		if err := sendIdiomCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+		if err := sendCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
 			log.Printf("❌ [IDIOM_SEND_ERR] Idiom send failed for ChatID %d: %v", chatID, err)
+		}
+
+	case "/collocation":
+		log.Printf("🤖 [AI_FLOW] /collocation requested by ChatID %d.", chatID)
+		notifier.SendTyping(chatID)
+		_ = notifier.Send(chatID, "🔄 <b>Finding a collocation for you...</b>")
+
+		card, _, err := serveContent(ctx, chain, store, chatID, kindCollocation, store.GetLevel(chatID), true)
+		if err != nil {
+			log.Printf("❌ [AI_ERR] Collocation generation failed for ChatID %d: %v", chatID, err)
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
+			return
+		}
+
+		log.Printf("✅ [AI_SUCCESS] Collocation delivered to ChatID %d.", chatID)
+		if err := sendCardWithTTS(ctx, store, notifier, chatID, card); err != nil {
+			log.Printf("❌ [COLLOCATION_SEND_ERR] Collocation send failed for ChatID %d: %v", chatID, err)
+		}
+
+	case "/story":
+		log.Printf("🤖 [AI_FLOW] /story requested by ChatID %d.", chatID)
+		notifier.SendTyping(chatID)
+		_ = notifier.Send(chatID, "🔄 <b>Writing a mini story for you...</b>")
+
+		card, _, err := serveContent(ctx, chain, store, chatID, kindStory, store.GetLevel(chatID), true)
+		if err != nil {
+			log.Printf("❌ [AI_ERR] Story generation failed for ChatID %d: %v", chatID, err)
+			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
+			return
+		}
+
+		log.Printf("✅ [AI_SUCCESS] Story delivered to ChatID %d.", chatID)
+		if err := notifier.Send(chatID, card); err != nil {
+			log.Printf("❌ [STORY_SEND_ERR] Story send failed for ChatID %d: %v", chatID, err)
 		}
 
 	case "/settings":
@@ -1477,6 +1528,8 @@ type timeBudgetPreset struct {
 	quizIntervalHours  int    // per-user quiz interval (hours)
 	quizEnabled        bool
 	idiomEnabled       bool
+	collocationEnabled bool
+	storyEnabled       bool
 	tipsEnabled        bool
 	reviewEnabled      bool // SRS word reviews
 	dailyReviewEnabled bool
@@ -1488,31 +1541,31 @@ var timeBudgetPresets = []timeBudgetPreset{
 	{
 		label: "⚡ 5 min/day", minutesPerDay: 5,
 		interval: 240, quizIntervalHours: 24,
-		quizEnabled: true, idiomEnabled: false, tipsEnabled: false,
+		quizEnabled: true, idiomEnabled: false, collocationEnabled: false, storyEnabled: false, tipsEnabled: false,
 		reviewEnabled: true, dailyReviewEnabled: false, digestEnabled: false,
 	},
 	{
 		label: "🎯 15 min/day", minutesPerDay: 15,
 		interval: 120, quizIntervalHours: 24,
-		quizEnabled: true, idiomEnabled: false, tipsEnabled: true,
+		quizEnabled: true, idiomEnabled: false, collocationEnabled: false, storyEnabled: false, tipsEnabled: true,
 		reviewEnabled: true, dailyReviewEnabled: false, digestEnabled: false,
 	},
 	{
 		label: "📚 30 min/day", minutesPerDay: 30,
 		interval: 60, quizIntervalHours: 12,
-		quizEnabled: true, idiomEnabled: true, tipsEnabled: true,
+		quizEnabled: true, idiomEnabled: true, collocationEnabled: true, storyEnabled: true, tipsEnabled: true,
 		reviewEnabled: true, dailyReviewEnabled: true, digestEnabled: true,
 	},
 	{
 		label: "🔥 1 hour/day", minutesPerDay: 60,
 		interval: 30, quizIntervalHours: 6,
-		quizEnabled: true, idiomEnabled: true, tipsEnabled: true,
+		quizEnabled: true, idiomEnabled: true, collocationEnabled: true, storyEnabled: true, tipsEnabled: true,
 		reviewEnabled: true, dailyReviewEnabled: true, digestEnabled: true,
 	},
 	{
 		label: "💪 2 hours/day", minutesPerDay: 120,
 		interval: 30, quizIntervalHours: 3,
-		quizEnabled: true, idiomEnabled: true, tipsEnabled: true,
+		quizEnabled: true, idiomEnabled: true, collocationEnabled: true, storyEnabled: true, tipsEnabled: true,
 		reviewEnabled: true, dailyReviewEnabled: true, digestEnabled: true,
 	},
 }
@@ -1539,6 +1592,12 @@ func applyTimeBudgetPreset(store *Store, chatID int64, p timeBudgetPreset) error
 		return err
 	}
 	if err := store.SetIdiomEnabled(chatID, p.idiomEnabled); err != nil {
+		return err
+	}
+	if err := store.SetCollocationEnabled(chatID, p.collocationEnabled); err != nil {
+		return err
+	}
+	if err := store.SetStoryEnabled(chatID, p.storyEnabled); err != nil {
 		return err
 	}
 	if err := store.SetTipsEnabled(chatID, p.tipsEnabled); err != nil {
@@ -1673,6 +1732,10 @@ func settingsText(prefs UserPrefs) string {
 			"    <i>Multiple-choice questions on words you've already learned</i>\n\n"+
 			"🗣️ <b>Idiom of the day:</b> %s\n"+
 			"    <i>One common English expression with meaning and examples, sent once a day</i>\n\n"+
+			"🔗 <b>Collocation of the day:</b> %s\n"+
+			"    <i>One natural word partnership (like \"make a decision\") with examples, sent once a day</i>\n\n"+
+			"📖 <b>Daily mini story:</b> %s\n"+
+			"    <i>A short reading-practice story at your level with key vocabulary, sent once a day</i>\n\n"+
 			"💡 <b>Daily grammar tip:</b> %s\n"+
 			"    <i>One focused grammar rule with correct/incorrect examples, sent once a day</i>\n\n"+
 			"🌙 <b>Midnight recap:</b> %s\n"+
@@ -1686,6 +1749,8 @@ func settingsText(prefs UserPrefs) string {
 		onOff(prefs.ReviewEnabled),
 		onOff(prefs.QuizEnabled), quizIntervalLabel(prefs.QuizIntervalHours),
 		onOff(prefs.IdiomEnabled),
+		onOff(prefs.CollocationEnabled),
+		onOff(prefs.StoryEnabled),
 		onOff(prefs.TipsEnabled),
 		onOff(prefs.DailyReviewEnabled),
 		onOff(prefs.DigestEnabled),
@@ -1717,6 +1782,10 @@ func settingsKeyboard(prefs UserPrefs) [][]inlineButton {
 		{
 			tog("🗣️ Idiom of the day", "idiom", prefs.IdiomEnabled),
 			tog("🌙 Midnight recap", "daily_review", prefs.DailyReviewEnabled),
+		},
+		{
+			tog("🔗 Collocation of the day", "collocation", prefs.CollocationEnabled),
+			tog("📖 Daily mini story", "story", prefs.StoryEnabled),
 		},
 		{
 			tog("🧩 Quizzes", "quiz", prefs.QuizEnabled),
@@ -2073,6 +2142,12 @@ func handleSettingsCallback(store *Store, notifier Notifier, cb *TelegramCallbac
 		case "idiom":
 			saveErr = store.SetIdiomEnabled(chatID, !prefs.IdiomEnabled)
 			toast = map[bool]string{true: "Idiom ON", false: "Idiom OFF"}[!prefs.IdiomEnabled]
+		case "collocation":
+			saveErr = store.SetCollocationEnabled(chatID, !prefs.CollocationEnabled)
+			toast = map[bool]string{true: "Collocation ON", false: "Collocation OFF"}[!prefs.CollocationEnabled]
+		case "story":
+			saveErr = store.SetStoryEnabled(chatID, !prefs.StoryEnabled)
+			toast = map[bool]string{true: "Mini story ON", false: "Mini story OFF"}[!prefs.StoryEnabled]
 		case "srs":
 			saveErr = store.SetReviewEnabled(chatID, !prefs.ReviewEnabled)
 			toast = map[bool]string{true: "SRS ON", false: "SRS OFF"}[!prefs.ReviewEnabled]
@@ -2523,6 +2598,8 @@ func registerBotCommands() {
 		{"command": "drill", "description": "Get a grammar drill right now"},
 		{"command": "word", "description": "Get a vocabulary word right now"},
 		{"command": "idiom", "description": "Get an idiom of the day"},
+		{"command": "collocation", "description": "Get a natural word partnership to learn"},
+		{"command": "story", "description": "Get a mini story to read at your level"},
 		{"command": "tip", "description": "Get a grammar tip (or /tip on|off)"},
 		{"command": "quiz", "description": "Test yourself on a learned word"},
 		{"command": "setup", "description": "Quick-setup: pick how much time you have per day"},
@@ -2727,6 +2804,22 @@ func openStore(path string) (*Store, error) {
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_sent_tips_chat ON sent_tips(chat_id);
+	CREATE TABLE IF NOT EXISTS sent_collocations (
+		chat_id INTEGER NOT NULL,
+		word    TEXT    NOT NULL,
+		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, word)
+	);
+	CREATE INDEX IF NOT EXISTS idx_sent_collocations_chat ON sent_collocations(chat_id);
+	CREATE TABLE IF NOT EXISTS sent_stories (
+		chat_id INTEGER NOT NULL,
+		word    TEXT    NOT NULL,
+		sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, word)
+	);
+	CREATE INDEX IF NOT EXISTS idx_sent_stories_chat ON sent_stories(chat_id);
 	CREATE TABLE IF NOT EXISTS changelog_delivery (
 		chat_id INTEGER NOT NULL,
 		version TEXT    NOT NULL,
@@ -2761,6 +2854,18 @@ func openStore(path string) (*Store, error) {
 		sent_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, tip_date)
 	);
+	CREATE TABLE IF NOT EXISTS collocation_delivery (
+		chat_id          INTEGER NOT NULL,
+		collocation_date TEXT    NOT NULL,
+		sent_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, collocation_date)
+	);
+	CREATE TABLE IF NOT EXISTS story_delivery (
+		chat_id    INTEGER NOT NULL,
+		story_date TEXT    NOT NULL,
+		sent_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, story_date)
+	);
 	CREATE TABLE IF NOT EXISTS user_prefs (
 		chat_id              INTEGER PRIMARY KEY,
 		level                TEXT    NOT NULL DEFAULT 'intermediate',
@@ -2770,6 +2875,8 @@ func openStore(path string) (*Store, error) {
 		tips_enabled         INTEGER NOT NULL DEFAULT 1,
 		quiz_enabled         INTEGER NOT NULL DEFAULT 1,
 		idiom_enabled        INTEGER NOT NULL DEFAULT 1,
+		collocation_enabled  INTEGER NOT NULL DEFAULT 1,
+		story_enabled        INTEGER NOT NULL DEFAULT 1,
 		review_enabled       INTEGER NOT NULL DEFAULT 1,
 		digest_enabled       INTEGER NOT NULL DEFAULT 1,
 		daily_review_enabled INTEGER NOT NULL DEFAULT 1,
@@ -3013,6 +3120,18 @@ func (s *Store) migrate() error {
 		"digest_enabled":       "INTEGER NOT NULL DEFAULT 1",
 		"daily_review_enabled": "INTEGER NOT NULL DEFAULT 1",
 		"quiz_interval_hours":  "INTEGER NOT NULL DEFAULT 6",
+	} {
+		if !s.columnExists("user_prefs", col) {
+			log.Printf("💾 [DB_MIGRATE] Adding user_prefs.%s column...", col)
+			if _, err := s.db.Exec("ALTER TABLE user_prefs ADD COLUMN " + col + " " + def); err != nil {
+				return err
+			}
+		}
+	}
+	// user_prefs collocation/story toggle columns added in v1.23.0.
+	for col, def := range map[string]string{
+		"collocation_enabled": "INTEGER NOT NULL DEFAULT 1",
+		"story_enabled":       "INTEGER NOT NULL DEFAULT 1",
 	} {
 		if !s.columnExists("user_prefs", col) {
 			log.Printf("💾 [DB_MIGRATE] Adding user_prefs.%s column...", col)
@@ -3302,6 +3421,30 @@ func (s *Store) RecordSentTip(chatID int64, topic string) error {
 		`INSERT INTO sent_tips (chat_id, word, last_sent_at) VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
 		 ON CONFLICT(chat_id, word) DO UPDATE SET last_sent_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
 		chatID, strings.ToLower(strings.TrimSpace(topic)),
+	)
+	return err
+}
+
+// RecordSentCollocation stores a collocation as having been sent to a chat.
+// sent_at records the first send; last_sent_at is bumped on every send to drive
+// least-recently-served rotation.
+func (s *Store) RecordSentCollocation(chatID int64, collocation string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO sent_collocations (chat_id, word, last_sent_at) VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
+		 ON CONFLICT(chat_id, word) DO UPDATE SET last_sent_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
+		chatID, strings.ToLower(strings.TrimSpace(collocation)),
+	)
+	return err
+}
+
+// RecordSentStory stores a mini-story title as having been sent to a chat.
+// sent_at records the first send; last_sent_at is bumped on every send to drive
+// least-recently-served rotation.
+func (s *Store) RecordSentStory(chatID int64, title string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO sent_stories (chat_id, word, last_sent_at) VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f','now'))
+		 ON CONFLICT(chat_id, word) DO UPDATE SET last_sent_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
+		chatID, strings.ToLower(strings.TrimSpace(title)),
 	)
 	return err
 }

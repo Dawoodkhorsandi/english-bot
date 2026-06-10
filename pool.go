@@ -185,6 +185,10 @@ func (s *Store) recordSentFor(kind string, chatID int64, term string) error {
 		return s.RecordSentIdiom(chatID, term)
 	case kindTip:
 		return s.RecordSentTip(chatID, term)
+	case kindCollocation:
+		return s.RecordSentCollocation(chatID, term)
+	case kindStory:
+		return s.RecordSentStory(chatID, term)
 	default:
 		return s.RecordSentWord(chatID, term)
 	}
@@ -199,6 +203,10 @@ func sentTableFor(kind string) string {
 		return "sent_idioms"
 	case kindTip:
 		return "sent_tips"
+	case kindCollocation:
+		return "sent_collocations"
+	case kindStory:
+		return "sent_stories"
 	default:
 		return "sent_words"
 	}
@@ -305,6 +313,58 @@ func (s *Store) MarkTipDelivered(chatID int64, tipDate string) error {
 	_, err := s.db.Exec(
 		"INSERT OR IGNORE INTO daily_tip_delivery (chat_id, tip_date) VALUES (?, ?)",
 		chatID, tipDate,
+	)
+	return err
+}
+
+// CollocationDelivered reports whether the collocation of the day for
+// collocationDate has already been delivered to chatID.
+func (s *Store) CollocationDelivered(chatID int64, collocationDate string) (bool, error) {
+	var one int
+	err := s.db.QueryRow(
+		"SELECT 1 FROM collocation_delivery WHERE chat_id = ? AND collocation_date = ?",
+		chatID, collocationDate,
+	).Scan(&one)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// MarkCollocationDelivered records that the collocation of the day was sent.
+func (s *Store) MarkCollocationDelivered(chatID int64, collocationDate string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO collocation_delivery (chat_id, collocation_date) VALUES (?, ?)",
+		chatID, collocationDate,
+	)
+	return err
+}
+
+// StoryDelivered reports whether the daily mini story for storyDate has already
+// been delivered to chatID.
+func (s *Store) StoryDelivered(chatID int64, storyDate string) (bool, error) {
+	var one int
+	err := s.db.QueryRow(
+		"SELECT 1 FROM story_delivery WHERE chat_id = ? AND story_date = ?",
+		chatID, storyDate,
+	).Scan(&one)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// MarkStoryDelivered records that the daily mini story for storyDate was sent.
+func (s *Store) MarkStoryDelivered(chatID int64, storyDate string) error {
+	_, err := s.db.Exec(
+		"INSERT OR IGNORE INTO story_delivery (chat_id, story_date) VALUES (?, ?)",
+		chatID, storyDate,
 	)
 	return err
 }
@@ -494,7 +554,7 @@ func runRefillCycle(ctx context.Context, chain *ProviderChain, store *Store) {
 		log.Printf("⚠️  [POOL_FILLER] Could not load active levels: %v (using default only)", err)
 		levels = []string{defaultLevel}
 	}
-	for _, kind := range []string{kindDrill, kindWord, kindIdiom} {
+	for _, kind := range []string{kindDrill, kindWord, kindIdiom, kindCollocation, kindStory} {
 		for _, level := range levels {
 			if ctx.Err() != nil {
 				return

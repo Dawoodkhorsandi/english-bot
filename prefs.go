@@ -47,6 +47,8 @@ type UserPrefs struct {
 	TipsEnabled        bool // scheduled daily grammar tips
 	QuizEnabled        bool // scheduled quizzes
 	IdiomEnabled       bool // daily idiom of the day
+	CollocationEnabled bool // daily collocation of the day
+	StoryEnabled       bool // daily mini story
 	ReviewEnabled      bool // SRS spaced-repetition memory checks
 	DigestEnabled      bool // weekly digest
 	DailyReviewEnabled bool // midnight vocab recap
@@ -134,22 +136,26 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 		Level: defaultLevel, Paused: false, Interval: defaultInterval,
 		TTSEnabled: true, TipsEnabled: true,
 		QuizEnabled: true, IdiomEnabled: true, ReviewEnabled: true,
+		CollocationEnabled: true, StoryEnabled: true,
 		DigestEnabled: true, DailyReviewEnabled: true,
 		QuizIntervalHours: defaultQuizIntervalHours,
 	}
 	var level, firstName string
 	var paused, interval, ttsEnabled, tipsEnabled int
 	var quizEnabled, idiomEnabled, reviewEnabled, digestEnabled, dailyReviewEnabled int
+	var collocationEnabled, storyEnabled int
 	var quizIntervalHours, streakCelebrated int
 	err := s.db.QueryRow(
 		`SELECT level, paused, interval_minutes, tts_enabled, tips_enabled,
 		        quiz_enabled, idiom_enabled, review_enabled, digest_enabled,
 		        daily_review_enabled, quiz_interval_hours,
+		        COALESCE(collocation_enabled,1), COALESCE(story_enabled,1),
 		        COALESCE(first_name,''), COALESCE(streak_celebrated,0)
 		 FROM user_prefs WHERE chat_id = ?`, chatID,
 	).Scan(&level, &paused, &interval, &ttsEnabled, &tipsEnabled,
 		&quizEnabled, &idiomEnabled, &reviewEnabled, &digestEnabled,
 		&dailyReviewEnabled, &quizIntervalHours,
+		&collocationEnabled, &storyEnabled,
 		&firstName, &streakCelebrated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -169,6 +175,8 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 	prefs.QuizEnabled = quizEnabled != 0
 	prefs.IdiomEnabled = idiomEnabled != 0
 	prefs.ReviewEnabled = reviewEnabled != 0
+	prefs.CollocationEnabled = collocationEnabled != 0
+	prefs.StoryEnabled = storyEnabled != 0
 	prefs.DigestEnabled = digestEnabled != 0
 	prefs.DailyReviewEnabled = dailyReviewEnabled != 0
 	if qh, ok := normalizeQuizIntervalHours(quizIntervalHours); ok {
@@ -369,6 +377,54 @@ func (s *Store) SetIdiomEnabled(chatID int64, enabled bool) error {
 	_, err := s.db.Exec(`
 		INSERT INTO user_prefs (chat_id, idiom_enabled) VALUES (?, ?)
 		ON CONFLICT(chat_id) DO UPDATE SET idiom_enabled = excluded.idiom_enabled, updated_at = CURRENT_TIMESTAMP`,
+		chatID, v,
+	)
+	return err
+}
+
+// GetCollocationEnabled reports whether the daily collocation is enabled for the user.
+func (s *Store) GetCollocationEnabled(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load collocation_enabled for chat %d: %v (using default=true)", chatID, err)
+		return true
+	}
+	return prefs.CollocationEnabled
+}
+
+// SetCollocationEnabled upserts the user's daily-collocation flag.
+func (s *Store) SetCollocationEnabled(chatID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, collocation_enabled) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET collocation_enabled = excluded.collocation_enabled, updated_at = CURRENT_TIMESTAMP`,
+		chatID, v,
+	)
+	return err
+}
+
+// GetStoryEnabled reports whether the daily mini story is enabled for the user.
+func (s *Store) GetStoryEnabled(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load story_enabled for chat %d: %v (using default=true)", chatID, err)
+		return true
+	}
+	return prefs.StoryEnabled
+}
+
+// SetStoryEnabled upserts the user's daily-mini-story flag.
+func (s *Store) SetStoryEnabled(chatID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, story_enabled) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET story_enabled = excluded.story_enabled, updated_at = CURRENT_TIMESTAMP`,
 		chatID, v,
 	)
 	return err
