@@ -234,6 +234,12 @@ var Changelogs = []ChangelogEntry{
 			"• 📖 <b>Mini stories!</b> A short reading-practice story at your level with key vocabulary and a comprehension question — one arrives daily, or get one anytime with /story\n" +
 			"• Both can be turned on/off in /settings",
 	},
+	{
+		Version: "1.23.1",
+		Silent:  true,
+		Text: "• /metrics pool depth now includes collocations and mini stories (per level) and tips\n" +
+			"• Fixes admin pool-depth view omitting the v1.23.0 content kinds",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -920,13 +926,16 @@ func handleMetrics(store *Store, chain *ProviderChain, notifier Notifier, chatID
 
 	b.WriteString("📦 <b>Pool depth:</b>\n")
 	levels, _ := store.ActiveLevels()
-	for _, kind := range []string{kindDrill, kindWord, kindIdiom} {
+	for _, kind := range []string{kindDrill, kindWord, kindIdiom, kindCollocation, kindStory} {
 		for _, level := range levels {
 			count, _ := store.PoolCount(kind, level)
 			target := poolTargetFor(level)
 			b.WriteString(fmt.Sprintf("  %s/%s: <b>%d</b>/%d\n", kind, level, count, target))
 		}
 	}
+	// Tips are level-independent — stocked only at the default level.
+	tipCount, _ := store.PoolCount(kindTip, defaultLevel)
+	b.WriteString(fmt.Sprintf("  %s: <b>%d</b>/%d\n", kindTip, tipCount, poolTargetFor(defaultLevel)))
 	b.WriteString("\n")
 
 	totalAnswered, totalCorrect, _ := store.TotalQuizStats()
