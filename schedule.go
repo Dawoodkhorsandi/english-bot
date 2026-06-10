@@ -466,7 +466,7 @@ func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, not
 			log.Printf("⚠️  [IDIOM] No idiom available for chat %d: %v", chatID, err)
 			continue
 		}
-		if err := sendIdiomCardWithTTS(ctx, store, notifier, chatID, text); err != nil {
+		if err := sendCardWithTTS(ctx, store, notifier, chatID, text); err != nil {
 			log.Printf("❌ [IDIOM] Send to chat %d failed: %v", chatID, err)
 			continue
 		}
@@ -563,6 +563,178 @@ func sendDailyTip(ctx context.Context, chain *ProviderChain, store *Store, notif
 		sent++
 	}
 	log.Printf("✅ [TIP] Daily tip delivered to %d/%d subscriber(s).", sent, len(chats))
+}
+
+// ---------------------------------------------------------------------------
+// Collocation of the day scheduler
+// ---------------------------------------------------------------------------
+
+// runCollocationScheduler fires once per local day at collocationTime and sends
+// one collocation card to each non-paused subscriber who has collocations
+// enabled. Set COLLOCATION_TIME=off to disable.
+func runCollocationScheduler(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
+	if strings.EqualFold(strings.TrimSpace(collocationTime), "off") {
+		log.Println("🔗 [COLLOCATION] Collocation-of-the-day scheduler disabled (COLLOCATION_TIME=off).")
+		return
+	}
+	hh, mm := parseHourMinute(collocationTime)
+	log.Printf("🔗 [COLLOCATION] Collocation-of-the-day scheduler started (fires daily at %02d:%02d local).", hh, mm)
+	for {
+		next := nextDailyTime(time.Now(), hh, mm)
+		wait := time.Until(next)
+		log.Printf("🔗 [COLLOCATION] Next collocation at %s (in %s).", next.Format("2006-01-02 15:04 MST"), wait.Truncate(time.Second))
+
+		select {
+		case <-ctx.Done():
+			log.Println("🔗 [COLLOCATION] Collocation scheduler stopped.")
+			return
+		case <-time.After(wait):
+		}
+
+		sendCollocationOfDay(ctx, chain, store, notifier, time.Now())
+	}
+}
+
+// sendCollocationOfDay sends each eligible subscriber one pooled collocation,
+// idempotent per (chat, local date), quiet-hour aware. Pool-only (never
+// generates inline) so the daily fan-out never hammers the AI.
+func sendCollocationOfDay(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, now time.Time) {
+	if isQuietHours(now) {
+		log.Printf("🌙 [COLLOCATION] %s is within quiet hours (%s–%s); skipping collocation sweep.", now.In(appLocation).Format("15:04"), quietStart, quietEnd)
+		return
+	}
+
+	collocationDate := now.In(appLocation).Format("2006-01-02")
+	chats, err := store.Subscribers()
+	if err != nil {
+		log.Printf("❌ [COLLOCATION] Could not read subscribers: %v", err)
+		return
+	}
+	log.Printf("🔗 [COLLOCATION] Sending collocation of the day %s to %d subscriber(s).", collocationDate, len(chats))
+
+	sent := 0
+	for _, chatID := range chats {
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [COLLOCATION] Could not load prefs for chat %d: %v", chatID, err)
+			continue
+		}
+		if prefs.Paused || !prefs.CollocationEnabled {
+			continue
+		}
+		if !globalHourlyLimiter.claimSlot(chatID, now, prefs.Interval) {
+			log.Printf("⏱️ [COLLOCATION] Rate-limited: skipping collocation for chat %d.", chatID)
+			continue
+		}
+		delivered, err := store.CollocationDelivered(chatID, collocationDate)
+		if err != nil {
+			log.Printf("⚠️  [COLLOCATION] Delivery check failed for chat %d: %v", chatID, err)
+			continue
+		}
+		if delivered {
+			continue
+		}
+		text, _, err := serveContent(ctx, chain, store, chatID, kindCollocation, prefs.Level, false)
+		if err != nil {
+			log.Printf("⚠️  [COLLOCATION] No collocation available for chat %d: %v", chatID, err)
+			continue
+		}
+		if err := sendCardWithTTS(ctx, store, notifier, chatID, text); err != nil {
+			log.Printf("❌ [COLLOCATION] Send to chat %d failed: %v", chatID, err)
+			continue
+		}
+		if err := store.MarkCollocationDelivered(chatID, collocationDate); err != nil {
+			log.Printf("⚠️  [COLLOCATION] Mark delivered failed for chat %d: %v", chatID, err)
+		}
+		sent++
+	}
+	log.Printf("✅ [COLLOCATION] Collocation of the day delivered to %d/%d subscriber(s).", sent, len(chats))
+}
+
+// ---------------------------------------------------------------------------
+// Daily mini story scheduler
+// ---------------------------------------------------------------------------
+
+// runStoryScheduler fires once per local day at storyTime and sends one mini
+// story to each non-paused subscriber who has stories enabled. Set
+// STORY_TIME=off to disable.
+func runStoryScheduler(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
+	if strings.EqualFold(strings.TrimSpace(storyTime), "off") {
+		log.Println("📖 [STORY] Daily mini story scheduler disabled (STORY_TIME=off).")
+		return
+	}
+	hh, mm := parseHourMinute(storyTime)
+	log.Printf("📖 [STORY] Daily mini story scheduler started (fires daily at %02d:%02d local).", hh, mm)
+	for {
+		next := nextDailyTime(time.Now(), hh, mm)
+		wait := time.Until(next)
+		log.Printf("📖 [STORY] Next story at %s (in %s).", next.Format("2006-01-02 15:04 MST"), wait.Truncate(time.Second))
+
+		select {
+		case <-ctx.Done():
+			log.Println("📖 [STORY] Story scheduler stopped.")
+			return
+		case <-time.After(wait):
+		}
+
+		sendMiniStory(ctx, chain, store, notifier, time.Now())
+	}
+}
+
+// sendMiniStory sends each eligible subscriber one pooled mini story at their
+// level, idempotent per (chat, local date), quiet-hour aware. Pool-only (never
+// generates inline) so the daily fan-out never hammers the AI.
+func sendMiniStory(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, now time.Time) {
+	if isQuietHours(now) {
+		log.Printf("🌙 [STORY] %s is within quiet hours (%s–%s); skipping story sweep.", now.In(appLocation).Format("15:04"), quietStart, quietEnd)
+		return
+	}
+
+	storyDate := now.In(appLocation).Format("2006-01-02")
+	chats, err := store.Subscribers()
+	if err != nil {
+		log.Printf("❌ [STORY] Could not read subscribers: %v", err)
+		return
+	}
+	log.Printf("📖 [STORY] Sending mini story %s to %d subscriber(s).", storyDate, len(chats))
+
+	sent := 0
+	for _, chatID := range chats {
+		prefs, err := store.GetPrefs(chatID)
+		if err != nil {
+			log.Printf("⚠️  [STORY] Could not load prefs for chat %d: %v", chatID, err)
+			continue
+		}
+		if prefs.Paused || !prefs.StoryEnabled {
+			continue
+		}
+		if !globalHourlyLimiter.claimSlot(chatID, now, prefs.Interval) {
+			log.Printf("⏱️ [STORY] Rate-limited: skipping story for chat %d.", chatID)
+			continue
+		}
+		delivered, err := store.StoryDelivered(chatID, storyDate)
+		if err != nil {
+			log.Printf("⚠️  [STORY] Delivery check failed for chat %d: %v", chatID, err)
+			continue
+		}
+		if delivered {
+			continue
+		}
+		text, _, err := serveContent(ctx, chain, store, chatID, kindStory, prefs.Level, false)
+		if err != nil {
+			log.Printf("⚠️  [STORY] No story available for chat %d: %v", chatID, err)
+			continue
+		}
+		if err := notifier.Send(chatID, text); err != nil {
+			log.Printf("❌ [STORY] Send to chat %d failed: %v", chatID, err)
+			continue
+		}
+		if err := store.MarkStoryDelivered(chatID, storyDate); err != nil {
+			log.Printf("⚠️  [STORY] Mark delivered failed for chat %d: %v", chatID, err)
+		}
+		sent++
+	}
+	log.Printf("✅ [STORY] Mini story delivered to %d/%d subscriber(s).", sent, len(chats))
 }
 
 // ---------------------------------------------------------------------------

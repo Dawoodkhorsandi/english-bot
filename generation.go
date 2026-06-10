@@ -8,10 +8,12 @@ import (
 )
 
 const (
-	kindDrill = "drill"
-	kindWord  = "word"
-	kindIdiom = "idiom"
-	kindTip   = "tip"
+	kindDrill       = "drill"
+	kindWord        = "word"
+	kindIdiom       = "idiom"
+	kindTip         = "tip"
+	kindCollocation = "collocation"
+	kindStory       = "story"
 )
 
 // drillPageGroups defines how a drill's numbered forms are split across paged
@@ -184,6 +186,62 @@ Rules:
 - Keep example sentences short (max 14 words) and natural.
 - Output the card only — no preamble, no explanation.`
 
+// collocationPromptBase is the collocation-card prompt without the per-user
+// exclusion clause.
+const collocationPromptBase = `Choose ONE common, useful English collocation (a natural word partnership such as "make a decision", "heavy rain", "fast asleep") that a learner needs for natural-sounding English, and produce a Collocation Card.
+
+Use this EXACT HTML format (for Telegram). Replace each {…} placeholder with real content. Keep it concise and easy to read.
+
+🔗 <b>Collocation of the Day: {COLLOCATION}</b>
+————————————————————
+
+💬 <b>Meaning</b>
+{one clear, simple sentence explaining what the collocation means}
+
+📝 <b>Examples</b>
+• {natural everyday sentence using the collocation}
+• {a second example in a different context}
+
+⚠️ <b>Watch out</b>
+❌ {the wrong word combination learners often say} → ✅ {the correct collocation}
+
+💡 <i>Say both examples out loud — word partnerships stick through repetition!</i>
+
+Rules:
+- Replace {COLLOCATION} with the collocation in its normal lowercase form (e.g. make a decision).
+- Pick a real, widely-used collocation of two or three words — not an idiom and not a single word.
+- Bold the collocation using <b>…</b> inside each example sentence.
+- Use only <b> and <i> HTML tags — no other tags or Markdown.
+- Keep example sentences short (max 14 words) and natural.
+- Output the card only — no preamble, no explanation.`
+
+// storyPromptBase is the mini-story prompt without the per-user exclusion clause.
+const storyPromptBase = `Write ONE original mini story for an English learner, designed for reading practice, and produce a Story Card.
+
+Use this EXACT HTML format (for Telegram). Replace each {…} placeholder with real content.
+
+📖 <b>Mini Story: {TITLE}</b>
+————————————————————
+
+{the story — short paragraphs of everyday, natural English, separated by blank lines}
+
+🔑 <b>Key Vocabulary</b>
+• <b>{word or phrase from the story}</b> — {short, simple meaning}
+• <b>{word or phrase from the story}</b> — {short, simple meaning}
+• <b>{word or phrase from the story}</b> — {short, simple meaning}
+
+🤔 <b>Think about it</b>
+{one short comprehension question about the story}
+
+💡 <i>Read it aloud once — then try retelling it in your own words!</i>
+
+Rules:
+- Replace {TITLE} with a short, original title of two to five words.
+- Tell a small, self-contained everyday story (a situation, a small problem, a resolution).
+- Pick 3 key vocabulary items that actually appear in the story and bold them with <b>…</b> inside the story text too.
+- Use only <b> and <i> HTML tags — no other tags or Markdown.
+- Output the card only — no preamble, no explanation.`
+
 // tipPromptBase is the grammar-tip prompt without the exclusion clause.
 const tipPromptBase = `Produce exactly ONE bite-sized grammar tip for English learners in Telegram HTML.
 
@@ -286,6 +344,47 @@ func tipLevelInstruction(level string) string {
 	}
 }
 
+// buildCollocationPrompt builds the collocation-card prompt for the given level,
+// appending the per-user exclusion clause when the learner has already seen some.
+func buildCollocationPrompt(level string, exclude []string) string {
+	prompt := collocationPromptBase + "\n\n" + levelInstruction(level)
+	if len(exclude) == 0 {
+		return prompt
+	}
+	return prompt + fmt.Sprintf(
+		"\n\nIMPORTANT: Do NOT use any of these collocations (already sent): %s.\nChoose a completely different collocation not in that list.",
+		strings.Join(exclude, ", "),
+	)
+}
+
+// buildStoryPrompt builds the mini-story prompt for the given level, appending
+// the per-user exclusion clause (story titles) when the learner has seen some.
+func buildStoryPrompt(level string, exclude []string) string {
+	prompt := storyPromptBase + "\n\n" + storyLevelInstruction(level)
+	if len(exclude) == 0 {
+		return prompt
+	}
+	return prompt + fmt.Sprintf(
+		"\n\nIMPORTANT: Do NOT reuse any of these story titles or their plots: %s.\nWrite a completely different story with a different title.",
+		strings.Join(exclude, ", "),
+	)
+}
+
+// storyLevelInstruction returns a difficulty directive for mini stories so the
+// story's length, vocabulary and sentence structure match the user's level.
+func storyLevelInstruction(level string) string {
+	switch level {
+	case levelBeginner:
+		return "DIFFICULTY: Target CEFR A1–A2 (beginner) learners. Keep the story to about 60–80 words in 2 short paragraphs. Use only simple present and simple past, short sentences (max 8 words), and very common vocabulary."
+	case levelUpperInt:
+		return "DIFFICULTY: Target CEFR B2 (upper-intermediate) learners. Keep the story to about 140–180 words in 3 paragraphs. Use varied tenses, natural conversational phrasing and some idiomatic expressions."
+	case levelAdvanced:
+		return "DIFFICULTY: Target CEFR C1–C2 (advanced) learners. Keep the story to about 180–220 words in 3–4 paragraphs. Use rich, nuanced vocabulary, subordinate clauses and varied registers."
+	default:
+		return "DIFFICULTY: Target CEFR B1 (intermediate) learners. Keep the story to about 100–130 words in 2–3 paragraphs. Use clear everyday vocabulary and straightforward grammar with simple and continuous tenses."
+	}
+}
+
 // buildWordLookupPrompt builds a vocabulary-card prompt for a SPECIFIC term the
 // user supplied (Change M). The model resolves the input to its English headword
 // — translating from another language if needed — and builds the card around it.
@@ -332,6 +431,10 @@ func generateContent(ctx context.Context, chain *ProviderChain, kind, level stri
 		prompt = buildIdiomPrompt(level, exclude)
 	case kindTip:
 		prompt = buildTipPrompt(level, exclude)
+	case kindCollocation:
+		prompt = buildCollocationPrompt(level, exclude)
+	case kindStory:
+		prompt = buildStoryPrompt(level, exclude)
 	default:
 		prompt = buildDrillPrompt(level, exclude)
 	}
@@ -350,6 +453,11 @@ func generateContent(ctx context.Context, chain *ProviderChain, kind, level stri
 		meaning = parseMeaning(text)
 	case kindTip:
 		term = parseTipTopic(text)
+	case kindCollocation:
+		term = parseCollocation(text)
+		meaning = parseMeaning(text)
+	case kindStory:
+		term = parseStoryTitle(text)
 	default:
 		term = parseVerb(text)
 	}
@@ -383,11 +491,28 @@ func parseWord(card string) string {
 }
 
 // parseIdiom extracts the full idiom phrase from the "Idiom of the Day:" line.
-// Unlike parseLabeledTerm it keeps the whole multi-word phrase (idioms aren't
-// single tokens), stripping any trailing HTML tag and surrounding punctuation.
 func parseIdiom(card string) string {
-	for _, line := range strings.Split(card, "\n") {
-		if !strings.Contains(strings.ToLower(line), "idiom of the day") {
+	return parseLabeledPhrase(card, "idiom of the day")
+}
+
+// parseCollocation extracts the full collocation phrase from the
+// "Collocation of the Day:" line of a collocation card.
+func parseCollocation(card string) string {
+	return parseLabeledPhrase(card, "collocation of the day")
+}
+
+// parseStoryTitle extracts the story title from the "Mini Story:" line.
+func parseStoryTitle(card string) string {
+	return parseLabeledPhrase(card, "mini story")
+}
+
+// parseLabeledPhrase scans text for a line containing label (case-insensitive)
+// and returns everything after the ":" separator. Unlike parseLabeledTerm it
+// keeps the whole multi-word phrase (idioms, collocations and titles aren't
+// single tokens), stripping any trailing HTML tag and surrounding punctuation.
+func parseLabeledPhrase(text, label string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.Contains(strings.ToLower(line), label) {
 			continue
 		}
 		idx := strings.Index(line, ":")

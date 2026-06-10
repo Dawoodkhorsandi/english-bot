@@ -38,7 +38,7 @@ Go application (multi-file, single package main)
 └── vocab.go          — /mywords (browse learned vocabulary) and /bookmark (save favourite words) features
 ```
 
-The application runs ten concurrent goroutines (plus an optional web server goroutine when `WEB_APP_URL` is set):
+The application runs thirteen concurrent goroutines (plus an optional web server goroutine when `WEB_APP_URL` is set):
 1. **Pool filler** (`poolFiller`) — tops up the pre-generated content pool in the background
 2. **Broadcast scheduler** (`runBroadcastScheduler`) — fires every half hour, per-user interval-aware delivery sweep
 3. **Daily review scheduler** (`runDailyReviewScheduler`) — sends a bedtime word recap at local midnight
@@ -47,8 +47,11 @@ The application runs ten concurrent goroutines (plus an optional web server goro
 6. **Weekly digest scheduler** (`runWeeklyDigestScheduler`) — sends a weekly recap (default Sunday 20:00)
 7. **Idiom scheduler** (`runIdiomScheduler`) — sends one daily idiom (default 09:00 local)
 8. **Daily tip scheduler** (`runDailyTipScheduler`) — sends one daily grammar tip (default 10:00 local)
-9. **Telegram poller** (`pollTelegramUpdates`) — long-polls Telegram for incoming messages and callback queries
-10. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
+9. **Collocation scheduler** (`runCollocationScheduler`) — sends one daily collocation card (default 13:00 local) (v1.23.0)
+10. **Mini story scheduler** (`runStoryScheduler`) — sends one daily reading-practice story (default 17:00 local) (v1.23.0)
+11. **Nightly backup scheduler** (`runDBBackupScheduler`) — sends a SQLite snapshot to the maintainer (default 02:00 local)
+12. **Telegram poller** (`pollTelegramUpdates`) — long-polls Telegram for incoming messages and callback queries
+13. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
 
 ---
 
@@ -77,6 +80,8 @@ All configuration is read from environment variables at startup. There are no co
 | `DIGEST_DAY` | `Sunday` | Weekday the weekly digest is sent |
 | `DIGEST_TIME` | `20:00` | Time of day the weekly digest is sent |
 | `IDIOM_TIME` | `09:00` | Local time the daily idiom of the day is sent; `off` disables it |
+| `COLLOCATION_TIME` | `13:00` | Local time the daily collocation of the day is sent; `off` disables it (v1.23.0) |
+| `STORY_TIME` | `17:00` | Local time the daily mini story is sent; `off` disables it (v1.23.0) |
 | `BACKUP_TIME` | `02:00` | Local time the nightly SQLite backup is sent to maintainer; `off` disables it |
 | `WEB_APP_URL` | *(unset)* | Public HTTPS base URL where the bot's web server is reachable (e.g. `https://bot.example.com`). When set, `/stats` shows a `📊 Full Dashboard` button that opens the Telegram Mini App. Leave unset to disable the web server entirely. (v1.18.0) |
 | `WEB_APP_PORT` | `8090` | Local TCP port for the embedded Mini App HTTP server. Only used when `WEB_APP_URL` is set. (v1.18.0) |
@@ -189,6 +194,28 @@ bumps `last_sent_at` via `ON CONFLICT … DO UPDATE` (v1.13.0). Index
 Primary key is `(chat_id, word)` — each user sees each tip topic at most once.
 Index: `idx_sent_tips_chat` on `chat_id`.
 
+#### `sent_collocations` (v1.23.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `word` | `TEXT` | Lowercased collocation phrase already sent (column named `word` so the generic `PooledUnseen` query works across kinds) |
+| `sent_at` | `DATETIME` | When the collocation was first sent |
+| `last_sent_at` | `DATETIME` | When the collocation was most recently served; drives least-recently-served rotation |
+
+Primary key `(chat_id, word)`. Index `idx_sent_collocations_chat` on `chat_id`.
+The per-user exclusion list for collocations.
+
+#### `sent_stories` (v1.23.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `word` | `TEXT` | Lowercased mini-story title already sent (column named `word` so the generic `PooledUnseen` query works across kinds) |
+| `sent_at` | `DATETIME` | When the story was first sent |
+| `last_sent_at` | `DATETIME` | When the story was most recently served; drives least-recently-served rotation |
+
+Primary key `(chat_id, word)`. Index `idx_sent_stories_chat` on `chat_id`.
+The per-user exclusion list for mini stories.
+
 #### `changelog_delivery`
 | Column | Type | Description |
 |---|---|---|
@@ -251,6 +278,24 @@ per user per day (Change Q).
 
 Primary key is `(chat_id, tip_date)` — one scheduled tip per user per day.
 
+#### `collocation_delivery` (v1.23.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `collocation_date` | `TEXT` | Local `YYYY-MM-DD` the collocation of the day was sent for |
+| `sent_at` | `DATETIME` | When the collocation was delivered |
+
+Primary key is `(chat_id, collocation_date)` — one scheduled collocation per user per day.
+
+#### `story_delivery` (v1.23.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `story_date` | `TEXT` | Local `YYYY-MM-DD` the mini story was sent for |
+| `sent_at` | `DATETIME` | When the story was delivered |
+
+Primary key is `(chat_id, story_date)` — one scheduled mini story per user per day.
+
 #### `user_prefs` (v1.4.0)
 | Column | Type | Description |
 |---|---|---|
@@ -262,6 +307,8 @@ Primary key is `(chat_id, tip_date)` — one scheduled tip per user per day.
 | `tips_enabled` | `INTEGER` | `1` = daily scheduled grammar tips enabled, default `1` (v1.15.0) |
 | `quiz_enabled` | `INTEGER` | `1` = scheduled quizzes enabled, default `1` (v1.17.0) |
 | `idiom_enabled` | `INTEGER` | `1` = daily idiom of the day enabled, default `1` (v1.17.0) |
+| `collocation_enabled` | `INTEGER` | `1` = daily collocation of the day enabled, default `1` (v1.23.0) |
+| `story_enabled` | `INTEGER` | `1` = daily mini story enabled, default `1` (v1.23.0) |
 | `review_enabled` | `INTEGER` | `1` = SRS word memory-check reviews enabled, default `1` (v1.17.0) |
 | `digest_enabled` | `INTEGER` | `1` = weekly digest enabled, default `1` (v1.17.0) |
 | `daily_review_enabled` | `INTEGER` | `1` = midnight vocabulary recap enabled, default `1` (v1.17.0) |
@@ -485,6 +532,8 @@ All messages use `parse_mode: HTML`.
 | `/drill` | Fires `sendChatAction(typing)`, sends a "Generating…" ack, calls `serveContent(kind=drill)`, delivers the drill. After delivery, asynchronously checks streak milestones. (v1.18.0: typing indicator + streak check) |
 | `/word` | Fires `sendChatAction(typing)`, sends a "Finding…" ack, calls `serveContent(kind=word)`, delivers word card + TTS. Checks streak milestones afterward. (v1.18.0: typing indicator + streak check) |
 | `/idiom` | Fires `sendChatAction(typing)`, sends a "Finding…" ack, calls `serveContent(kind=idiom)`, delivers idiom card + TTS. (v1.12.0; v1.18.0: typing indicator) |
+| `/collocation` | Fires `sendChatAction(typing)`, sends a "Finding…" ack, calls `serveContent(kind=collocation)`, delivers collocation card + TTS. (v1.23.0) |
+| `/story` | Fires `sendChatAction(typing)`, sends a "Writing…" ack, calls `serveContent(kind=story)`, delivers a level-matched mini story (text only, no TTS). (v1.23.0) |
 | `/tip [on\|off]` | Fires `sendChatAction(typing)`. No arg: on-demand grammar tip. `on`/`off`: toggles `user_prefs.tips_enabled`. (v1.15.0; v1.18.0: typing indicator) |
 | `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query`. (v1.4.0) |
 | `/stats` | Sends a progress summary with Unicode progress bars for streak and quiz accuracy; personalised greeting from `user_prefs.first_name`. When `WEB_APP_URL` is configured, includes a `📊 Full Dashboard` inline button that opens the Telegram Mini App. (`UserStats` / `formatStats(st, firstName)`) (v1.5.0; v1.18.0: bars, greeting, mini-app button) |
@@ -523,7 +572,7 @@ receives one.
 given user-slot wins and sends; all others skip silently.
 
 **Priority rules:**
-- **Broadcasts, quiz, idiom, tip, daily review, weekly digest** — all subject to
+- **Broadcasts, quiz, idiom, tip, collocation, mini story, daily review, weekly digest** — all subject to
   the rate limiter; they compete for the user's current interval slot.
 - **SRS word reviews** — **exempt** from the rate limiter. They send independently
   (max 1 card per sweep, controlled by `REVIEW_BATCH_MAX`) so they never block or
@@ -750,6 +799,52 @@ Ordered so page 1 leads with the forms learners use most (v1.12.0):
 
 ---
 
+### AI Collocation Generation — `generateContent(kind=collocation)` (v1.23.0)
+
+**Model / retry / difficulty:** same as the other kinds (provider fallback chain, level-targeted via `levelInstruction`).
+
+**Output format:** Telegram HTML (`<b>`/`<i>` only). The card structure is:
+
+```
+🔗 Collocation of the Day: {COLLOCATION}
+————————————————————
+💬 Meaning        — one simple sentence
+📝 Examples       — two example sentences (collocation bolded)
+⚠️ Watch out      — ❌ common wrong combination → ✅ correct collocation
+💡 (say-it-aloud nudge)
+```
+
+**Term parsing:** `parseCollocation` keeps the **whole phrase** after `Collocation of the Day:` via the shared `parseLabeledPhrase` helper (which `parseIdiom` also uses).
+
+**Exclusion clause:** appends already-pooled collocations with an instruction to pick a different one.
+
+**Delivery:** on demand via `/collocation`, and once daily via the collocation scheduler (`COLLOCATION_TIME`, default 13:00). Pooled per level; sent history lives in `sent_collocations`. Collocation cards get a best-effort pronunciation voice note like idioms (`extractTTSTerm` falls back to `parseCollocation`).
+
+---
+
+### AI Mini Story Generation — `generateContent(kind=story)` (v1.23.0)
+
+**Model / retry / difficulty:** provider fallback chain with a dedicated `storyLevelInstruction` that scales story length and complexity per CEFR band (≈60–80 words for beginner up to ≈180–220 words for advanced).
+
+**Output format:** Telegram HTML (`<b>`/`<i>` only). The card structure is:
+
+```
+📖 Mini Story: {TITLE}
+————————————————————
+{2–4 short paragraphs; 3 key vocabulary items bolded in the text}
+🔑 Key Vocabulary — 3 bolded terms from the story with short meanings
+🤔 Think about it — one comprehension question
+💡 (read-aloud / retell nudge)
+```
+
+**Term parsing:** `parseStoryTitle` keeps the whole title after `Mini Story:` via `parseLabeledPhrase`; the title is the pool/history key.
+
+**Exclusion clause:** appends already-sent story titles with an instruction to write a different story.
+
+**Delivery:** on demand via `/story`, and once daily via the story scheduler (`STORY_TIME`, default 17:00). Pooled per level; sent history lives in `sent_stories`. Stories are sent as plain text (no TTS — they exceed the TTS length cap by design).
+
+---
+
 ### Content Delivery — `serveContent`
 
 `serveContent` is the single read-path for both on-demand commands and broadcasts.
@@ -852,9 +947,11 @@ later: user taps ◀️/▶️  →  callback "drill:<page>:<verb>"
 11. Start weekly digest scheduler goroutine (fires weekly, default Sunday 20:00)
 12. Start idiom-of-the-day scheduler goroutine (fires daily at IDIOM_TIME, default 09:00)
 13. Start nightly backup scheduler goroutine (fires daily at BACKUP_TIME, default 02:00)
-14. Start Telegram long-poll goroutine
-15. Block on OS signal (SIGINT / SIGTERM)
-16. On signal: cancel context → goroutines exit, deferred store.Close() runs
+14. Start collocation-of-the-day scheduler goroutine (fires daily at COLLOCATION_TIME, default 13:00)
+15. Start mini story scheduler goroutine (fires daily at STORY_TIME, default 17:00)
+16. Start Telegram long-poll goroutine
+17. Block on OS signal (SIGINT / SIGTERM)
+18. On signal: cancel context → goroutines exit, deferred store.Close() runs
 ```
 
 ---

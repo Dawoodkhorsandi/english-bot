@@ -43,9 +43,9 @@ func sendWordCardWithTTS(ctx context.Context, store *Store, notifier Notifier, c
 	return nil
 }
 
-// sendIdiomCardWithTTS sends an idiom card and then (best-effort) a pronunciation
-// voice note as a reply to that card.
-func sendIdiomCardWithTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string) error {
+// sendCardWithTTS sends a phrase card (idiom or collocation) and then
+// (best-effort) a pronunciation voice note as a reply to that card.
+func sendCardWithTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string) error {
 	msgID, err := notifier.SendWithMessageID(chatID, card)
 	if err != nil {
 		return err
@@ -55,12 +55,15 @@ func sendIdiomCardWithTTS(ctx context.Context, store *Store, notifier Notifier, 
 }
 
 // extractTTSTerm tries to extract a speakable term from a card. It checks for
-// a vocabulary word first, then falls back to an idiom phrase.
+// a vocabulary word first, then falls back to an idiom or collocation phrase.
 func extractTTSTerm(card string) string {
 	if w := strings.TrimSpace(parseWord(card)); w != "" {
 		return w
 	}
-	return strings.TrimSpace(parseIdiom(card))
+	if p := strings.TrimSpace(parseIdiom(card)); p != "" {
+		return p
+	}
+	return strings.TrimSpace(parseCollocation(card))
 }
 
 // maybeSendTTS tries Gemini TTS first, then falls back to espeak-ng.
