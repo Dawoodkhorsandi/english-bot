@@ -65,7 +65,10 @@ jobs:
             EOF
 
             docker compose pull
-            docker compose up -d
+            # --force-recreate so changes to .env (env_file) are picked up even
+            # when the image tag is unchanged; without it, compose reports the
+            # container "up-to-date" and keeps running with the old environment.
+            docker compose up -d --force-recreate
 
             docker image prune -f
 
