@@ -278,6 +278,12 @@ var Changelogs = []ChangelogEntry{
 		Text: "• /poolusage now shows \"pool <depth>/<target>\" per line so a raised target is visible immediately\n" +
 			"• Clarifies that the percentage is consumption of items generated so far, not of the configured target",
 	},
+	{
+		Version: "1.23.8",
+		Silent:  true,
+		Text: "• Mini App: clearer startup logging when WEB_APP_URL is unset (web server stays off → reverse proxy 502) or non-HTTPS\n" +
+			"• Documented WEB_APP_URL / WEB_APP_PORT in .env.example so the dashboard is discoverable",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -365,8 +371,16 @@ func main() {
 	notifier := &telegramNotifier{}
 
 	// Start the optional Mini App web server (requires WEB_APP_URL to be set).
+	// When WEB_APP_URL is empty the server never starts, so nothing listens on
+	// WEB_APP_PORT — a reverse proxy in front of it will return 502, and /stats
+	// shows no Dashboard button. Log both states explicitly so that is obvious.
 	if webAppURL != "" {
+		if !strings.HasPrefix(webAppURL, "https://") {
+			log.Printf("⚠️  [WEBAPP] WEB_APP_URL=%q is not https:// — Telegram rejects non-HTTPS Mini App buttons, so /stats will fail to send.", webAppURL)
+		}
 		startWebServer(store)
+	} else {
+		log.Printf("ℹ️  [WEBAPP] WEB_APP_URL not set — Mini App dashboard disabled; /stats shows text only and port %s is not served.", webAppPort)
 	}
 
 	// Register bot commands with Telegram so users see a command menu.
