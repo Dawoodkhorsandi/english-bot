@@ -1559,7 +1559,7 @@ func TestServeContentFromPool(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddToPool(kindDrill, defaultLevel, "walk", "", "drill text for walk")
 
-	text, _, err := serveContent(context.Background(), emptyProviderChain(), store, 100, kindDrill, defaultLevel, false)
+	text, _, err := serveContent(context.Background(), emptyProviderChain(), store, nil, 100, kindDrill, defaultLevel, false)
 	if err != nil {
 		t.Fatalf("serveContent: %v", err)
 	}
@@ -1574,7 +1574,7 @@ func TestServeContentInlineGenerate(t *testing.T) {
 	store.AddSubscriber(100)
 	chain := mockProviderChain("📘 <b>Word of the Session: ephemeral</b>\n\n<b>Meaning:</b> short-lived")
 
-	text, _, err := serveContent(context.Background(), chain, store, 100, kindWord, defaultLevel, true)
+	text, _, err := serveContent(context.Background(), chain, store, nil, 100, kindWord, defaultLevel, true)
 	if err != nil {
 		t.Fatalf("serveContent: %v", err)
 	}

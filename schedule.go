@@ -209,7 +209,7 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 
 		sendPendingChangelogs(store, notifier, chatID)
 
-		text, term, err := serveContent(ctx, chain, store, chatID, kind, prefs.Level, false)
+		text, term, err := serveContent(ctx, chain, store, notifier, chatID, kind, prefs.Level, false)
 		if err != nil {
 			log.Printf("❌ [BROADCAST] %s for chat %d failed: %v", kind, chatID, err)
 			continue
@@ -461,7 +461,7 @@ func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, not
 		if delivered {
 			continue
 		}
-		text, _, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), false)
+		text, _, err := serveContent(ctx, chain, store, notifier, chatID, kindIdiom, store.GetLevel(chatID), false)
 		if err != nil {
 			log.Printf("⚠️  [IDIOM] No idiom available for chat %d: %v", chatID, err)
 			continue
@@ -548,7 +548,7 @@ func sendDailyTip(ctx context.Context, chain *ProviderChain, store *Store, notif
 		}
 
 		// Best effort: pool-first, no inline generation on scheduler path.
-		tipText, _, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, false)
+		tipText, _, err := serveContent(ctx, chain, store, notifier, chatID, kindTip, defaultLevel, false)
 		if err != nil {
 			log.Printf("⚠️  [TIP] Could not get tip for chat %d: %v", chatID, err)
 			continue
@@ -634,7 +634,7 @@ func sendCollocationOfDay(ctx context.Context, chain *ProviderChain, store *Stor
 		if delivered {
 			continue
 		}
-		text, _, err := serveContent(ctx, chain, store, chatID, kindCollocation, prefs.Level, false)
+		text, _, err := serveContent(ctx, chain, store, notifier, chatID, kindCollocation, prefs.Level, false)
 		if err != nil {
 			log.Printf("⚠️  [COLLOCATION] No collocation available for chat %d: %v", chatID, err)
 			continue
@@ -720,7 +720,7 @@ func sendMiniStory(ctx context.Context, chain *ProviderChain, store *Store, noti
 		if delivered {
 			continue
 		}
-		text, _, err := serveContent(ctx, chain, store, chatID, kindStory, prefs.Level, false)
+		text, _, err := serveContent(ctx, chain, store, notifier, chatID, kindStory, prefs.Level, false)
 		if err != nil {
 			log.Printf("⚠️  [STORY] No story available for chat %d: %v", chatID, err)
 			continue

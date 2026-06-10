@@ -253,6 +253,12 @@ var Changelogs = []ChangelogEntry{
 		Text: "• Memory-check cards now hide the meaning until you answer (recall first!)\n" +
 			"• Tapping ✅ Knew it reveals a short reminder; ❌ Forgot reveals the full word card to relearn it",
 	},
+	{
+		Version: "1.23.4",
+		Silent:  true,
+		Text: "• Maintainer is now alerted when a user has consumed the entire pool for a kind/level and starts seeing repeats\n" +
+			"• Deduped per chat+kind+level; re-alerts only after the pool is grown via /config",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -600,7 +606,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Generating your drill...</b>")
 
-		drill, _, err := serveContent(ctx, chain, store, chatID, kindDrill, store.GetLevel(chatID), true)
+		drill, _, err := serveContent(ctx, chain, store, notifier, chatID, kindDrill, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -616,7 +622,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding a fresh word for you...</b>")
 
-		card, term, err := serveContent(ctx, chain, store, chatID, kindWord, store.GetLevel(chatID), true)
+		card, term, err := serveContent(ctx, chain, store, notifier, chatID, kindWord, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Word generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -634,7 +640,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding an idiom for you...</b>")
 
-		card, _, err := serveContent(ctx, chain, store, chatID, kindIdiom, store.GetLevel(chatID), true)
+		card, _, err := serveContent(ctx, chain, store, notifier, chatID, kindIdiom, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Idiom generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -651,7 +657,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding a collocation for you...</b>")
 
-		card, _, err := serveContent(ctx, chain, store, chatID, kindCollocation, store.GetLevel(chatID), true)
+		card, _, err := serveContent(ctx, chain, store, notifier, chatID, kindCollocation, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Collocation generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -668,7 +674,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Writing a mini story for you...</b>")
 
-		card, _, err := serveContent(ctx, chain, store, chatID, kindStory, store.GetLevel(chatID), true)
+		card, _, err := serveContent(ctx, chain, store, notifier, chatID, kindStory, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Story generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -1723,7 +1729,7 @@ func handleTip(ctx context.Context, chain *ProviderChain, store *Store, notifier
 
 	log.Printf("💡 [TIP] /tip requested by ChatID %d.", chatID)
 	_ = notifier.Send(chatID, "🔄 <b>Fetching your grammar tip...</b>")
-	tip, _, err := serveContent(ctx, chain, store, chatID, kindTip, defaultLevel, true)
+	tip, _, err := serveContent(ctx, chain, store, notifier, chatID, kindTip, defaultLevel, true)
 	if err != nil {
 		log.Printf("❌ [TIP] On-demand tip failed for chat %d: %v", chatID, err)
 		_ = notifier.Send(chatID, "❌ Sorry, I couldn't fetch a tip right now. Please try again.")
@@ -3102,6 +3108,14 @@ func openStore(path string) (*Store, error) {
 		story_date TEXT    NOT NULL,
 		sent_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (chat_id, story_date)
+	);
+	CREATE TABLE IF NOT EXISTS pool_exhaustion_notice (
+		chat_id     INTEGER NOT NULL,
+		kind        TEXT    NOT NULL,
+		level       TEXT    NOT NULL,
+		pool_count  INTEGER NOT NULL DEFAULT 0,
+		notified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, kind, level)
 	);
 	CREATE TABLE IF NOT EXISTS user_prefs (
 		chat_id              INTEGER PRIMARY KEY,
