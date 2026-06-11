@@ -60,7 +60,12 @@ func startWebServer(store *Store) {
 	mux.HandleFunc("/api/quiz/answer", withUser(store, handleAPIQuizAnswer))
 	mux.HandleFunc("/api/practice", withUser(store, handleAPIPractice))
 	// Frontend: the SPA shell on the app routes, static files otherwise.
+	// Embedded files carry no modtime, so without an explicit Cache-Control
+	// webviews cache them heuristically and users keep running a stale SPA
+	// after a deploy. no-cache forces a revalidation on every open (the whole
+	// frontend is ~50 KB, so the cost is negligible).
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		switch r.URL.Path {
 		case "/", "/stats", "/app":
 			serveIndex(w)
