@@ -20,7 +20,8 @@ needs a bundler is out.
   §2 — the app must look right in any Telegram theme, light or dark.
 - Feel native: Telegram `BackButton` for drill-downs, `SettingsButton` for
   settings, haptics on every meaningful interaction (§6), native
-  `MainButton`/`SecondaryButton` where a screen has one primary action (`GAP`).
+  `MainButton`/`SecondaryButton` where a screen has one primary action
+  (✅ v1.26.0 in swipe sessions).
 - Optimistic UI **with rollback**: update the UI immediately, revert on a
   failed POST. The bookmark star (`wordRow()` in `app.js`) is the canonical
   example — it flips back on error. All mutations follow it: settings
@@ -96,7 +97,7 @@ factory in `app.js` where one exists.
 | Card | `.card`, `.card h2`, `.big`, `.sub` | Section header `h2` is 13px uppercase hint-colored |
 | Progress bar | `.bar-wrap` / `.bar-fill`; `bar(pct, colour)` | Width transition .4s; colour param should be a token |
 | Stat grid | `.grid` | 2-column |
-| Chart box | `.chart-box` | **`GAP`**: replace Chart.js bars with a CSS-grid activity heatmap |
+| Activity heatmap | `.heatmap` / `.heat-cell` (+`.on`, `.today`, `.future`); `heatmapHTML(set)` | 17 week columns × 7 day rows, pure CSS grid (✅ v1.26.0, Chart.js dropped) |
 | Chips | `.chips` / `.chip` / `.chip-on` | Filter + action duty; active = accent |
 | Search | `.search` | Debounce input 250ms |
 | List + row | `.list`, `.word`, `.word-main`, `.word-term`, `.word-meaning`, `.word-mastery`; `wordRow(w)` | Mastery icons: ✅ mastered · 📖 learning · 🆕 new |
@@ -124,10 +125,11 @@ Contract (`opts`): `load() → Promise<[{front, back, …}]>` ·
 Interaction constants: drag >6px distinguishes drag from tap-to-reveal ·
 commit at |dx| > 90px · 180ms advance to next card · stamps fade in over 80px.
 
-Answers re-queue once on POST failure (✅ v1.25.0). Target state (**`GAP`**):
-`MainButton`/`SecondaryButton` mirror the in-page answer buttons; session ends
-on a completion screen with per-session stats (X known / Y forgot) instead of
-only the 🎉 card.
+Answers re-queue once on POST failure (✅ v1.25.0). On Bot API 7.10+ clients
+the native `MainButton` ("Knew it") / `SecondaryButton` ("Forgot", left)
+replace the in-page answer buttons, and sessions end on a completion screen
+with a progress ring and known/forgot counts (✅ v1.26.0). Only one session is
+live at a time — `teardownSession` hides the native buttons on any view change.
 
 ## 5. Screens
 
@@ -137,10 +139,10 @@ deck study is a `BackButton` drill-down inside the Decks tab.
 
 | Screen | Data | Layout | Target additions (`GAP`) |
 |---|---|---|---|
-| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Quiz accuracy (if answered>0) → 30-day activity → Level | GitHub-style heatmap (~120 days) replacing Chart.js; share-streak action at milestones; skeleton first paint |
+| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Quiz accuracy (if answered>0) → 30-day activity → Level | ✅ heatmap (v1.26.0); `GAP`: share-streak action at milestones |
 | **Words** `#view-vocab` | `GET /api/vocab?offset&limit&bookmarks&q` | Search → chips (All/⭐Bookmarks) → list → Load more | Skeleton rows; result count while searching |
-| **Decks** `#view-decks` | `GET /api/decks`, drill-down `GET /api/decks/study`, `POST /api/decks/swipe` | Deck cards (name, %, bar, due/mastered) → swipe session | `disableVerticalSwipes` while studying; native answer buttons |
-| **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap | Same as Decks + completion screen |
+| **Decks** `#view-decks` | `GET /api/decks`, drill-down `GET /api/decks/study`, `POST /api/decks/swipe` | Deck cards (name, %, bar, due/mastered) → swipe session | ✅ v1.25.0/v1.26.0 |
+| **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap | ✅ native buttons + completion screen (v1.26.0) |
 | **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips → your-rank card (if outside top 50) → top-50 list; first-visit name modal | Avatars via `WebAppUser.photo_url`; weekly metric chip |
 | **Settings** `#view-settings` | `GET/POST /api/settings` | Level chips → leaderboard name → pause + interval → 9 content toggles | Toggle rollback on failed POST |
 
@@ -181,13 +183,15 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
   collapsing the Mini App.
 - ✅ v1.25.0 `tg.enableClosingConfirmation()` once a session has ≥1 answered
   card (`setCloseGuard`); disabled on completion/exit.
+- ✅ v1.26.0 native `MainButton`/`SecondaryButton` answer cards in sessions
+  (Bot API 7.10+, in-page buttons as fallback); torn down on any view change.
 - `.swipe-card` keeps `touch-action: pan-y` so vertical page scroll still works.
 
 ### Telegram WebApp API matrix
 
 | Used today | Target (`GAP`) | Explicitly avoided |
 |---|---|---|
-| `ready`, `expand`, `initData`, `HapticFeedback` (impact/notification/selection), `BackButton`, `SettingsButton`, `disableVerticalSwipes`, `enableClosingConfirmation`, `setBottomBarColor` | `MainButton`, `SecondaryButton`, `CloudStorage`, `shareToStory`/`shareMessage`, `addToHomeScreen`, `photo_url` | fullscreen mode, `setEmojiStatus`, `downloadFile`, biometrics, sensors, pull-to-refresh |
+| `ready`, `expand`, `initData`, `HapticFeedback` (impact/notification/selection), `BackButton`, `SettingsButton`, `MainButton`, `SecondaryButton`, `disableVerticalSwipes`, `enableClosingConfirmation`, `setBottomBarColor`, `CloudStorage` | `shareToStory`/`shareMessage`, `addToHomeScreen`, `photo_url` | fullscreen mode, `setEmojiStatus`, `downloadFile`, biometrics, sensors, pull-to-refresh |
 
 ## 7. Network & state
 
@@ -198,9 +202,9 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 - **Mutation policy:** optimistic update + rollback on rejection (bookmark
   star pattern). Settings toggles flip back on failure; swipe answers
   re-queue once on a failed POST (✅ v1.25.0).
-- **`GAP`** `CloudStorage` keys, all prefixed: `lastTab` (restore on boot),
-  `ui.*` (per-view UI state, e.g. last leaderboard metric). Never store
-  learning data client-side — SQLite is the source of truth.
+- ✅ v1.26.0 `CloudStorage` keys (`cloudGet`/`cloudSet`): `lastTab` (restored
+  on boot), `ui.board.metric`. Never store learning data client-side — SQLite
+  is the source of truth.
 - One screen = one primary fetch; refills inside a session go through the
   session's `load()`.
 
@@ -223,10 +227,10 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 | ~~`disableVerticalSwipes` + `enableClosingConfirmation` in sessions~~ ✅ v1.25.0 | 1 |
 | ~~Skeleton loaders~~ ✅ v1.25.0 | 1 |
 | ~~Mutation rollback (settings toggles) + swipe answer retry queue~~ ✅ v1.25.0 | 1 |
-| `MainButton`/`SecondaryButton` session answers | 2 |
-| Session completion screen with per-session stats | 2 |
-| Activity heatmap (drop Chart.js) | 2 |
-| `CloudStorage` last-tab restore + `ui.*` state | 2 |
+| ~~`MainButton`/`SecondaryButton` session answers~~ ✅ v1.26.0 | 2 |
+| ~~Session completion screen with per-session stats~~ ✅ v1.26.0 | 2 |
+| ~~Activity heatmap (drop Chart.js)~~ ✅ v1.26.0 | 2 |
+| ~~`CloudStorage` last-tab restore + `ui.*` state~~ ✅ v1.26.0 | 2 |
 | Library tab (idioms / collocations / stories / tips / quiz history) | 3 |
 | Leaderboard avatars + weekly metric | 4 |
 | `shareToStory` streak card + `addToHomeScreen` prompt | 4 |
