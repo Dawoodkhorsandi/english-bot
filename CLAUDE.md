@@ -33,7 +33,9 @@ kept in sync with the code and **CI enforces it** (see Testing).
 
 - Frontend is a vanilla-JS SPA embedded via `//go:embed webapp` — files in
   `webapp/` (`index.html`, `app.js`, `styles.css`) and decks in
-  `webapp/decks/*.json`. No build step, no framework.
+  `webapp/decks/*.json`. No build step, no framework. UI conventions live in
+  `UI/DESIGN.md` (design system, update it with UI PRs) and the feature
+  roadmap in `UI/ROADMAP.md`.
 - Every `/api/*` handler is wrapped by `withUser`, which validates Telegram
   `initData` (HMAC-SHA256) **and** an `auth_date` freshness TTL (`initDataTTL`),
   resolving the `chatID`. The frontend sends initData in the `X-Init-Data`
