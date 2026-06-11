@@ -284,6 +284,19 @@ var Changelogs = []ChangelogEntry{
 		Text: "• Mini App: clearer startup logging when WEB_APP_URL is unset (web server stays off → reverse proxy 502) or non-HTTPS\n" +
 			"• Documented WEB_APP_URL / WEB_APP_PORT in .env.example so the dashboard is discoverable",
 	},
+	{
+		Version: "1.24.0",
+		Text: "📣 <b>What's New in v1.24.0</b>\n\n" +
+			"🚀 <b>Your English hub just leveled up!</b>\n\n" +
+			"Tap the <b>menu button</b> next to the message box (or send /app) to open a whole new in-app experience:\n\n" +
+			"📊 <b>Dashboard</b> — your streak, words, quiz accuracy and 30-day activity, beautifully laid out\n" +
+			"📘 <b>Word list</b> — search every word you've learned, filter your ⭐ bookmarks, all in one scroll\n" +
+			"📚 <b>Word decks</b> — swipe through curated decks (the classic <b>504 Essential Words</b> and <b>Barron's GRE</b>) with a smart Leitner system that brings tricky words back more often\n" +
+			"🧠 <b>Quick review</b> — swipe ✅/❌ through your due words to lock them into memory\n" +
+			"🏆 <b>Leaderboard</b> — see how you rank against other learners (pick a name, or get a fun random one!)\n" +
+			"⚙️ <b>Settings</b> — tweak your level, schedule and content right inside the app\n\n" +
+			"Everything syncs with the bot you already use. Give it a tap! 🎉",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -368,6 +381,11 @@ func main() {
 	// Load persisted admin config overrides before any scheduling decisions.
 	store.LoadBotConfig()
 
+	// Seed the curated Leitner decks (idempotent) so the Mini App can serve them.
+	if err := store.SeedDecks(); err != nil {
+		log.Printf("⚠️  [DECKS] Seeding failed: %v", err)
+	}
+
 	notifier := &telegramNotifier{}
 
 	// Start the optional Mini App web server (requires WEB_APP_URL to be set).
@@ -379,6 +397,9 @@ func main() {
 			log.Printf("⚠️  [WEBAPP] WEB_APP_URL=%q is not https:// — Telegram rejects non-HTTPS Mini App buttons, so /stats will fail to send.", webAppURL)
 		}
 		startWebServer(store)
+		// Make the Mini App the chat's persistent menu button (the "sticky"
+		// button next to the message input), so it's always one tap away.
+		setChatMenuButton()
 	} else {
 		log.Printf("ℹ️  [WEBAPP] WEB_APP_URL not set — Mini App dashboard disabled; /stats shows text only and port %s is not served.", webAppPort)
 	}
@@ -411,6 +432,7 @@ func main() {
 	go runDBBackupScheduler(ctx, store, notifier)
 	go runCollocationScheduler(ctx, chain, store, notifier)
 	go runStoryScheduler(ctx, chain, store, notifier)
+	go runDeckBackfill(ctx, chain, store)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store, notifier)
@@ -627,6 +649,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/interval — set how often scheduled practice arrives\n" +
 			"/tts — turn pronunciation audio on or off\n" +
 			"/stats — see your progress, streak and totals\n" +
+			"/app — open your English hub: progress, word list and more\n" +
 			"/mywords — browse all your learned vocabulary\n" +
 			"/bookmark — view or toggle bookmarks on important words\n" +
 			"/pause — stop scheduled sends (on-demand still works)\n" +
@@ -755,6 +778,19 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		} else {
 			_ = notifier.Send(chatID, formatStats(stats, firstName))
 		}
+
+	case "/app":
+		if webAppURL == "" {
+			_ = notifier.Send(chatID, "📱 The in-app experience isn't available right now. You can still use all features here in the chat.")
+			return
+		}
+		kb := [][]inlineButton{{{
+			Text:   "📱 Open the app",
+			WebApp: &webAppInfo{URL: webAppURL},
+		}}}
+		_ = notifier.SendKeyboard(chatID,
+			"📱 <b>Your English hub</b>\n\nProgress, your word list and more — all in one place. Tap below to open it.",
+			kb)
 
 	case "/quiz":
 		log.Printf("🧩 [QUIZ] requested by ChatID %d.", chatID)
@@ -3121,6 +3157,7 @@ func registerBotCommands() {
 		{"command": "interval", "description": "Set how often practice arrives"},
 		{"command": "tts", "description": "Toggle pronunciation audio on/off"},
 		{"command": "stats", "description": "See your progress and streak"},
+		{"command": "app", "description": "Open your English hub (progress, words & more)"},
 		{"command": "mywords", "description": "Browse your learned vocabulary"},
 		{"command": "bookmark", "description": "Bookmark or view important words"},
 		{"command": "pause", "description": "Pause scheduled sends"},
@@ -3133,6 +3170,24 @@ func registerBotCommands() {
 		log.Printf("⚠️  [INIT] Could not register bot commands: %v", err)
 	} else {
 		log.Printf("✅ [INIT] Registered %d bot commands with Telegram.", len(commands))
+	}
+}
+
+// setChatMenuButton makes the Mini App the bot's default chat menu button — the
+// persistent button beside the message input that opens the app for every user.
+// Requires WEB_APP_URL to be a public https:// URL (caller ensures it is set).
+func setChatMenuButton() {
+	payload := map[string]interface{}{
+		"menu_button": map[string]interface{}{
+			"type":    "web_app",
+			"text":    "📱 App",
+			"web_app": map[string]interface{}{"url": webAppURL},
+		},
+	}
+	if err := telegramPost("setChatMenuButton", payload); err != nil {
+		log.Printf("⚠️  [WEBAPP] Could not set chat menu button: %v", err)
+	} else {
+		log.Printf("✅ [WEBAPP] Mini App set as the persistent chat menu button.")
 	}
 }
 
@@ -3403,6 +3458,7 @@ func openStore(path string) (*Store, error) {
 		daily_review_enabled INTEGER NOT NULL DEFAULT 1,
 		quiz_interval_hours  INTEGER NOT NULL DEFAULT 6,
 		first_name           TEXT    NOT NULL DEFAULT '',
+		display_name         TEXT    NOT NULL DEFAULT '',
 		streak_celebrated    INTEGER NOT NULL DEFAULT 0,
 		updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -3416,6 +3472,25 @@ func openStore(path string) (*Store, error) {
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_review_due ON review_schedule(chat_id, due_at);
+	CREATE TABLE IF NOT EXISTS deck_cards (
+		deck_id     TEXT    NOT NULL,
+		term        TEXT    NOT NULL,
+		definition  TEXT    NOT NULL DEFAULT '',
+		example     TEXT    NOT NULL DEFAULT '',
+		group_label TEXT    NOT NULL DEFAULT '',
+		ordering    INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (deck_id, term)
+	);
+	CREATE TABLE IF NOT EXISTS leitner_progress (
+		chat_id    INTEGER  NOT NULL,
+		deck_id    TEXT     NOT NULL,
+		term       TEXT     NOT NULL,
+		box        INTEGER  NOT NULL DEFAULT 1,
+		due_at     DATETIME NOT NULL,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, deck_id, term)
+	);
+	CREATE INDEX IF NOT EXISTS idx_leitner_due ON leitner_progress(chat_id, deck_id, due_at);
 	CREATE TABLE IF NOT EXISTS quiz_results (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		chat_id     INTEGER NOT NULL,
@@ -3691,9 +3766,11 @@ func (s *Store) migrate() error {
 			}
 		}
 	}
-	// user_prefs UI-enhancement columns added in v1.18.0.
+	// user_prefs UI-enhancement columns added in v1.18.0; display_name (Mini App
+	// leaderboard) added in v1.24.0.
 	for col, def := range map[string]string{
 		"first_name":        "TEXT NOT NULL DEFAULT ''",
+		"display_name":      "TEXT NOT NULL DEFAULT ''",
 		"streak_celebrated": "INTEGER NOT NULL DEFAULT 0",
 	} {
 		if !s.columnExists("user_prefs", col) {

@@ -34,11 +34,15 @@ Go application (multi-file, single package main)
 ├── quiz.go           — quiz building (4 types + native poll), quiz_results, poll registry, quiz scheduler
 ├── stats.go          — /stats computation (streaks, activity days, progressBar, formatStats), admin metrics
 ├── admin.go          — admin panel: paginated /users list, user detail view, direct messaging to users
-├── webapp.go         — optional Telegram Mini App HTTP server; HMAC-SHA256 initData validation; /api/stats JSON endpoint
+├── webapp.go         — Mini App hub: HTTP server, embedded SPA, HMAC-SHA256 initData auth (+auth_date TTL), JSON API
+├── leaderboard.go    — cross-user ranking, display names, deterministic funny-name fallback
+├── leitner.go        — curated Leitner decks (deck_cards/leitner_progress), 5-box scheduler, example backfill worker
 └── vocab.go          — /mywords (browse learned vocabulary) and /bookmark (save favourite words) features
 ```
 
-The application runs thirteen concurrent goroutines (plus an optional web server goroutine when `WEB_APP_URL` is set):
+The Mini App frontend is embedded from `webapp/` (`index.html`, `app.js`, `styles.css`) and curated deck data from `webapp/decks/*.json`, all via `go:embed`.
+
+The application runs fourteen concurrent goroutines (plus an optional web server goroutine when `WEB_APP_URL` is set):
 1. **Pool filler** (`poolFiller`) — tops up the pre-generated content pool in the background
 2. **Broadcast scheduler** (`runBroadcastScheduler`) — fires every half hour, per-user interval-aware delivery sweep
 3. **Daily review scheduler** (`runDailyReviewScheduler`) — sends a bedtime word recap at local midnight
@@ -50,8 +54,9 @@ The application runs thirteen concurrent goroutines (plus an optional web server
 9. **Collocation scheduler** (`runCollocationScheduler`) — sends one daily collocation card (default 13:00 local) (v1.23.0)
 10. **Mini story scheduler** (`runStoryScheduler`) — sends one daily reading-practice story (default 17:00 local) (v1.23.0)
 11. **Nightly backup scheduler** (`runDBBackupScheduler`) — sends a SQLite snapshot to the maintainer (default 02:00 local)
-12. **Telegram poller** (`pollTelegramUpdates`) — long-polls Telegram for incoming messages and callback queries
-13. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
+12. **Deck example backfill** (`runDeckBackfill`) — generates missing example sentences for curated deck cards, caching them in `deck_cards` (v1.24.0)
+13. **Telegram poller** (`pollTelegramUpdates`) — long-polls Telegram for incoming messages and callback queries
+14. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
 
 ---
 
@@ -567,6 +572,7 @@ All messages use `parse_mode: HTML`.
 | `/tip [on\|off]` | Fires `sendChatAction(typing)`. No arg: on-demand grammar tip. `on`/`off`: toggles `user_prefs.tips_enabled`. (v1.15.0; v1.18.0: typing indicator) |
 | `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query`. (v1.4.0) |
 | `/stats` | Sends a progress summary with Unicode progress bars for streak and quiz accuracy; personalised greeting from `user_prefs.first_name`. When `WEB_APP_URL` is configured, includes a `📊 Full Dashboard` inline button that opens the Telegram Mini App. (`UserStats` / `formatStats(st, firstName)`) (v1.5.0; v1.18.0: bars, greeting, mini-app button) |
+| `/app` | Sends a button that opens the Telegram Mini App hub (dashboard, vocabulary, decks, review, leaderboard). No-op message when `WEB_APP_URL` is unset. (v1.24.0) |
 | `/quiz` | Sends a native Telegram quiz poll (`sendPoll type:quiz`); Telegram highlights the correct answer after the user taps. The `poll_answer` update is routed to `handleQuizPollAnswer` which grades the result and feeds SRS. Falls back to inline keyboard if `sendPoll` fails. (v1.9.0; v1.18.0: native polls) |
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
@@ -674,28 +680,67 @@ command.
 
 ---
 
-### Telegram Mini App — `webapp.go` (v1.18.0, optional)
+### Telegram Mini App hub — `webapp.go` (v1.18.0; expanded to a multi-tab hub in v1.24.0, optional)
 
 When `WEB_APP_URL` is set, `startWebServer` launches an HTTP server on
-`WEB_APP_PORT` (default `8090`) with two routes:
+`WEB_APP_PORT` (default `8090`) serving a single embedded SPA plus a JSON API.
+The frontend lives in `webapp/` (`index.html`, `app.js`, `styles.css`) and is
+embedded with `go:embed`; `GET /`, `/stats`, and `/app` all serve `index.html`,
+other paths serve static assets (and bundled deck JSON).
 
-- `GET /stats` — serves the single-page HTML app (`statsPageHTML`)
-- `GET /api/stats?initData=...` — validates Telegram `initData` (HMAC-SHA256),
-  returns a JSON stats object
+On startup the bot also calls `setChatMenuButton` (`main.go`) so the Mini App
+becomes the chat's **persistent menu button** — always one tap from the input box.
 
-**initData validation** (`validateInitData`): parses the URL-encoded string,
-sorts all fields except `hash` into a `key=value\n` check string, computes
-`HMAC-SHA256(HMAC-SHA256("WebAppData", bot_token), check_string)`, and compares
-to the `hash` field. Rejects the request on mismatch.
+**Frontend** is a lightweight vanilla-JS SPA (no framework) with a bottom tab bar
+(Stats · Words · Decks · Review · Ranks) plus a Settings screen opened via
+Telegram's native `SettingsButton`. It uses the Telegram WebApp SDK
+(`BackButton` for drill-downs, `HapticFeedback` on swipes, `MainButton` where
+useful) and themes to `--tg-theme-*` CSS variables (light/dark) with safe-area
+insets. Chart.js renders the 30-day activity chart.
 
-**Stats JSON** includes `current_streak`, `longest_streak`, `words`, `mastered`,
-`verbs`, `quiz_answered`, `quiz_correct`, `quiz_pct`, `active_days`,
-`activity_days` (sorted `"YYYY-MM-DD"` strings), and `level`.
+**Auth** — every `/api/*` handler is wrapped by `withUser`, which reads the
+Telegram `initData` from the `X-Init-Data` header (or `?initData=` fallback) and
+calls `validateInitData`: it sorts all fields except `hash` into a
+`key=value\n` check string, computes
+`HMAC-SHA256(HMAC-SHA256("WebAppData", bot_token), check_string)`, compares to
+`hash`, and **also rejects initData whose `auth_date` is older than
+`initDataTTL` (24h)** as replay protection. On failure it returns 401.
 
-**HTML page** (`statsPageHTML`) uses the Telegram WebApp JS SDK, calls
-`/api/stats`, and renders stat cards with Unicode progress bars and a Chart.js
-30-day activity bar chart. Colours adapt to Telegram's theme CSS variables
-(`--tg-theme-bg-color`, `--tg-theme-button-color`, etc.).
+**JSON API:**
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/stats` | GET | Dashboard payload (streak, words, mastered, drills, quiz %, 30-day activity, level, paused, member-since). |
+| `/api/vocab?offset&limit&bookmarks&q` | GET | Page of learned words (`LearnedWordsFiltered`), with mastery + bookmark flags and a term/meaning search. |
+| `/api/bookmark` | POST | `{term, on}` → toggle a bookmark. |
+| `/api/leaderboard?metric=words\|mastered` | GET | Ranked rows + the caller's own rank + `hasName`. |
+| `/api/leaderboard/name` | POST | `{name}` → set the caller's display name (sanitised, ≤24 chars). |
+| `/api/review/next?limit` | GET | Due SRS cards (`DueReviews`). |
+| `/api/review/answer` | POST | `{term, known}` → `ApplyReviewKnown`/`ApplyReviewForgot`. |
+| `/api/decks` | GET | Curated decks with per-user progress % + due/mastered counts. |
+| `/api/decks/study?deck&limit` | GET | Next cards to study (due first, then new). |
+| `/api/decks/swipe` | POST | `{deck, term, known}` → Leitner box update. |
+| `/api/settings` | GET/POST | Read all prefs / apply one `{key, value}` change via existing setters. |
+
+**Leaderboard** (`leaderboard.go`): cross-user ranking via `GROUP BY chat_id`
+over `sent_vocab` (words) or `review_schedule` (mastered, interval ≥ 21d). Each
+user picks a display name on first open; if they skip, a deterministic friendly
+nickname (`funnyName`, adjective+noun seeded by `chat_id`) is shown — never a raw
+Telegram name and never "Anonymous". Names are sanitised (`sanitizeDisplayName`).
+
+**Leitner decks** (`leitner.go`): curated vocabulary decks studied with a 5-box
+Leitner system. Cards live in `deck_cards` (seeded idempotently from embedded
+`webapp/decks/*.json` by `SeedDecks`); per-user progress in `leitner_progress`
+(box 1–5 per card). A correct recall promotes one box (longer interval:
+0/1/3/7/21 days), a miss resets to box 1; box 5 = mastered. Progress % =
+`sum(box-1) / (total*4)`. Decks ship word+definition (+examples where available);
+missing example sentences are generated in the background by `runDeckBackfill`
+via the `ProviderChain` and cached into `deck_cards`. Bundled at launch:
+**504 Absolutely Essential Words** (504 words across 42 lessons, each with a
+definition + example) and **Barron's GRE 333** (definitions; examples AI-filled).
+
+> Deck word lists are community reproductions of copyrighted study books — fine
+> for personal/educational use; review licensing before public distribution.
 
 ---
 

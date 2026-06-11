@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>English Bot</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!-- Each .view is one tab screen; the active one is shown by app.js. -->
+<main id="main">
+  <section class="view" id="view-dashboard">
+    <div class="loading">Loading…</div>
+  </section>
+
+  <section class="view" id="view-vocab" hidden>
+    <h1>📘 Your Words</h1>
+    <input id="vocab-search" class="search" type="search" placeholder="Search words or meanings…" autocomplete="off">
+    <div class="chips">
+      <button class="chip chip-on" data-filter="all">All</button>
+      <button class="chip" data-filter="bookmarks">⭐ Bookmarks</button>
+    </div>
+    <div id="vocab-list" class="list"></div>
+    <button id="vocab-more" class="more" hidden>Load more</button>
+    <p id="vocab-empty" class="empty" hidden></p>
+  </section>
+
+  <section class="view" id="view-board" hidden>
+    <h1>🏆 Leaderboard</h1>
+    <div class="chips">
+      <button class="chip chip-on" data-metric="words">Words learned</button>
+      <button class="chip" data-metric="mastered">Mastered</button>
+    </div>
+    <div id="board-me" class="card" hidden></div>
+    <div id="board-list" class="list"></div>
+    <p id="board-empty" class="empty" hidden></p>
+  </section>
+
+  <section class="view" id="view-review" hidden>
+    <h1>🧠 Review</h1>
+    <div id="review-swipe"></div>
+  </section>
+
+  <section class="view" id="view-decks" hidden>
+    <div id="decks-home">
+      <h1>📚 Word Decks</h1>
+      <div id="decks-list" class="list"></div>
+      <p id="decks-empty" class="empty" hidden></p>
+    </div>
+    <div id="decks-study" hidden>
+      <h1 id="decks-study-title"></h1>
+      <div id="decks-swipe"></div>
+    </div>
+  </section>
+
+  <!-- Opened via Telegram's native Settings button (no bottom tab). -->
+  <section class="view" id="view-settings" hidden>
+    <h1>⚙️ Settings</h1>
+    <div id="settings-body"><div class="loading">Loading…</div></div>
+  </section>
+</main>
+
+<!-- Bottom tab bar. Tabs are added here as later phases land. -->
+<nav id="tabbar">
+  <button class="tab tab-on" data-view="dashboard"><span>📊</span>Stats</button>
+  <button class="tab" data-view="vocab"><span>📘</span>Words</button>
+  <button class="tab" data-view="decks"><span>📚</span>Decks</button>
+  <button class="tab" data-view="review"><span>🧠</span>Review</button>
+  <button class="tab" data-view="board"><span>🏆</span>Ranks</button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>
