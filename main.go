@@ -360,6 +360,12 @@ var Changelogs = []ChangelogEntry{
 			"so webviews cached them heuristically and users kept a stale frontend after deploys " +
 			"(reported as the reverted native answer buttons still hiding the tab bar in Review).",
 	},
+	{
+		Version: "1.29.2",
+		Silent:  true,
+		Text: "Mini App: review/deck cards now flip both ways on tap (tap reveals the meaning, tap again hides it), " +
+			"and the dashboard shows a Library breakdown (idioms / collocations / stories / tips) alongside words and drills.",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the

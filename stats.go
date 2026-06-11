@@ -22,6 +22,10 @@ type UserStats struct {
 	Mastered       int // words moved into long-term memory (Change D)
 	QuizAnswered   int // quiz questions answered (Change E)
 	QuizCorrect    int // quiz questions answered correctly (Change E)
+	Idioms         int // idioms of the day received
+	Collocations   int // collocations of the day received
+	Stories        int // mini stories received
+	Tips           int // grammar tips received
 	ActiveDays     int // distinct local days with any activity
 	CurrentStreak  int // consecutive active days ending today/yesterday
 	LongestStreak  int // best run of consecutive active days ever
@@ -74,6 +78,10 @@ func (s *Store) UserStats(chatID int64) (UserStats, error) {
 		st.QuizAnswered = answered
 		st.QuizCorrect = correct
 	}
+	st.Idioms = s.countByChat("sent_idioms", chatID)
+	st.Collocations = s.countByChat("sent_collocations", chatID)
+	st.Stories = s.countByChat("sent_stories", chatID)
+	st.Tips = s.countByChat("sent_tips", chatID)
 
 	var created any
 	if err := s.db.QueryRow("SELECT created_at FROM subscribers WHERE chat_id = ?", chatID).Scan(&created); err == nil {
@@ -97,6 +105,14 @@ func (s *Store) UserStats(chatID int64) (UserStats, error) {
 	st.CurrentStreak, st.LongestStreak = computeStreaks(days, time.Now().In(appLocation))
 	sort.Strings(st.ActivityDays)
 	return st, nil
+}
+
+// countByChat returns the row count for a chat in one of the fixed per-user
+// content tables. The table name is always a hardcoded constant (no injection).
+func (s *Store) countByChat(table string, chatID int64) int {
+	var n int
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE chat_id = ?", chatID).Scan(&n)
+	return n
 }
 
 // activityDays returns, per distinct local (appLocation) calendar date keyed by
