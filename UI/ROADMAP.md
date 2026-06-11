@@ -7,8 +7,10 @@ specific rows of its gap checklist (§9).
 **Rules**
 
 - One phase = one PR = one `Changelogs` entry. Any `webapp/` change needs a
-  new version to redeploy (the SPA is `go:embed`-ed); `Silent: true` is fine
-  for pure polish, user-visible features get a catchy non-silent note.
+  new version to redeploy (the SPA is `go:embed`-ed).
+- **Phases 1–4 use `Silent: true` entries** — they ship quietly. The final
+  phase ships a **non-silent** changelog announcing the whole arc (polish,
+  sessions, Library, gamification, in-app practice) to users at once.
 - Each PR updates DESIGN.md: tick the gaps it closes, spec anything new.
 - New endpoints: wrap in `withUser`, document in DOCS.md, test via the
   `signInitData` + `apiCall` pattern in `webapp_api_test.go`.
@@ -74,6 +76,7 @@ Biggest backend lift; brings chat-only features (`/quiz`, `/word`, `/idiom`,
 | In-app quiz: `GET /api/quiz/next` + `POST /api/quiz/answer` reusing `quiz.go` question generation, writing `quiz_results` | `webapp.go`, `quiz.go`, `webapp/app.js`, `webapp/styles.css` | L |
 | On-demand content: `GET /api/practice?kind=word\|idiom\|collocation` drawing from `content_pool` at the user's level, respecting `pool.go` accounting and recording to the `sent_*` tables | `webapp.go`, `pool.go`, `webapp/app.js` | L |
 | Rate limiting on practice endpoints (align with the bot's hourly-limiter approach) | `webapp.go` | S |
+| **Non-silent changelog** announcing all phases: native polish, smarter review sessions, the Library tab, leaderboard avatars & weekly ranks, and in-app practice | `main.go` (`Changelogs`) | S |
 
 ## Backlog / non-goals
 
