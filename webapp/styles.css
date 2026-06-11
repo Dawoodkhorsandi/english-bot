@@ -46,9 +46,12 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 .skel-row { height: 58px; border-radius: 12px; margin-bottom: 8px; }
 
 /* ---- Dashboard cards ---- */
-.card { background: var(--card); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+.card {
+  background: var(--card); border-radius: 16px; padding: 16px; margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
 .card h2 {
-  font-size: 13px; color: var(--hint); font-weight: 500; margin-bottom: 6px;
+  font-size: 13px; color: var(--hint); font-weight: 600; margin-bottom: 6px;
   text-transform: uppercase; letter-spacing: .5px;
 }
 .big { font-size: 34px; font-weight: 700; line-height: 1.1; }
@@ -56,11 +59,41 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 .bar-wrap { background: var(--border); border-radius: 6px; height: 8px; margin-top: 10px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 6px; transition: width .4s ease; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-/* ---- Stat tiles (Library breakdown on the dashboard) ---- */
+
+/* ---- Hero streak card ---- */
+.card.hero {
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
+    var(--card);
+}
+.hero-row { display: flex; align-items: center; gap: 16px; margin-top: 4px; }
+.streak-ring { position: relative; width: 84px; height: 84px; flex-shrink: 0; }
+.streak-ring .ring { transform: rotate(-90deg); }
+.streak-ring .track { stroke: var(--border); }
+.streak-ring .fill.streak { stroke: var(--accent); transition: stroke-dashoffset .6s ease; }
+.streak-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; line-height: 1;
+}
+.streak-num { font-size: 26px; font-weight: 800; }
+.streak-flame { font-size: 13px; }
+.hero-meta { flex: 1; min-width: 0; }
+.hero-line { font-size: 22px; font-weight: 700; }
+.hero-actions { margin-top: 14px; }
+.link-btn {
+  border: none; background: none; color: var(--link); font-size: 13px;
+  padding: 6px 0 0; cursor: pointer;
+}
+.explain {
+  margin-top: 12px; font-size: 13px; line-height: 1.55; color: var(--text);
+  background: var(--bg); border-radius: 12px; padding: 12px 14px;
+}
+
+/* ---- Stat tiles ---- */
 .stat-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 6px; }
-.stat-tile { text-align: center; }
+.stat-tile { text-align: center; background: var(--bg); border-radius: 12px; padding: 12px 6px; }
 .stat-emoji { font-size: 22px; line-height: 1.2; }
-.stat-n { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.stat-n { font-size: 22px; font-weight: 700; line-height: 1.1; margin-top: 2px; }
 .stat-tile .sub { margin-top: 2px; }
 /* ---- Activity heatmap (GitHub-style, columns = weeks) ---- */
 .heatmap {
@@ -130,10 +163,8 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 /* ---- Leaderboard ---- */
 .word.me { outline: 2px solid var(--accent); }
 .rank { min-width: 32px; text-align: center; font-weight: 700; font-size: 15px; }
-.avatar, .avatar-fallback {
-  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; object-fit: cover;
-}
 .avatar-fallback {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
   background: var(--accent); color: var(--accent-text); font-size: 13px;
   font-weight: 700; display: flex; align-items: center; justify-content: center;
 }
@@ -146,20 +177,43 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 .deck { cursor: pointer; }
 .deck-head { display: flex; align-items: baseline; justify-content: space-between; }
 .deck-pct { font-size: 20px; font-weight: 700; color: var(--accent); }
+.grammar-cta { cursor: pointer; background:
+  radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 60%),
+  var(--card); }
+
+/* ---- Deck detail: Leitner box distribution ---- */
+.box-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; }
+.box-label { width: 92px; flex-shrink: 0; color: var(--hint); }
+.box-bar { flex: 1; height: 10px; background: var(--border); border-radius: 6px; overflow: hidden; }
+.box-fill { height: 100%; border-radius: 6px; background: var(--accent); transition: width .4s ease; }
+.box-fill.l0 { background: var(--border); }
+.box-fill.l1 { background: var(--accent); opacity: .3; }
+.box-fill.l2 { background: var(--accent); opacity: .5; }
+.box-fill.l3 { background: var(--accent); opacity: .7; }
+.box-fill.l4 { background: var(--accent); opacity: .85; }
+.box-fill.l5 { background: var(--success); opacity: 1; }
+.box-n { width: 30px; text-align: right; font-weight: 600; flex-shrink: 0; }
 
 /* ---- Swipe trainer (review + decks) ---- */
-.swipe-area { position: relative; height: 320px; margin: 8px 0 18px; }
+.swipe-area { position: relative; height: 380px; margin: 8px 0 18px; }
 .swipe-card {
   position: absolute; inset: 0; background: var(--card); border-radius: 18px;
   padding: 24px; display: flex; flex-direction: column; align-items: center;
   justify-content: center; text-align: center; cursor: grab; user-select: none;
-  box-shadow: 0 6px 22px rgba(0,0,0,.12); touch-action: pan-y;
+  box-shadow: 0 6px 22px rgba(0,0,0,.12);
+  /* none so the iOS Telegram webview hands horizontal drags to our JS rather
+     than treating them as scroll/back gestures (vertical swipe already guarded). */
+  touch-action: none; -webkit-user-select: none;
 }
 .swipe-card.dragging { cursor: grabbing; transition: none; }
 .swipe-card.leaving { transition: transform .28s ease, opacity .28s ease; }
 .swipe-front { font-size: 30px; font-weight: 700; }
-.swipe-back { font-size: 17px; line-height: 1.5; color: var(--text); }
+.swipe-sub { font-size: 15px; color: var(--hint); margin-top: 8px; letter-spacing: .3px; }
+.swipe-back { font-size: 17px; line-height: 1.5; color: var(--text); max-height: 280px; overflow-y: auto; }
 .swipe-back .ex { display: block; font-size: 14px; color: var(--hint); margin-top: 12px; font-style: italic; }
+.rev-meaning { font-size: 18px; font-weight: 600; }
+.rev-fa { font-size: 16px; color: var(--accent-fg); margin-top: 12px; }
+.rev-mnem { font-size: 14px; color: var(--hint); margin-top: 12px; line-height: 1.5; }
 .swipe-hint { position: absolute; bottom: 16px; font-size: 12px; color: var(--hint); }
 .swipe-stamp {
   position: absolute; top: 18px; font-size: 22px; font-weight: 800; padding: 4px 12px;
@@ -178,15 +232,52 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 
 /* ---- Practice (on-demand cards + in-app quiz) ---- */
 .practice-text { font-size: 16px; line-height: 1.6; white-space: pre-line; }
-.quiz-opts { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
-.quiz-opt {
-  border: none; border-radius: 12px; padding: 13px 14px; font-size: 15px;
-  background: var(--card); color: var(--text); text-align: left; cursor: pointer;
+.quiz-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.quiz-progress { font-size: 13px; font-weight: 600; color: var(--hint); }
+.quiz-score-pill {
+  font-size: 13px; font-weight: 700; color: var(--accent-fg);
+  background: var(--card); padding: 4px 12px; border-radius: 999px;
 }
-.quiz-opt.correct { background: var(--success); color: #fff; }
-.quiz-opt.wrong { background: var(--danger); color: #fff; }
+.quiz-q .practice-text { font-size: 18px; font-weight: 600; line-height: 1.5; }
+.quiz-opts { display: flex; flex-direction: column; gap: 10px; }
+.quiz-opt {
+  display: flex; align-items: center; gap: 12px; border: 2px solid transparent;
+  border-radius: 14px; padding: 13px 14px; font-size: 16px;
+  background: var(--card); color: var(--text); text-align: left; cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.quiz-badge {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
+  background: var(--bg); color: var(--accent-fg); font-weight: 800; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.quiz-opt-text { flex: 1; min-width: 0; }
+.quiz-opt.correct { border-color: var(--success); background: color-mix(in srgb, var(--success) 16%, var(--card)); }
+.quiz-opt.correct .quiz-badge { background: var(--success); color: #fff; }
+.quiz-opt.wrong { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, var(--card)); }
+.quiz-opt.wrong .quiz-badge { background: var(--danger); color: #fff; }
 .quiz-opt:disabled { cursor: default; }
-.quiz-score { text-align: center; color: var(--hint); font-size: 13px; margin-top: 12px; }
+.quiz-next {
+  display: block; width: 100%; margin-top: 16px; padding: 15px; border: none;
+  border-radius: 14px; background: var(--accent); color: var(--accent-text);
+  font-size: 16px; font-weight: 700; cursor: pointer;
+}
+
+/* ---- Grammar lessons ---- */
+.grammar-level { font-size: 13px; color: var(--hint); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .5px; margin: 18px 0 8px; }
+.grammar-pattern {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px;
+  background: var(--bg); border-radius: 12px; padding: 12px 14px; line-height: 1.5;
+  color: var(--accent-fg);
+}
+.grammar-text { font-size: 15px; line-height: 1.6; }
+.grammar-ex { font-size: 15px; line-height: 1.7; }
+.grammar-tip { font-size: 14px; line-height: 1.55; color: var(--hint); }
+.grammar-img { width: 100%; border-radius: 12px; display: block; }
+.gp-item { margin-bottom: 16px; }
+.gp-item:last-child { margin-bottom: 0; }
+.gp-q { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
 
 /* ---- Settings ---- */
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 15px; }

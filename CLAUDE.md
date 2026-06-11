@@ -40,23 +40,37 @@ kept in sync with the code and **CI enforces it** (see Testing).
   `initData` (HMAC-SHA256) **and** an `auth_date` freshness TTL (`initDataTTL`),
   resolving the `chatID`. The frontend sends initData in the `X-Init-Data`
   header (server also accepts `?initData=`). Reuse `withUser` for any new endpoint.
-- API: `/api/stats`, `/api/vocab`, `/api/bookmark`, `/api/leaderboard`(+`/name`),
-  `/api/review/next`+`/answer`, `/api/decks`(+`/study`,`/swipe`), `/api/settings`
+- API: `/api/config` (public: bot handle + web app URL), `/api/stats`,
+  `/api/vocab`, `/api/bookmark`, `/api/leaderboard`(+`/name`; metrics
+  words/mastered/weekly/today; **no profile photos** — privacy),
+  `/api/review/next`+`/answer` (cards carry pronunciation/persian/example),
+  `/api/decks`(+`/study`,`/swipe`,`/detail`), `/api/settings`
   (GET reads prefs, POST applies one `{key,value}` via existing setters),
   `/api/content?kind=` (Library history: idiom/collocation/story/tip),
   `/api/quizzes` (quiz attempt history), `/api/vocab/card?term=` (word detail),
   `/api/practice?kind=` (pool-only on-demand card, rate-limited),
-  `/api/quiz/next`+`/answer` (in-app quiz, HMAC-token stateless).
-- Tabs: Stats · Library · Decks · Review · Ranks; Settings via the native
-  Telegram `SettingsButton`. Drill-downs use `BackButton`. The app is the chat's
-  persistent menu button (`setChatMenuButton` on startup) and opens via `/app`.
+  `/api/quiz/next`+`/answer` (in-app quiz, HMAC-token stateless),
+  `/api/grammar`(+`/lesson?id=`) (static grammar lessons).
+- Tabs: Stats · Library · Study (decks + on-demand practice + grammar) · Review
+  · Ranks; Settings via the native Telegram `SettingsButton`. Drill-downs use
+  `BackButton`. The app is the chat's persistent menu button
+  (`setChatMenuButton` on startup) and opens via `/app`.
 - **Adding a deck:** drop `webapp/decks/<id>.json`
-  (`[{term, definition, example, group}]`) and add a `deckRegistry` entry in
-  `leitner.go`. `SeedDecks` ingests it idempotently; blank `example`s are filled
-  by `runDeckBackfill`. Leitner: 5 boxes, known→+1 (0/1/3/7/21d), miss→box 1.
-- Bundled decks: **504 Absolutely Essential Words** (full 504, def+example, from
-  github.com/ashkan-jafarzadeh/504-essential-words, pipe-delimited CSV) and
-  **Barron's GRE 333** (def only; examples AI-backfilled).
+  (`[{term, definition, example, group, persian?, pronunciation?, mnemonic?}]`)
+  and add a `deckRegistry` entry in `leitner.go`. `SeedDecks` ingests it
+  idempotently (UPSERT fills blank columns from JSON without clobbering
+  backfilled values); blank `example`/`persian`/`pronunciation` are filled by
+  `runDeckBackfill` (`backfillOneDeckField`, one field per 30s). Leitner: 5
+  boxes, known→+1 (0/1/3/7/21d), miss→box 1.
+- Bundled decks: **504 Absolutely Essential Words** (def+example+Persian, from
+  github.com/ashkan-jafarzadeh/504-essential-words), **Barron's GRE 333**
+  (def+mnemonic; Persian/pronunciation AI-backfilled), plus curated **Phrasal
+  Verbs**, **Business English**, **Academic Word List**, **IELTS/TOEFL** decks.
+- **Grammar lessons** (`grammar.go`, `webapp/grammar/lessons.json`): a static,
+  pre-authored curriculum (no AI at request time) served to `/grammar` and the
+  Study tab. Lessons have `{pattern, explanation, examples, tip, practice}`;
+  practice MCQs are scored client-side. `BOT_USERNAME` env (default
+  `@mymusclememorybot`) feeds the share link via `/api/config`.
 
 ## Testing & docs sync (CI-enforced — `doc_test.go`)
 

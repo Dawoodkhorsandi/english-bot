@@ -38,6 +38,7 @@ const srsTimeLayout = "2006-01-02 15:04:05"
 type dueReview struct {
 	term         string
 	meaning      string
+	text         string // full pooled card text (for pronunciation/Persian/example)
 	intervalDays int
 	ease         float64
 	reps         int
@@ -96,11 +97,16 @@ func (s *Store) SeedReview(chatID int64, word string, now time.Time) error {
 // DueReviews returns up to limit words whose review is due (due_at <= now) for a
 // chat, oldest-due first, joined with their meaning from the content pool.
 func (s *Store) DueReviews(chatID int64, now time.Time, limit int) ([]dueReview, error) {
+	// GROUP BY rs.word so a word that exists in content_pool at more than one
+	// level (the pool is UNIQUE per (kind, level, term)) yields a single review
+	// card, not one per level. MAX() picks one non-empty meaning/text.
 	rows, err := s.db.Query(`
-		SELECT rs.word, COALESCE(cp.meaning, ''), rs.interval_days, rs.ease, rs.reps
+		SELECT rs.word, COALESCE(MAX(cp.meaning), ''), COALESCE(MAX(cp.text), ''),
+		       rs.interval_days, rs.ease, rs.reps
 		FROM review_schedule rs
 		LEFT JOIN content_pool cp ON cp.kind = 'word' AND cp.term = rs.word
 		WHERE rs.chat_id = ? AND rs.due_at <= ?
+		GROUP BY rs.word, rs.interval_days, rs.ease, rs.reps, rs.due_at
 		ORDER BY rs.due_at ASC
 		LIMIT ?`,
 		chatID, now.UTC().Format(srsTimeLayout), limit,
@@ -113,7 +119,7 @@ func (s *Store) DueReviews(chatID int64, now time.Time, limit int) ([]dueReview,
 	var out []dueReview
 	for rows.Next() {
 		var d dueReview
-		if err := rows.Scan(&d.term, &d.meaning, &d.intervalDays, &d.ease, &d.reps); err != nil {
+		if err := rows.Scan(&d.term, &d.meaning, &d.text, &d.intervalDays, &d.ease, &d.reps); err != nil {
 			return nil, err
 		}
 		out = append(out, d)

@@ -366,6 +366,16 @@ var Changelogs = []ChangelogEntry{
 		Text: "Mini App: review/deck cards now flip both ways on tap (tap reveals the meaning, tap again hides it), " +
 			"and the dashboard shows a Library breakdown (idioms / collocations / stories / tips) alongside words and drills.",
 	},
+	{
+		Version: "1.30.0",
+		Text: "📣 <b>What's New in v1.30.0</b>\n\n" +
+			"📖 <b>Grammar lessons!</b> A brand-new section — bite-size lessons from easy to advanced, each with the pattern, a clear explanation, examples and quick practice. Send /grammar or open the app.\n\n" +
+			"🧠 <b>Better reviews</b> — review cards now show pronunciation, a Persian translation and an example, no more repeated words, and swiping works smoothly on iPhone.\n\n" +
+			"📚 <b>More & richer decks</b> — the 504 deck now has Persian, Barron's GRE adds memory mnemonics, plus four new decks: Phrasal Verbs, Business English, Academic Word List and IELTS/TOEFL. Each deck now has its own detail page with a progress breakdown.\n\n" +
+			"🏆 <b>Leaderboard</b> — a new ☀️ Today ranking alongside This-week.\n\n" +
+			"✨ <b>A fresh look</b> — a redesigned quiz, a fancier stats dashboard with a streak ring (tap ⓘ to see how streaks work), and a one-tap Share button to invite friends.\n\n" +
+			"Tap the menu button (or send /app) and explore! 🎉",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -683,6 +693,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/story — Get a mini story to read at your level\n" +
 			"/tip — Get a grammar tip right now\n" +
 			"/quiz — Test yourself on a word you've learned\n" +
+			"/grammar — Bite-size grammar lessons (easy → advanced)\n" +
 			"/level — Choose your difficulty (beginner/intermediate/upper-intermediate/advanced)\n" +
 			"/interval — Choose how often you get practice\n" +
 			"/tts — Turn pronunciation audio on/off\n" +
@@ -705,6 +716,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"📖 <b>Mini stories:</b> a short story at your level with key vocabulary and a comprehension question — sent once a day, or anytime via /story.\n\n" +
 			"🧠 <b>Spaced repetition:</b> words you've learned come back as quick <b>memory checks</b> at growing intervals — tap ✅ Knew it / ❌ Forgot and I'll tune when you see each one next.\n\n" +
 			"🧩 <b>Quizzes:</b> multiple-choice questions test your recall — send /quiz anytime, and one pops up now and then. Your answers also tune your review schedule.\n\n" +
+			"📖 <b>Grammar lessons:</b> bite-size lessons from easy to advanced — each shows the pattern, a clear explanation, examples and quick practice. Send /grammar anytime, or open the app.\n\n" +
 			"💬 <b>Look up any word:</b> just type it (English or Persian) and I'll send a full card for it.\n\n" +
 			"You get one of each per hour, about 30 minutes apart (quiet overnight).\n\n" +
 			"/drill — generate a grammar drill on demand\n" +
@@ -714,6 +726,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			"/story — get a mini story to read at your level\n" +
 			"/tip — grammar tip now; /tip on or /tip off for daily tips\n" +
 			"/quiz — test yourself on a word you've already learned\n" +
+			"/grammar — bite-size grammar lessons; /grammar 1 opens a lesson\n" +
 			"/level — set difficulty: beginner, intermediate, upper-intermediate or advanced\n" +
 			"/interval — set how often scheduled practice arrives\n" +
 			"/tts — turn pronunciation audio on or off\n" +
@@ -820,6 +833,9 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 	case "/tip":
 		notifier.SendTyping(chatID)
 		handleTip(ctx, chain, store, notifier, chatID, args)
+
+	case "/grammar":
+		handleGrammar(store, notifier, chatID, args)
 
 	case "/level":
 		handleLevel(store, notifier, chatID, args)
@@ -3220,6 +3236,7 @@ func registerBotCommands() {
 		{"command": "story", "description": "Get a mini story to read at your level"},
 		{"command": "tip", "description": "Get a grammar tip (or /tip on|off)"},
 		{"command": "quiz", "description": "Test yourself on a learned word"},
+		{"command": "grammar", "description": "Bite-size grammar lessons (easy to advanced)"},
 		{"command": "setup", "description": "Quick-setup: pick how much time you have per day"},
 		{"command": "settings", "description": "View and change all your settings"},
 		{"command": "level", "description": "Set difficulty (beginner/intermediate/upper-intermediate/advanced)"},
@@ -3542,12 +3559,15 @@ func openStore(path string) (*Store, error) {
 	);
 	CREATE INDEX IF NOT EXISTS idx_review_due ON review_schedule(chat_id, due_at);
 	CREATE TABLE IF NOT EXISTS deck_cards (
-		deck_id     TEXT    NOT NULL,
-		term        TEXT    NOT NULL,
-		definition  TEXT    NOT NULL DEFAULT '',
-		example     TEXT    NOT NULL DEFAULT '',
-		group_label TEXT    NOT NULL DEFAULT '',
-		ordering    INTEGER NOT NULL DEFAULT 0,
+		deck_id       TEXT    NOT NULL,
+		term          TEXT    NOT NULL,
+		definition    TEXT    NOT NULL DEFAULT '',
+		example       TEXT    NOT NULL DEFAULT '',
+		group_label   TEXT    NOT NULL DEFAULT '',
+		ordering      INTEGER NOT NULL DEFAULT 0,
+		persian       TEXT    NOT NULL DEFAULT '',
+		pronunciation TEXT    NOT NULL DEFAULT '',
+		mnemonic      TEXT    NOT NULL DEFAULT '',
 		PRIMARY KEY (deck_id, term)
 	);
 	CREATE TABLE IF NOT EXISTS leitner_progress (
@@ -3831,6 +3851,16 @@ func (s *Store) migrate() error {
 		if !s.columnExists("user_prefs", col) {
 			log.Printf("💾 [DB_MIGRATE] Adding user_prefs.%s column...", col)
 			if _, err := s.db.Exec("ALTER TABLE user_prefs ADD COLUMN " + col + " " + def); err != nil {
+				return err
+			}
+		}
+	}
+	// deck_cards Persian/pronunciation/mnemonic columns added in v1.30.0; filled
+	// from the source JSON (where present) and the AI backfill worker otherwise.
+	for _, col := range []string{"persian", "pronunciation", "mnemonic"} {
+		if !s.columnExists("deck_cards", col) {
+			log.Printf("💾 [DB_MIGRATE] Adding deck_cards.%s column...", col)
+			if _, err := s.db.Exec("ALTER TABLE deck_cards ADD COLUMN " + col + " TEXT NOT NULL DEFAULT ''"); err != nil {
 				return err
 			}
 		}

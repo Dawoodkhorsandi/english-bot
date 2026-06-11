@@ -1,0 +1,562 @@
+[
+ {
+  "id": "g01",
+  "order": 1,
+  "level": "beginner",
+  "title": "The verb “to be”",
+  "pattern": "subject + am / is / are (+ not)",
+  "explanation": "Use “to be” to describe people and things. I take am; he/she/it takes is; we/you/they take are. Make it negative with not and questions by putting be first.",
+  "examples": [
+   "I am a student.",
+   "She is happy today.",
+   "They are not at home.",
+   "Are you ready?"
+  ],
+  "tip": "Contractions are natural: I'm, he's, we're, isn't, aren't.",
+  "practice": [
+   {
+    "q": "___ she your sister?",
+    "options": [
+     "Is",
+     "Are",
+     "Am"
+    ],
+    "answer": 0
+   },
+   {
+    "q": "We ___ tired.",
+    "options": [
+     "is",
+     "are",
+     "am"
+    ],
+    "answer": 1
+   }
+  ]
+ },
+ {
+  "id": "g02",
+  "order": 2,
+  "level": "beginner",
+  "title": "Present simple",
+  "pattern": "subject + base verb (he/she/it + verb-s)",
+  "explanation": "Use the present simple for habits, routines and facts. Add -s for he/she/it. Use do/does to form questions and negatives.",
+  "examples": [
+   "I work in a bank.",
+   "She likes coffee.",
+   "They don't live here.",
+   "Does he play tennis?"
+  ],
+  "tip": "Only the he/she/it form takes -s: he runs, but they run.",
+  "practice": [
+   {
+    "q": "He ___ to school by bus.",
+    "options": [
+     "go",
+     "goes",
+     "going"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "___ they speak English?",
+    "options": [
+     "Does",
+     "Do",
+     "Are"
+    ],
+    "answer": 1
+   }
+  ]
+ },
+ {
+  "id": "g03",
+  "order": 3,
+  "level": "beginner",
+  "title": "Articles: a, an, the",
+  "pattern": "a/an + singular noun (first mention) · the + known noun",
+  "explanation": "Use a before a consonant sound and an before a vowel sound for one non-specific thing. Use the when it's clear which one you mean.",
+  "examples": [
+   "I saw a dog.",
+   "She is an engineer.",
+   "The dog was friendly.",
+   "Open the window, please."
+  ],
+  "tip": "It's about sound, not spelling: an hour, a university.",
+  "practice": [
+   {
+    "q": "I need ___ umbrella.",
+    "options": [
+     "a",
+     "an",
+     "the"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "Close ___ door, please. (we both know which)",
+    "options": [
+     "a",
+     "an",
+     "the"
+    ],
+    "answer": 2
+   }
+  ]
+ },
+ {
+  "id": "g04",
+  "order": 4,
+  "level": "beginner",
+  "title": "Plurals & there is / there are",
+  "pattern": "there is + singular · there are + plural",
+  "explanation": "Most nouns add -s for plural (some add -es or change form). Use there is for one thing and there are for more than one.",
+  "examples": [
+   "There is a book on the table.",
+   "There are three chairs.",
+   "There are many people here.",
+   "Is there a problem?"
+  ],
+  "tip": "Irregular plurals don't take -s: child→children, man→men, foot→feet.",
+  "practice": [
+   {
+    "q": "There ___ two cats in the garden.",
+    "options": [
+     "is",
+     "are",
+     "be"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "The plural of “box” is ___.",
+    "options": [
+     "boxs",
+     "boxes",
+     "boxen"
+    ],
+    "answer": 1
+   }
+  ]
+ },
+ {
+  "id": "g05",
+  "order": 5,
+  "level": "beginner",
+  "title": "Present continuous",
+  "pattern": "subject + am/is/are + verb-ing",
+  "explanation": "Use the present continuous for actions happening now or around now. Form it with be + the -ing form of the verb.",
+  "examples": [
+   "I am reading a book.",
+   "She is working right now.",
+   "They are not listening.",
+   "What are you doing?"
+  ],
+  "tip": "Compare with present simple: “I read every day” (habit) vs “I'm reading now” (now).",
+  "practice": [
+   {
+    "q": "Look! It ___ .",
+    "options": [
+     "rains",
+     "is raining",
+     "rain"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "They ___ TV at the moment.",
+    "options": [
+     "watch",
+     "are watching",
+     "watches"
+    ],
+    "answer": 1
+   }
+  ]
+ },
+ {
+  "id": "g06",
+  "order": 6,
+  "level": "elementary",
+  "title": "Past simple",
+  "pattern": "subject + verb-ed (regular) / irregular past form",
+  "explanation": "Use the past simple for finished actions at a known past time. Regular verbs add -ed; many common verbs are irregular. Use did for questions and negatives.",
+  "examples": [
+   "I visited my aunt yesterday.",
+   "She went to Paris last year.",
+   "We didn't see the film.",
+   "Did you call him?"
+  ],
+  "tip": "After did, always use the base verb: “Did you go?” not “Did you went?”",
+  "practice": [
+   {
+    "q": "They ___ home late last night.",
+    "options": [
+     "come",
+     "came",
+     "comed"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "___ you finish the report?",
+    "options": [
+     "Did",
+     "Do",
+     "Does"
+    ],
+    "answer": 0
+   }
+  ]
+ },
+ {
+  "id": "g07",
+  "order": 7,
+  "level": "elementary",
+  "title": "Comparatives & superlatives",
+  "pattern": "short adj + -er than · the + adj + -est · more/most + long adj",
+  "explanation": "Compare two things with the comparative (-er / more) and three or more with the superlative (the -est / the most).",
+  "examples": [
+   "This box is heavier than that one.",
+   "She is more careful than me.",
+   "It's the tallest building here.",
+   "That was the most interesting talk."
+  ],
+  "tip": "One syllable → -er/-est; three+ syllables → more/most. Good→better→best is irregular.",
+  "practice": [
+   {
+    "q": "Today is ___ than yesterday.",
+    "options": [
+     "hot",
+     "hotter",
+     "hottest"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "It's the ___ film I've ever seen.",
+    "options": [
+     "good",
+     "better",
+     "best"
+    ],
+    "answer": 2
+   }
+  ]
+ },
+ {
+  "id": "g08",
+  "order": 8,
+  "level": "elementary",
+  "title": "Future: will vs. be going to",
+  "pattern": "will + base verb · am/is/are going to + base verb",
+  "explanation": "Use will for decisions made now, offers and predictions. Use be going to for plans already decided and predictions based on evidence.",
+  "examples": [
+   "I'll help you with that.",
+   "It will probably rain tomorrow.",
+   "We're going to visit Rome in May.",
+   "Look at those clouds — it's going to rain."
+  ],
+  "tip": "Plan already made → going to. Deciding as you speak → will.",
+  "practice": [
+   {
+    "q": "“The phone's ringing.” “I ___ get it.”",
+    "options": [
+     "am going to",
+     "will",
+     "go"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "We ___ buy a house next year (already decided).",
+    "options": [
+     "will",
+     "are going to",
+     "go"
+    ],
+    "answer": 1
+   }
+  ]
+ },
+ {
+  "id": "g09",
+  "order": 9,
+  "level": "intermediate",
+  "title": "Present perfect",
+  "pattern": "subject + have/has + past participle",
+  "explanation": "Use the present perfect for past actions connected to now: life experience, recent news, or unfinished time. Use for + a period and since + a starting point.",
+  "examples": [
+   "I have visited Japan twice.",
+   "She has just arrived.",
+   "We haven't met before.",
+   "He has lived here since 2010."
+  ],
+  "tip": "Use the past simple for a finished time (“I saw it yesterday”), present perfect for unfinished/unstated time (“I have seen it”).",
+  "practice": [
+   {
+    "q": "I ___ never ___ sushi.",
+    "options": [
+     "did / eat",
+     "have / eaten",
+     "am / eating"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "We've been friends ___ ten years.",
+    "options": [
+     "since",
+     "for",
+     "ago"
+    ],
+    "answer": 1
+   }
+  ]
+ },
+ {
+  "id": "g10",
+  "order": 10,
+  "level": "intermediate",
+  "title": "Modal verbs (can, must, should)",
+  "pattern": "subject + modal + base verb",
+  "explanation": "Modals add meaning to a verb: can/could (ability, possibility), must/have to (obligation), should (advice), might/may (possibility). They are followed by the base verb with no -s.",
+  "examples": [
+   "You can park here.",
+   "I must finish this today.",
+   "You should see a doctor.",
+   "It might rain later."
+  ],
+  "tip": "No “to” and no -s after a modal: “She can swim,” not “She cans to swim.”",
+  "practice": [
+   {
+    "q": "You ___ smoke here — it's forbidden.",
+    "options": [
+     "mustn't",
+     "shouldn't",
+     "don't have to"
+    ],
+    "answer": 0
+   },
+   {
+    "q": "You look tired. You ___ rest.",
+    "options": [
+     "should",
+     "must",
+     "can"
+    ],
+    "answer": 0
+   }
+  ]
+ },
+ {
+  "id": "g11",
+  "order": 11,
+  "level": "intermediate",
+  "title": "Zero & first conditional",
+  "pattern": "If + present, present (zero) · If + present, will + base (first)",
+  "explanation": "Use the zero conditional for facts that are always true. Use the first conditional for a real or likely future situation and its result.",
+  "examples": [
+   "If you heat ice, it melts.",
+   "If it rains, the ground gets wet.",
+   "If you study, you will pass.",
+   "I'll call you if I have time."
+  ],
+  "tip": "No “will” in the if-part: “If it rains, I will stay,” not “If it will rain…”.",
+  "practice": [
+   {
+    "q": "If you mix blue and yellow, you ___ green.",
+    "options": [
+     "will get",
+     "get",
+     "got"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "If she calls, I ___ answer.",
+    "options": [
+     "will",
+     "would",
+     "am"
+    ],
+    "answer": 0
+   }
+  ]
+ },
+ {
+  "id": "g12",
+  "order": 12,
+  "level": "intermediate",
+  "title": "Second conditional",
+  "pattern": "If + past simple, would + base verb",
+  "explanation": "Use the second conditional for unreal, imaginary or unlikely present/future situations. The past form here means “imaginary”, not past time.",
+  "examples": [
+   "If I had more money, I would travel.",
+   "If I were you, I'd apologise.",
+   "She would help if she knew.",
+   "What would you do if you won?"
+  ],
+  "tip": "With “to be”, formal English uses were for all subjects: “If I were rich…”.",
+  "practice": [
+   {
+    "q": "If I ___ you, I'd take the job.",
+    "options": [
+     "am",
+     "were",
+     "will be"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "If we had a car, we ___ drive there.",
+    "options": [
+     "will",
+     "would",
+     "did"
+    ],
+    "answer": 1
+   }
+  ]
+ },
+ {
+  "id": "g13",
+  "order": 13,
+  "level": "upper-intermediate",
+  "title": "Third conditional",
+  "pattern": "If + past perfect, would have + past participle",
+  "explanation": "Use the third conditional to imagine a different past — something that did NOT happen and its imagined result. It often expresses regret or criticism.",
+  "examples": [
+   "If I had studied, I would have passed.",
+   "She would have come if you had invited her.",
+   "If they hadn't left early, they'd have missed the train.",
+   "What would you have done?"
+  ],
+  "tip": "Both parts are unreal past: “had + p.p.” in the if-part, “would have + p.p.” in the result.",
+  "practice": [
+   {
+    "q": "If he ___ harder, he would have won.",
+    "options": [
+     "tried",
+     "had tried",
+     "tries"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "I ___ called if I'd known.",
+    "options": [
+     "would have",
+     "will have",
+     "had"
+    ],
+    "answer": 0
+   }
+  ]
+ },
+ {
+  "id": "g14",
+  "order": 14,
+  "level": "upper-intermediate",
+  "title": "The passive voice",
+  "pattern": "subject + be (correct tense) + past participle (+ by …)",
+  "explanation": "Use the passive when the action matters more than who does it, or the doer is unknown/obvious. The object of the active sentence becomes the subject.",
+  "examples": [
+   "English is spoken here.",
+   "The bridge was built in 1890.",
+   "My car has been stolen.",
+   "The results will be announced tomorrow."
+  ],
+  "tip": "Keep the tense in “be”: is made, was made, has been made, will be made.",
+  "practice": [
+   {
+    "q": "This song ___ by millions of people.",
+    "options": [
+     "is loved",
+     "loves",
+     "is loving"
+    ],
+    "answer": 0
+   },
+   {
+    "q": "The letter ___ yesterday.",
+    "options": [
+     "was sent",
+     "is sent",
+     "sent"
+    ],
+    "answer": 0
+   }
+  ]
+ },
+ {
+  "id": "g15",
+  "order": 15,
+  "level": "upper-intermediate",
+  "title": "Reported speech",
+  "pattern": "say/tell + that + clause (tense usually shifts back)",
+  "explanation": "When we report what someone said, the tense usually moves one step back (present→past, will→would) and pronouns/time words change.",
+  "examples": [
+   "“I am tired.” → He said he was tired.",
+   "“I'll call.” → She said she would call.",
+   "“We saw it.” → They said they had seen it.",
+   "She asked where I lived."
+  ],
+  "tip": "Tell needs a person (tell me), say does not (say that…).",
+  "practice": [
+   {
+    "q": "“I like it.” → He said he ___ it.",
+    "options": [
+     "likes",
+     "liked",
+     "will like"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "“I will help.” → She said she ___ help.",
+    "options": [
+     "will",
+     "would",
+     "helps"
+    ],
+    "answer": 1
+   }
+  ]
+ },
+ {
+  "id": "g16",
+  "order": 16,
+  "level": "upper-intermediate",
+  "title": "Relative clauses",
+  "pattern": "noun + who/which/that/where/whose + extra information",
+  "explanation": "Relative clauses add information about a noun. Use who for people, which for things, that for either (in defining clauses), where for places and whose for possession.",
+  "examples": [
+   "The man who called is my boss.",
+   "The book which I read was great.",
+   "This is the house where I grew up.",
+   "She's the writer whose book won."
+  ],
+  "tip": "In a defining clause you can drop who/which/that when it's the object: “the book (that) I read”.",
+  "practice": [
+   {
+    "q": "That's the woman ___ helped me.",
+    "options": [
+     "which",
+     "who",
+     "where"
+    ],
+    "answer": 1
+   },
+   {
+    "q": "It's a topic ___ interests me.",
+    "options": [
+     "who",
+     "whose",
+     "that"
+    ],
+    "answer": 2
+   }
+  ]
+ }
+]

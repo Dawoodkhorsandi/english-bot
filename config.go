@@ -188,6 +188,10 @@ var (
 	// WEB_APP_PORT controls the local HTTP port (default 8090).
 	webAppURL  = getEnv("WEB_APP_URL", "")
 	webAppPort = getEnv("WEB_APP_PORT", "8090")
+
+	// botUsername is the bot's public @handle, used by the Mini App's share/invite
+	// link. Defaults to the production handle; override via env when self-hosting.
+	botUsername = getEnv("BOT_USERNAME", "@mymusclememorybot")
 )
 
 // appLocation is the time.Location used for all scheduling decisions.

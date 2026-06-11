@@ -584,12 +584,14 @@ func parseLabeledTerm(text, label string) string {
 	return ""
 }
 
-// parseMeaning extracts the one-line meaning that follows the "Meaning" header in
-// a vocabulary card, stripping any HTML tags. Empty if not found.
-func parseMeaning(card string) string {
+// cardSection returns the first non-empty, HTML-stripped line that follows the
+// bold section header containing keyword (case-insensitive) in a content card
+// (e.g. "Meaning", "Pronunciation", "Persian", "Examples"). Empty if not found.
+func cardSection(card, keyword string) string {
+	kw := strings.ToLower(keyword)
 	lines := strings.Split(card, "\n")
 	for i, line := range lines {
-		if !strings.Contains(strings.ToLower(line), "meaning") || !strings.Contains(line, "<b>") {
+		if !strings.Contains(strings.ToLower(line), kw) || !strings.Contains(line, "<b>") {
 			continue
 		}
 		for j := i + 1; j < len(lines); j++ {
@@ -600,6 +602,25 @@ func parseMeaning(card string) string {
 		}
 	}
 	return ""
+}
+
+// parseMeaning extracts the one-line meaning that follows the "Meaning" header in
+// a vocabulary card, stripping any HTML tags. Empty if not found.
+func parseMeaning(card string) string { return cardSection(card, "Meaning") }
+
+// parsePronunciation extracts the pronunciation line (syllable spelling · IPA).
+func parsePronunciation(card string) string { return cardSection(card, "Pronunciation") }
+
+// parsePersian extracts the Persian/Farsi translation (the <tg-spoiler> content,
+// with tags stripped).
+func parsePersian(card string) string { return cardSection(card, "Persian") }
+
+// parseExample returns the first example sentence from a card's Examples section,
+// with any leading bullet removed.
+func parseExample(card string) string {
+	ex := strings.TrimSpace(cardSection(card, "Examples"))
+	ex = strings.TrimSpace(strings.TrimPrefix(ex, "•"))
+	return strings.TrimSpace(ex)
 }
 
 // ---------------------------------------------------------------------------

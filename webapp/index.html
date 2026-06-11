@@ -34,9 +34,10 @@
   <section class="view" id="view-board" hidden>
     <h1>🏆 Leaderboard</h1>
     <div class="chips">
-      <button class="chip chip-on" data-metric="words">Words learned</button>
-      <button class="chip" data-metric="mastered">Mastered</button>
+      <button class="chip chip-on" data-metric="words">All-time</button>
       <button class="chip" data-metric="weekly">📅 This week</button>
+      <button class="chip" data-metric="today">☀️ Today</button>
+      <button class="chip" data-metric="mastered">Mastered</button>
     </div>
     <div id="board-me" class="card" hidden></div>
     <div id="board-list" class="list"></div>
@@ -60,8 +61,15 @@
           <button class="chip" data-practice="collocation">🔗 Collocation</button>
         </div>
       </div>
+      <div class="card grammar-cta" id="grammar-open">
+        <h2>Grammar lessons</h2>
+        <div class="sub">📖 Learn one pattern at a time, from easy to advanced — with examples and quick practice.</div>
+      </div>
       <div id="decks-list" class="list"></div>
       <p id="decks-empty" class="empty" hidden></p>
+    </div>
+    <div id="decks-detail" hidden>
+      <div id="detail-body"></div>
     </div>
     <div id="decks-study" hidden>
       <h1 id="decks-study-title"></h1>
@@ -70,6 +78,10 @@
     <div id="decks-practice" hidden>
       <h1 id="practice-title"></h1>
       <div id="practice-body"></div>
+    </div>
+    <div id="decks-grammar" hidden>
+      <h1>📖 Grammar</h1>
+      <div id="grammar-body"></div>
     </div>
   </section>
 

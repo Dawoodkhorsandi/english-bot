@@ -143,11 +143,11 @@ deck study is a `BackButton` drill-down inside the Decks tab.
 
 | Screen | Data | Layout | Target additions (`GAP`) |
 |---|---|---|---|
-| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Library tiles (idioms/collocations/stories/tips, if any) → Quiz accuracy (if answered>0) → 30-day activity → Level | ✅ heatmap (v1.26.0), share-streak + home-screen offer (v1.28.0), Library tiles (v1.29.2) |
+| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → **hero streak card** (progress ring `streakRing` + ⓘ streak explainer) → Vocabulary tiles (Words/Mastered/Drills/Quiz) → Library tiles → Quiz accuracy → heatmap (intensity + legend) → Level | ✅ hero/ring + explainer (v1.30.0) |
 | **Library** `#view-vocab` | `GET /api/vocab` (words/bookmarks), `GET /api/content?kind=` (idiom/collocation/story/tip), `GET /api/quizzes` | Search (words only) → kind chips → list → Load more; content rows expand in place (`contentRow`), quiz rows show ✅/❌ + date (`quizRow`) | `GAP`: result count while searching |
-| **Decks** `#view-decks` | `GET /api/decks`(+`/study`,`/swipe`), `GET /api/practice?kind=`, `GET /api/quiz/next` + `POST /api/quiz/answer` | Practice-now card (quiz/word/idiom/collocation chips → BackButton drill-down) → deck cards → swipe session | ✅ practice hub v1.29.0 |
-| **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap | ✅ native buttons + completion screen (v1.26.0) |
-| **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips → your-rank card (if outside top 50) → top-50 list; first-visit name modal | ✅ avatars + 📅 weekly chip (v1.28.0) |
+| **Study** `#view-decks` | `GET /api/decks`(+`/study`,`/swipe`,`/detail`), `GET /api/practice?kind=`, `GET /api/quiz/next`+`/answer`, `GET /api/grammar`(+`/lesson`) | Practice-now chips + Grammar CTA → deck list → **deck detail** (box distribution + Study CTA, `showDeckSub`) → swipe session; Grammar list → lesson detail | ✅ detail page + grammar (v1.30.0) |
+| **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap; card shows pronunciation (front sub) + meaning/example/Persian (`cardBack`) | ✅ richer card + iOS touch swipe (v1.30.0) |
+| **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips (All-time/Weekly/**Today**/Mastered) → your-rank card → top-50 list (initial-letter badges, **no photos**); first-visit name modal | ✅ Today metric, photos removed (v1.30.0) |
 | **Settings** `#view-settings` | `GET/POST /api/settings` | Level chips → leaderboard name → pause + interval → 9 content toggles | Toggle rollback on failed POST |
 
 State copy conventions — every screen ships all four states:

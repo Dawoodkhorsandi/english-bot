@@ -273,6 +273,69 @@ func TestAPIReviewFlow(t *testing.T) {
 	}
 }
 
+// TestAPIReviewDedupAndEnrich verifies a word present in content_pool at more
+// than one level yields a single review card (not one per level), and that the
+// payload carries pronunciation/Persian/example parsed from the pooled card.
+func TestAPIReviewDedupAndEnrich(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const chatID = 100
+
+	card := "📘 <b>Word of the Session: vigorous</b>\n" +
+		"💬 <b>Meaning</b>\nfull of energy and strength\n" +
+		"🔊 <b>Pronunciation</b>\nVIG-er-us · /ˈvɪɡ.ɚ.əs/\n" +
+		"📝 <b>Examples</b>\n• She took a <b>vigorous</b> walk.\n" +
+		"🇮🇷 <b>Persian</b>\n<tg-spoiler>پرانرژی</tg-spoiler>"
+	// Same term pooled at two levels — the old query returned a row per level.
+	if err := store.AddToPool(kindWord, "beginner", "vigorous", "full of energy and strength", card); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddToPool(kindWord, "advanced", "vigorous", "full of energy and strength", card); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := store.SeedReview(chatID, "vigorous", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(
+		"UPDATE review_schedule SET due_at = ? WHERE chat_id = ? AND word = ?",
+		now.Add(-time.Hour).UTC().Format(srsTimeLayout), chatID, "vigorous",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Store-level dedup.
+	due, err := store.DueReviews(chatID, time.Now(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 {
+		t.Fatalf("DueReviews returned %d rows for one word at two levels, want 1", len(due))
+	}
+
+	// API payload carries the parsed fields.
+	w := apiCall(store, handleAPIReviewNext, http.MethodGet, "/api/review/next", chatID, "")
+	var resp struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("payload items = %d, want 1", len(resp.Items))
+	}
+	it := resp.Items[0]
+	if it["pronunciation"] != "VIG-er-us · /ˈvɪɡ.ɚ.əs/" {
+		t.Errorf("pronunciation = %q", it["pronunciation"])
+	}
+	if it["persian"] != "پرانرژی" {
+		t.Errorf("persian = %q", it["persian"])
+	}
+	if it["example"] != "She took a vigorous walk." {
+		t.Errorf("example = %q", it["example"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Leitner decks
 // ---------------------------------------------------------------------------
@@ -344,6 +407,65 @@ func TestDeckSeedStudySwipe(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("forgotten card %q should remain due", other)
+	}
+}
+
+func TestDeckEnrichmentAndDetail(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const chatID = 321
+
+	// Seed a tiny deck via SeedDecks-like UPSERT directly: insert one rich card.
+	if _, err := store.db.Exec(`
+		INSERT INTO deck_cards (deck_id, term, definition, example, group_label, ordering, persian, pronunciation, mnemonic)
+		VALUES ('504','vigorous','full of energy','She is vigorous.','Lesson 1',0,'پرانرژی','/ˈvɪɡ.ɚ.əs/','vig = vigor')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Study payload carries the enriched fields.
+	w := apiCall(store, handleAPIDeckStudy, http.MethodGet, "/api/decks/study?deck=504", chatID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("study code = %d (%s)", w.Code, w.Body.String())
+	}
+	var study struct {
+		Items []DeckStudyCard `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &study); err != nil {
+		t.Fatal(err)
+	}
+	if len(study.Items) != 1 {
+		t.Fatalf("study items = %d, want 1", len(study.Items))
+	}
+	c := study.Items[0]
+	if c.Persian != "پرانرژی" || c.Pronunciation != "/ˈvɪɡ.ɚ.əs/" || c.Mnemonic != "vig = vigor" {
+		t.Errorf("enriched fields missing: %+v", c)
+	}
+
+	// Detail: one new card, box distribution sums correctly, study a card → box 2.
+	if err := store.DeckSwipe(chatID, "504", "vigorous", true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	dw := apiCall(store, handleAPIDeckDetail, http.MethodGet, "/api/decks/detail?deck=504", chatID, "")
+	if dw.Code != http.StatusOK {
+		t.Fatalf("detail code = %d (%s)", dw.Code, dw.Body.String())
+	}
+	var det DeckDetail
+	if err := json.Unmarshal(dw.Body.Bytes(), &det); err != nil {
+		t.Fatal(err)
+	}
+	if det.Total != 1 || len(det.Boxes) != leitnerMaxBox {
+		t.Fatalf("detail = %+v, want total 1 and %d boxes", det, leitnerMaxBox)
+	}
+	if det.Boxes[1].Count != 1 { // box 2 after a known swipe
+		t.Errorf("box 2 count = %d, want 1 (%+v)", det.Boxes[1].Count, det.Boxes)
+	}
+	if det.New != 0 {
+		t.Errorf("new = %d, want 0 after studying the only card", det.New)
+	}
+
+	// Unknown deck → 404.
+	if w := apiCall(store, handleAPIDeckDetail, http.MethodGet, "/api/decks/detail?deck=nope", chatID, ""); w.Code != http.StatusNotFound {
+		t.Errorf("unknown deck code = %d, want 404", w.Code)
 	}
 }
 
@@ -517,52 +639,75 @@ func TestAPIContentAndQuizHistory(t *testing.T) {
 	}
 }
 
-func TestAPILeaderboardWeeklyAndAvatar(t *testing.T) {
+func TestAPILeaderboardMetricsNoPhoto(t *testing.T) {
 	saveToken(t)
 	store := testStoreHelper(t)
 
-	// Two users learned a word just now (inside the current week).
+	// Two users learned a word just now (inside the current week and today).
 	if err := store.RecordSentVocab(1, "alpha"); err != nil {
 		t.Fatalf("RecordSentVocab: %v", err)
 	}
 	if err := store.RecordSentVocab(2, "beta"); err != nil {
 		t.Fatalf("RecordSentVocab: %v", err)
 	}
-	if err := store.SetPhotoURL(2, "https://example.com/p.jpg"); err != nil {
-		t.Fatalf("SetPhotoURL: %v", err)
-	}
 
-	w := apiCall(store, handleAPILeaderboard, http.MethodGet, "/api/leaderboard?metric=weekly", 1, "")
-	if w.Code != http.StatusOK {
-		t.Fatalf("code = %d, want 200 (%s)", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Metric string      `json:"metric"`
-		Rows   []LeaderRow `json:"rows"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if resp.Metric != "weekly" {
-		t.Errorf("metric = %q, want weekly", resp.Metric)
-	}
-	if len(resp.Rows) != 2 {
-		t.Fatalf("rows = %d, want 2", len(resp.Rows))
-	}
-	var photoSeen bool
-	for _, r := range resp.Rows {
-		if r.Photo == "https://example.com/p.jpg" {
-			photoSeen = true
+	for _, metric := range []string{"weekly", "today"} {
+		w := apiCall(store, handleAPILeaderboard, http.MethodGet, "/api/leaderboard?metric="+metric, 1, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s code = %d, want 200 (%s)", metric, w.Code, w.Body.String())
 		}
-	}
-	if !photoSeen {
-		t.Error("expected user 2's avatar URL in the weekly rows")
+		var resp struct {
+			Metric string                   `json:"metric"`
+			Rows   []map[string]interface{} `json:"rows"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if resp.Metric != metric {
+			t.Errorf("metric = %q, want %q", resp.Metric, metric)
+		}
+		if len(resp.Rows) != 2 {
+			t.Fatalf("%s rows = %d, want 2", metric, len(resp.Rows))
+		}
+		// Privacy: no profile photo field is ever exposed.
+		for _, r := range resp.Rows {
+			if _, ok := r["photo"]; ok {
+				t.Errorf("%s rows must not expose a photo field", metric)
+			}
+		}
 	}
 
 	// Unknown metrics fall back to "words".
-	w = apiCall(store, handleAPILeaderboard, http.MethodGet, "/api/leaderboard?metric=bogus", 1, "")
+	w := apiCall(store, handleAPILeaderboard, http.MethodGet, "/api/leaderboard?metric=bogus", 1, "")
+	var resp struct {
+		Metric string `json:"metric"`
+	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp.Metric != "words" {
 		t.Errorf("bogus metric = %q, want words (err %v)", resp.Metric, err)
+	}
+}
+
+func TestAPIConfig(t *testing.T) {
+	saveToken(t)
+	prevUser, prevURL := botUsername, webAppURL
+	botUsername, webAppURL = "@testbot", "https://bot.example.com"
+	t.Cleanup(func() { botUsername, webAppURL = prevUser, prevURL })
+
+	r := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	handleAPIConfig(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", w.Code)
+	}
+	var resp struct {
+		BotUsername string `json:"botUsername"`
+		WebAppURL   string `json:"webAppURL"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.BotUsername != "@testbot" || resp.WebAppURL != "https://bot.example.com" {
+		t.Errorf("config = %+v", resp)
 	}
 }
 
@@ -682,5 +827,78 @@ func TestAPIQuizNextAndAnswer(t *testing.T) {
 		q.Word, (q.Correct+1)%quizOptionCount, q.Exp, q.Token)
 	if w := apiCall(store, handleAPIQuizAnswer, http.MethodPost, "/api/quiz/answer", chatID, tampered); w.Code != http.StatusBadRequest {
 		t.Errorf("tampered token code = %d, want 400", w.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Grammar lessons
+// ---------------------------------------------------------------------------
+
+func TestGrammarLessonsValid(t *testing.T) {
+	lessons := loadGrammarLessons()
+	if len(lessons) < 10 {
+		t.Fatalf("expected a full curriculum, got %d lessons", len(lessons))
+	}
+	seen := map[string]bool{}
+	for i, l := range lessons {
+		if l.ID == "" || l.Title == "" || l.Pattern == "" || l.Explanation == "" {
+			t.Errorf("lesson %d missing core fields: %+v", i, l)
+		}
+		if len(l.Examples) == 0 {
+			t.Errorf("lesson %q has no examples", l.ID)
+		}
+		if seen[l.ID] {
+			t.Errorf("duplicate lesson id %q", l.ID)
+		}
+		seen[l.ID] = true
+		if i > 0 && l.Order < lessons[i-1].Order {
+			t.Errorf("lessons not ordered easy→hard at %q", l.ID)
+		}
+		for _, p := range l.Practice {
+			if p.Answer < 0 || p.Answer >= len(p.Options) {
+				t.Errorf("lesson %q practice answer index %d out of range", l.ID, p.Answer)
+			}
+		}
+	}
+}
+
+func TestAPIGrammar(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+
+	w := apiCall(store, handleAPIGrammar, http.MethodGet, "/api/grammar", 100, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("list code = %d", w.Code)
+	}
+	var list struct {
+		Lessons []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"lessons"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Lessons) == 0 {
+		t.Fatal("grammar list is empty")
+	}
+
+	// Fetch the first lesson in full.
+	id := list.Lessons[0].ID
+	lw := apiCall(store, handleAPIGrammarLesson, http.MethodGet, "/api/grammar/lesson?id="+id, 100, "")
+	if lw.Code != http.StatusOK {
+		t.Fatalf("lesson code = %d", lw.Code)
+	}
+	var l GrammarLesson
+	if err := json.Unmarshal(lw.Body.Bytes(), &l); err != nil {
+		t.Fatal(err)
+	}
+	if l.ID != id || l.Pattern == "" {
+		t.Errorf("lesson payload = %+v", l)
+	}
+
+	// Unknown id → 404.
+	if w := apiCall(store, handleAPIGrammarLesson, http.MethodGet, "/api/grammar/lesson?id=nope", 100, ""); w.Code != http.StatusNotFound {
+		t.Errorf("unknown lesson code = %d, want 404", w.Code)
 	}
 }
