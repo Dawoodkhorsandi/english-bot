@@ -8,6 +8,13 @@
   --accent: var(--tg-theme-button-color, #2196F3);
   --accent-text: var(--tg-theme-button-text-color, #fff);
   --link: var(--tg-theme-link-color, #2196F3);
+  --section: var(--tg-theme-section-bg-color, var(--card));
+  --accent-fg: var(--tg-theme-accent-text-color, var(--accent));
+  --danger: var(--tg-theme-destructive-text-color, #f44336);
+  --subtitle: var(--tg-theme-subtitle-text-color, var(--hint));
+  --bottom-bar: var(--tg-theme-bottom-bar-bg-color, var(--bg));
+  --success: #4CAF50;
+  --border: rgba(128, 128, 128, .18);
 }
 
 body {
@@ -26,6 +33,18 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .loading, .empty { color: var(--hint); text-align: center; padding: 40px 16px; }
 
+/* ---- Skeleton loaders (first paint) ---- */
+.skeleton { position: relative; overflow: hidden; background: var(--border); border-radius: 8px; }
+.skeleton::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent);
+  animation: shimmer 1.2s infinite;
+}
+@keyframes shimmer { to { transform: translateX(100%); } }
+.skel-line { height: 14px; margin-bottom: 10px; }
+.skel-big { height: 34px; width: 55%; margin-bottom: 10px; }
+.skel-row { height: 58px; border-radius: 12px; margin-bottom: 8px; }
+
 /* ---- Dashboard cards ---- */
 .card { background: var(--card); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
 .card h2 {
@@ -34,7 +53,7 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 }
 .big { font-size: 34px; font-weight: 700; line-height: 1.1; }
 .sub { font-size: 13px; color: var(--hint); margin-top: 4px; }
-.bar-wrap { background: rgba(128,128,128,.2); border-radius: 6px; height: 8px; margin-top: 10px; overflow: hidden; }
+.bar-wrap { background: var(--border); border-radius: 6px; height: 8px; margin-top: 10px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 6px; transition: width .4s ease; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .chart-box { height: 140px; margin-top: 8px; }
@@ -103,20 +122,20 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
   position: absolute; top: 18px; font-size: 22px; font-weight: 800; padding: 4px 12px;
   border-radius: 8px; border: 3px solid; opacity: 0; text-transform: uppercase;
 }
-.swipe-stamp.known { right: 18px; color: #4CAF50; border-color: #4CAF50; transform: rotate(12deg); }
-.swipe-stamp.forgot { left: 18px; color: #f44336; border-color: #f44336; transform: rotate(-12deg); }
+.swipe-stamp.known { right: 18px; color: var(--success); border-color: var(--success); transform: rotate(12deg); }
+.swipe-stamp.forgot { left: 18px; color: var(--danger); border-color: var(--danger); transform: rotate(-12deg); }
 .swipe-actions { display: flex; gap: 12px; }
 .swipe-btn {
   flex: 1; border: none; border-radius: 12px; padding: 15px; font-size: 16px;
   font-weight: 600; cursor: pointer; color: #fff;
 }
-.swipe-btn.forgot { background: #f44336; }
-.swipe-btn.known { background: #4CAF50; }
+.swipe-btn.forgot { background: var(--danger); }
+.swipe-btn.known { background: var(--success); }
 .swipe-progress { text-align: center; color: var(--hint); font-size: 13px; margin-top: 14px; }
 
 /* ---- Settings ---- */
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 15px; }
-.set-row + .set-row { border-top: 1px solid rgba(128,128,128,.15); }
+.set-row + .set-row { border-top: 1px solid var(--border); }
 .num {
   width: 84px; padding: 7px 10px; border-radius: 8px; border: none;
   background: var(--bg); color: var(--text); font-size: 15px; text-align: right;
@@ -148,8 +167,8 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 /* ---- Bottom tab bar ---- */
 #tabbar {
   position: fixed; left: 0; right: 0; bottom: 0;
-  display: flex; background: var(--bg);
-  border-top: 1px solid rgba(128,128,128,.2);
+  display: flex; background: var(--bottom-bar);
+  border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .tab {

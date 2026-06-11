@@ -3,6 +3,8 @@
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
+// Blend the native bottom-bar area with the app's tab bar.
+try { tg.setBottomBarColor(tg.themeParams.bottom_bar_bg_color || 'bg_color'); } catch (e) { /* older clients */ }
 
 // ---------------------------------------------------------------------------
 // API helper — every request carries the Telegram initData for HMAC auth.
@@ -21,6 +23,40 @@ function haptic(kind) {
   try { tg.HapticFeedback.impactOccurred(kind || 'light'); } catch (e) { /* ignore */ }
 }
 
+// Result feedback (review answers, errors): success | error | warning.
+function hapticNotify(type) {
+  try { tg.HapticFeedback.notificationOccurred(type); } catch (e) { /* ignore */ }
+}
+
+// Selection feedback: tab switches, chips, pickers.
+function hapticSelect() {
+  try { tg.HapticFeedback.selectionChanged(); } catch (e) { /* ignore */ }
+}
+
+// Keep a vertical drag on a swipe card from collapsing the Mini App.
+function setSwipeGuard(on) {
+  try { on ? tg.disableVerticalSwipes() : tg.enableVerticalSwipes(); } catch (e) { /* ignore */ }
+}
+
+function setCloseGuard(on) {
+  try { on ? tg.enableClosingConfirmation() : tg.disableClosingConfirmation(); } catch (e) { /* ignore */ }
+}
+
+function skeletonRows(n) {
+  let html = '';
+  for (let i = 0; i < n; i++) html += '<div class="skeleton skel-row"></div>';
+  return html;
+}
+
+function skeletonCards(n) {
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    html += '<div class="card"><div class="skeleton skel-line" style="width:30%"></div>' +
+            '<div class="skeleton skel-big"></div><div class="skeleton skel-line" style="width:45%"></div></div>';
+  }
+  return html;
+}
+
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -35,6 +71,8 @@ let currentView = 'dashboard';
 
 function showView(name) {
   try { tg.BackButton.hide(); } catch (e) { /* ignore */ } // reset on tab switch
+  setSwipeGuard(name === 'review'); // deck study sets its own guard
+  setCloseGuard(false);
   currentView = name;
   document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('tab-on', t.dataset.view === name));
@@ -43,7 +81,7 @@ function showView(name) {
 }
 
 document.querySelectorAll('.tab').forEach(t => {
-  t.addEventListener('click', () => { haptic('light'); showView(t.dataset.view); });
+  t.addEventListener('click', () => { hapticSelect(); showView(t.dataset.view); });
 });
 
 // ---------------------------------------------------------------------------
@@ -62,7 +100,7 @@ function renderDashboard(s) {
   let html = '<h1>📊 Your Progress</h1>';
   if (s.paused) {
     html += '<div class="card" style="background:rgba(244,67,54,.12)">' +
-      '<div class="sub" style="color:#f44336">⏸️ Scheduled sends are paused — send /resume in the chat.</div></div>';
+      '<div class="sub" style="color:var(--danger)">⏸️ Scheduled sends are paused — send /resume in the chat.</div></div>';
   }
   html += '<div class="card"><h2>Streak</h2>' +
     '<div class="big">' + s.current_streak + ' day' + (s.current_streak === 1 ? '' : 's') + flame + '</div>' +
@@ -79,7 +117,7 @@ function renderDashboard(s) {
     html += '<div class="card"><h2>Quiz accuracy</h2>' +
       '<div class="big">' + s.quiz_pct + '%</div>' +
       '<div class="sub">' + s.quiz_correct + ' / ' + s.quiz_answered + ' correct</div>' +
-      bar(s.quiz_pct, '#4CAF50') + '</div>';
+      bar(s.quiz_pct, 'var(--success)') + '</div>';
   }
 
   html += '<div class="card"><h2>Activity · last 30 days</h2>' +
@@ -114,8 +152,13 @@ function renderDashboard(s) {
 }
 
 async function loadDashboard() {
-  try { renderDashboard(await api('/api/stats')); }
-  catch (e) { views.dashboard.innerHTML = '<p class="empty">Could not load your stats.<br>Try again later.</p>'; }
+  // Skeleton on first paint only; on later visits the old content stays
+  // until fresh data replaces it (no flash).
+  if (!views.dashboard.dataset.ready) views.dashboard.innerHTML = skeletonCards(3);
+  try {
+    renderDashboard(await api('/api/stats'));
+    views.dashboard.dataset.ready = '1';
+  } catch (e) { views.dashboard.innerHTML = '<p class="empty">Could not load your stats.<br>Try again later.</p>'; }
 }
 
 // ---------------------------------------------------------------------------
@@ -144,13 +187,13 @@ function wordRow(w) {
     star.textContent = on ? '⭐' : '☆';
     haptic('light');
     try { await api('/api/bookmark', { method: 'POST', body: JSON.stringify({ term: w.term, on }) }); }
-    catch (e) { on = !on; star.textContent = on ? '⭐' : '☆'; }
+    catch (e) { on = !on; star.textContent = on ? '⭐' : '☆'; hapticNotify('error'); }
   });
   return el;
 }
 
 async function loadVocab(reset) {
-  if (reset) { vocabState.offset = 0; listEl.innerHTML = ''; }
+  if (reset) { vocabState.offset = 0; listEl.innerHTML = skeletonRows(5); }
   const params = new URLSearchParams({
     offset: vocabState.offset, limit: vocabState.limit,
     bookmarks: vocabState.filter === 'bookmarks' ? '1' : '0',
@@ -158,8 +201,9 @@ async function loadVocab(reset) {
   });
   let data;
   try { data = await api('/api/vocab?' + params.toString()); }
-  catch (e) { emptyEl.hidden = false; emptyEl.textContent = 'Could not load your words.'; return; }
+  catch (e) { listEl.innerHTML = ''; emptyEl.hidden = false; emptyEl.textContent = 'Could not load your words.'; return; }
 
+  if (reset) listEl.innerHTML = '';
   vocabState.total = data.total || 0;
   (data.items || []).forEach(w => listEl.appendChild(wordRow(w)));
   vocabState.offset += (data.items || []).length;
@@ -182,11 +226,11 @@ searchEl.addEventListener('input', () => {
   searchTimer = setTimeout(() => { vocabState.q = searchEl.value.trim(); loadVocab(true); }, 250);
 });
 
-document.querySelectorAll('.chip').forEach(c => {
+document.querySelectorAll('[data-filter]').forEach(c => {
   c.addEventListener('click', () => {
-    document.querySelectorAll('.chip').forEach(x => x.classList.toggle('chip-on', x === c));
+    document.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('chip-on', x === c));
     vocabState.filter = c.dataset.filter;
-    haptic('light');
+    hapticSelect();
     loadVocab(true);
   });
 });
@@ -214,9 +258,10 @@ function boardRow(r) {
 }
 
 async function loadBoard() {
+  if (!boardListEl.children.length) boardListEl.innerHTML = skeletonRows(6);
   let data;
   try { data = await api('/api/leaderboard?metric=' + boardState.metric); }
-  catch (e) { boardEmptyEl.hidden = false; boardEmptyEl.textContent = 'Could not load the leaderboard.'; return; }
+  catch (e) { boardListEl.innerHTML = ''; boardEmptyEl.hidden = false; boardEmptyEl.textContent = 'Could not load the leaderboard.'; return; }
 
   // First visit and no chosen name yet → invite the user to pick one.
   if (!boardState.promptedForName && data.me && !data.me.hasName) {
@@ -245,7 +290,7 @@ document.querySelectorAll('[data-metric]').forEach(c => {
   c.addEventListener('click', () => {
     document.querySelectorAll('[data-metric]').forEach(x => x.classList.toggle('chip-on', x === c));
     boardState.metric = c.dataset.metric;
-    haptic('light');
+    hapticSelect();
     loadBoard();
   });
 });
@@ -288,6 +333,8 @@ function askDisplayName() {
 // ---------------------------------------------------------------------------
 function createSwipeSession(container, opts) {
   let queue = [];
+  let answered = 0;
+  let finished = false;
   container.innerHTML =
     '<div class="swipe-area"></div>' +
     '<div class="swipe-actions">' +
@@ -299,6 +346,9 @@ function createSwipeSession(container, opts) {
   const progress = container.querySelector('.swipe-progress');
 
   function finish(msg) {
+    finished = true;
+    setCloseGuard(false);
+    if (answered > 0) hapticNotify('success');
     area.innerHTML = '<div class="swipe-card" style="cursor:default">' +
       '<div class="swipe-front" style="font-size:42px">🎉</div>' +
       '<div class="swipe-back">' + esc(msg) + '</div></div>';
@@ -308,6 +358,7 @@ function createSwipeSession(container, opts) {
 
   function showCard() {
     if (!queue.length) { finish(opts.doneText || 'All done for now!'); return; }
+    finished = false;
     actions.style.display = 'flex';
     const card = queue[0];
     progress.textContent = queue.length + ' card' + (queue.length === 1 ? '' : 's') + ' left';
@@ -355,21 +406,30 @@ function createSwipeSession(container, opts) {
   }
 
   function commit(known, el) {
-    haptic(known ? 'medium' : 'rigid');
+    hapticNotify(known ? 'success' : 'error');
     const card = queue.shift();
+    answered++;
+    setCloseGuard(true); // a stray swipe-down must not lose the session
     if (el) {
       el.classList.add('leaving');
       el.style.transform = 'translateX(' + (known ? 600 : -600) + 'px) rotate(' + (known ? 40 : -40) + 'deg)';
       el.style.opacity = '0';
     }
-    Promise.resolve(opts.onAnswer(card, known)).catch(() => {});
+    Promise.resolve(opts.onAnswer(card, known)).catch(() => {
+      // The answer didn't reach the server — put the card back so the
+      // session can't silently lose progress (max one retry per card).
+      card._retries = (card._retries || 0) + 1;
+      if (card._retries > 1) return;
+      queue.push(card);
+      if (finished) showCard(); else progress.textContent = queue.length + ' card' + (queue.length === 1 ? '' : 's') + ' left';
+    });
     setTimeout(showCard, 180);
   }
 
   actions.querySelector('.known').addEventListener('click', () => commit(true, area.querySelector('.swipe-card')));
   actions.querySelector('.forgot').addEventListener('click', () => commit(false, area.querySelector('.swipe-card')));
 
-  area.innerHTML = '<div class="loading">Loading…</div>';
+  area.innerHTML = '<div class="skeleton" style="position:absolute;inset:0;border-radius:18px"></div>';
   Promise.resolve(opts.load()).then(cards => {
     queue = cards || [];
     if (!queue.length) { finish(opts.emptyText || 'Nothing to review right now.'); return; }
@@ -422,7 +482,7 @@ function deckCardEl(d) {
 async function loadDecks() {
   // Always return to the deck list when (re)entering the tab.
   closeDeck(true);
-  decksListEl.innerHTML = '<div class="loading">Loading…</div>';
+  decksListEl.innerHTML = skeletonRows(2);
   let data;
   try { data = await api('/api/decks'); }
   catch (e) { decksListEl.innerHTML = ''; decksEmptyEl.hidden = false; decksEmptyEl.textContent = 'Could not load decks.'; return; }
@@ -438,6 +498,7 @@ function openDeck(d) {
   decksStudy.hidden = false;
   document.getElementById('decks-study-title').textContent = '📚 ' + d.name;
   haptic('light');
+  setSwipeGuard(true);
   tg.BackButton.show();
   tg.BackButton.onClick(backToDecks);
 
@@ -461,6 +522,8 @@ function backToDecks() { closeDeck(); loadDecks(); }
 function closeDeck(silent) {
   decksStudy.hidden = true;
   decksHome.hidden = false;
+  setSwipeGuard(false);
+  setCloseGuard(false);
   tg.BackButton.hide();
   if (!silent) tg.BackButton.offClick(backToDecks);
 }
@@ -481,8 +544,13 @@ function row(label, control) {
 
 async function postSetting(key, value) {
   haptic('light');
-  try { await api('/api/settings', { method: 'POST', body: JSON.stringify({ key, value }) }); }
-  catch (e) { /* keep optimistic UI; next open re-syncs */ }
+  try {
+    await api('/api/settings', { method: 'POST', body: JSON.stringify({ key, value }) });
+    return true;
+  } catch (e) {
+    hapticNotify('error');
+    return false; // callers roll the optimistic UI back
+  }
 }
 
 function renderSettings(s) {
@@ -511,9 +579,13 @@ function renderSettings(s) {
 
   body.innerHTML = html;
 
-  body.querySelectorAll('[data-level]').forEach(c => c.addEventListener('click', () => {
+  body.querySelectorAll('[data-level]').forEach(c => c.addEventListener('click', async () => {
+    const prev = body.querySelector('[data-level].chip-on');
     body.querySelectorAll('[data-level]').forEach(x => x.classList.toggle('chip-on', x === c));
-    postSetting('level', c.dataset.level);
+    hapticSelect();
+    if (!await postSetting('level', c.dataset.level)) {
+      body.querySelectorAll('[data-level]').forEach(x => x.classList.toggle('chip-on', x === prev));
+    }
   }));
 
   const nameInput = document.getElementById('set-name');
@@ -528,14 +600,16 @@ function renderSettings(s) {
     catch (e) { nameSave.textContent = 'Retry'; nameSave.disabled = false; return; }
     setTimeout(() => { nameSave.textContent = 'Save'; nameSave.disabled = false; }, 1200);
   });
-  body.querySelectorAll('.switch input').forEach(inp => inp.addEventListener('change', () => {
-    postSetting(inp.dataset.key, inp.checked);
+  body.querySelectorAll('.switch input').forEach(inp => inp.addEventListener('change', async () => {
+    if (!await postSetting(inp.dataset.key, inp.checked)) inp.checked = !inp.checked;
   }));
   const intv = document.getElementById('set-interval');
-  intv.addEventListener('change', () => {
+  let lastInterval = parseInt(intv.value, 10);
+  intv.addEventListener('change', async () => {
     let n = parseInt(intv.value, 10); if (isNaN(n)) n = 60;
     n = Math.max(15, Math.min(1440, n)); intv.value = n;
-    postSetting('interval', n);
+    if (await postSetting('interval', n)) lastInterval = n;
+    else intv.value = lastInterval;
   });
 }
 
@@ -549,7 +623,7 @@ async function openSettings() {
   views.settings.hidden = false;
   tg.BackButton.show();
   tg.BackButton.onClick(closeSettings);
-  document.getElementById('settings-body').innerHTML = '<div class="loading">Loading…</div>';
+  document.getElementById('settings-body').innerHTML = skeletonCards(3);
   try { renderSettings(await api('/api/settings')); }
   catch (e) { document.getElementById('settings-body').innerHTML = '<p class="empty">Could not load settings.</p>'; }
 }

@@ -23,8 +23,8 @@ needs a bundler is out.
   `MainButton`/`SecondaryButton` where a screen has one primary action (`GAP`).
 - Optimistic UI **with rollback**: update the UI immediately, revert on a
   failed POST. The bookmark star (`wordRow()` in `app.js`) is the canonical
-  example — it flips back on error. All mutations must follow it (`GAP`:
-  settings toggles and swipe answers don't yet).
+  example — it flips back on error. All mutations follow it: settings
+  toggles/level/interval roll back, swipe answers re-queue (✅ v1.25.0).
 - Reuse `createSwipeSession(container, opts)` for any card-based flow.
 - `esc()` every interpolated string — user names, AI-generated content, all of it.
 - Every screen has explicit loading / empty / error states with actionable copy (§4).
@@ -35,11 +35,11 @@ needs a bundler is out.
   Tabs reload on every switch (`showView`) instead.
 - No horizontal swipe targets hugging the screen edges (iOS edge-swipe
   conflict); the swipe card is inset by body padding.
-- No hardcoded hex colors outside the token block in `styles.css` (`GAP`:
-  a few `#4CAF50`/`#f44336` remain — see §2).
+- No hardcoded hex colors outside the token block in `styles.css`
+  (✅ v1.25.0 — see §2).
 - No custom in-page back buttons or bottom sheets where native chrome exists.
-- Don't drop a swiped card from the queue before its POST is durable (`GAP`:
-  today `commit()` fires-and-forgets `onAnswer`).
+- Don't drop a swiped card from the queue before its POST is durable —
+  `commit()` re-queues the card once on a failed `onAnswer` (✅ v1.25.0).
 - No new CDN dependencies without strong cause; prefer removing them
   (Chart.js is slated for removal — see ROADMAP Phase 2).
 
@@ -57,21 +57,20 @@ variables to semantic app tokens. Components reference only the app tokens.
 | `--tg-theme-button-color` | `--accent` | `#2196F3` | ✅ exists |
 | `--tg-theme-button-text-color` | `--accent-text` | `#fff` | ✅ exists |
 | `--tg-theme-link-color` | `--link` | `#2196F3` | ✅ exists |
-| `--tg-theme-section-bg-color` | `--section` | `var(--card)` | **`GAP`** |
-| `--tg-theme-accent-text-color` | `--accent-fg` | `var(--accent)` | **`GAP`** |
-| `--tg-theme-destructive-text-color` | `--danger` | `#f44336` | **`GAP`** |
-| `--tg-theme-subtitle-text-color` | `--subtitle` | `var(--hint)` | **`GAP`** |
-| `--tg-theme-bottom-bar-bg-color` | `--bottom-bar` | `var(--bg)` | **`GAP`** |
-| — (semantic) | `--success` | `#4CAF50` | **`GAP`** |
-| — (semantic) | `--border` | `rgba(128,128,128,.15)` | **`GAP`** |
+| `--tg-theme-section-bg-color` | `--section` | `var(--card)` | ✅ v1.25.0 |
+| `--tg-theme-accent-text-color` | `--accent-fg` | `var(--accent)` | ✅ v1.25.0 |
+| `--tg-theme-destructive-text-color` | `--danger` | `#f44336` | ✅ v1.25.0 |
+| `--tg-theme-subtitle-text-color` | `--subtitle` | `var(--hint)` | ✅ v1.25.0 |
+| `--tg-theme-bottom-bar-bg-color` | `--bottom-bar` | `var(--bg)` | ✅ v1.25.0 |
+| — (semantic) | `--success` | `#4CAF50` | ✅ v1.25.0 |
+| — (semantic) | `--border` | `rgba(128,128,128,.15)` | ✅ v1.25.0 |
 
-Hardcoded colors to migrate when the tokens land: `.swipe-stamp.known` /
-`.swipe-btn.known` / quiz-accuracy bar (→ `--success`), `.swipe-stamp.forgot` /
-`.swipe-btn.forgot` / paused banner (→ `--danger`), the `rgba(128,128,128,…)`
-borders in `.set-row`, `.bar-wrap`, `.slider`, `#tabbar` (→ `--border`).
+All former hardcoded colors (`#4CAF50`, `#f44336`, the `rgba(128,128,128,…)`
+borders) now go through `--success` / `--danger` / `--border`; the `.slider`
+track keeps its own `rgba(…,.4)` as a control-specific shade.
 
-Boot rule (**`GAP`**): call `tg.setBottomBarColor('secondary_bg_color')` so the
-tab bar blends with Telegram's chrome.
+Boot rule: `tg.setBottomBarColor(tg.themeParams.bottom_bar_bg_color || 'bg_color')`
+so the native bottom-bar area matches the tab bar (✅ v1.25.0).
 
 ## 3. Typography, spacing, shape
 
@@ -108,7 +107,7 @@ factory in `app.js` where one exists.
 | Settings row | `.set-row`, `.num`, `.switch`, `.slider`; `row()`, `toggleHTML()` | Rows divided by `--border` |
 | Modal | `.modal-back`, `.modal`, `.modal-actions`; `askDisplayName()` | Only for text input (no native equivalent) |
 | Tab bar | `#tabbar`, `.tab`, `.tab-on` | Fixed bottom, `safe-area-inset-bottom`; inactive icons grayscaled |
-| States | `.loading`, `.empty` | **`GAP`**: `.skeleton` shimmer blocks replace `Loading…` text on Stats/Words/Ranks first paint |
+| States | `.loading`, `.empty` | ✅ v1.25.0: `.skeleton` shimmer (`.skel-line`/`.skel-big`/`.skel-row`, helpers `skeletonRows()`/`skeletonCards()`) on first paint |
 
 ### Swipe session (`createSwipeSession(container, opts)`)
 
@@ -125,7 +124,7 @@ Contract (`opts`): `load() → Promise<[{front, back, …}]>` ·
 Interaction constants: drag >6px distinguishes drag from tap-to-reveal ·
 commit at |dx| > 90px · 180ms advance to next card · stamps fade in over 80px.
 
-Target state (**`GAP`**): answers retry/re-queue on POST failure;
+Answers re-queue once on POST failure (✅ v1.25.0). Target state (**`GAP`**):
 `MainButton`/`SecondaryButton` mirror the in-page answer buttons; session ends
 on a completion screen with per-session stats (X known / Y forgot) instead of
 only the 🎉 card.
@@ -161,11 +160,11 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 
 | Event | Call | Status |
 |---|---|---|
-| Tab / chip selection | `selectionChanged()` | **`GAP`** (today `impactOccurred('light')`) |
+| Tab / chip selection | `selectionChanged()` | ✅ v1.25.0 |
 | Button tap, card flip, deck open | `impactOccurred('light')` | ✅ |
-| Answer: knew it | `notificationOccurred('success')` | **`GAP`** (today `impactOccurred('medium')`) |
-| Answer: forgot | `notificationOccurred('error')` | **`GAP`** (today `impactOccurred('rigid')`) |
-| Session complete | `notificationOccurred('success')` | **`GAP`** |
+| Answer: knew it | `notificationOccurred('success')` | ✅ v1.25.0 |
+| Answer: forgot | `notificationOccurred('error')` | ✅ v1.25.0 |
+| Session complete | `notificationOccurred('success')` | ✅ v1.25.0 |
 
 ### Native chrome
 
@@ -177,18 +176,18 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 
 ### Gestures & lifecycle
 
-- **`GAP`** `tg.disableVerticalSwipes()` on entering a swipe view,
-  `enableVerticalSwipes()` on leaving — prevents a card drag from collapsing
-  the Mini App.
-- **`GAP`** `tg.enableClosingConfirmation()` once a session has ≥1 answered
-  card; disable on completion/exit.
+- ✅ v1.25.0 `tg.disableVerticalSwipes()` on entering a swipe view
+  (`setSwipeGuard`), re-enabled on leaving — prevents a card drag from
+  collapsing the Mini App.
+- ✅ v1.25.0 `tg.enableClosingConfirmation()` once a session has ≥1 answered
+  card (`setCloseGuard`); disabled on completion/exit.
 - `.swipe-card` keeps `touch-action: pan-y` so vertical page scroll still works.
 
 ### Telegram WebApp API matrix
 
 | Used today | Target (`GAP`) | Explicitly avoided |
 |---|---|---|
-| `ready`, `expand`, `initData`, `HapticFeedback.impactOccurred`, `BackButton`, `SettingsButton` | `notificationOccurred`, `selectionChanged`, `MainButton`, `SecondaryButton`, `disableVerticalSwipes`, `enableClosingConfirmation`, `setBottomBarColor`, `CloudStorage`, `shareToStory`/`shareMessage`, `addToHomeScreen`, `photo_url` | fullscreen mode, `setEmojiStatus`, `downloadFile`, biometrics, sensors, pull-to-refresh |
+| `ready`, `expand`, `initData`, `HapticFeedback` (impact/notification/selection), `BackButton`, `SettingsButton`, `disableVerticalSwipes`, `enableClosingConfirmation`, `setBottomBarColor` | `MainButton`, `SecondaryButton`, `CloudStorage`, `shareToStory`/`shareMessage`, `addToHomeScreen`, `photo_url` | fullscreen mode, `setEmojiStatus`, `downloadFile`, biometrics, sensors, pull-to-refresh |
 
 ## 7. Network & state
 
@@ -197,8 +196,8 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
   Server-side every `/api/*` route is wrapped by `withUser` (`webapp.go`) —
   reuse it for any new endpoint.
 - **Mutation policy:** optimistic update + rollback on rejection (bookmark
-  star pattern). **`GAP`**: settings toggles must flip back on failure; swipe
-  answers must re-queue or retry instead of `catch(() => {})`.
+  star pattern). Settings toggles flip back on failure; swipe answers
+  re-queue once on a failed POST (✅ v1.25.0).
 - **`GAP`** `CloudStorage` keys, all prefixed: `lastTab` (restore on boot),
   `ui.*` (per-view UI state, e.g. last leaderboard metric). Never store
   learning data client-side — SQLite is the source of truth.
@@ -219,11 +218,11 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 
 | Gap | Roadmap phase |
 |---|---|
-| Missing theme tokens + `setBottomBarColor` + hardcoded color migration | 1 |
-| Haptics taxonomy (`selectionChanged`, `notificationOccurred`) | 1 |
-| `disableVerticalSwipes` + `enableClosingConfirmation` in sessions | 1 |
-| Skeleton loaders | 1 |
-| Mutation rollback (settings toggles) + swipe answer retry queue | 1 |
+| ~~Missing theme tokens + `setBottomBarColor` + hardcoded color migration~~ ✅ v1.25.0 | 1 |
+| ~~Haptics taxonomy (`selectionChanged`, `notificationOccurred`)~~ ✅ v1.25.0 | 1 |
+| ~~`disableVerticalSwipes` + `enableClosingConfirmation` in sessions~~ ✅ v1.25.0 | 1 |
+| ~~Skeleton loaders~~ ✅ v1.25.0 | 1 |
+| ~~Mutation rollback (settings toggles) + swipe answer retry queue~~ ✅ v1.25.0 | 1 |
 | `MainButton`/`SecondaryButton` session answers | 2 |
 | Session completion screen with per-session stats | 2 |
 | Activity heatmap (drop Chart.js) | 2 |
