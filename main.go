@@ -353,6 +353,13 @@ var Changelogs = []ChangelogEntry{
 			"📱 <b>One tap away</b> — keep a 7-day streak and we'll offer to put the app on your home screen\n\n" +
 			"…plus a faster, smoother feel everywhere: native haptics, skeleton loading, and full dark-mode theming. Happy learning! 🎉",
 	},
+	{
+		Version: "1.29.1",
+		Silent:  true,
+		Text: "Mini App: Cache-Control no-cache on the SPA shell and assets — embedded files have no modtime, " +
+			"so webviews cached them heuristically and users kept a stale frontend after deploys " +
+			"(reported as the reverted native answer buttons still hiding the tab bar in Review).",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
