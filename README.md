@@ -22,6 +22,7 @@ A Telegram bot that sends subscribers AI-generated English practice on a configu
 - **Streak Celebrations** -- personalised congratulations at 3, 7, 14, 30, and 60-day streaks
 - **Reply Keyboard** -- four persistent shortcut buttons (Word / Drill / Quiz / Stats) always visible at the bottom of the chat
 - **Progress Dashboard** -- `/stats` shows Unicode progress bars for streak and quiz accuracy; optional Telegram Mini App with a 30-day activity chart (set `WEB_APP_URL`)
+- **Mini App hub** -- a multi-tab Telegram Mini App (opened from the persistent menu button or `/app`): progress dashboard, searchable vocabulary list, swipe-to-review (SRS), curated **Leitner word decks** (e.g. Barron's GRE), a cross-user **leaderboard**, and an in-app settings panel
 - **Typing Indicator** -- "typing…" chat action fires before every AI generation call
 - **Multi-Provider AI** -- Gemini, Groq, Cerebras, OpenRouter, GitHub Models, Cloudflare, Mistral, Gemini2, SambaNova, Cohere with automatic fallback
 - **Pre-Generated Pool** -- background worker keeps a content pool topped up; broadcasts never block on AI calls
@@ -89,6 +90,7 @@ go test ./... -v
 | `/tip` | Get a grammar tip now; `/tip on` or `/tip off` to control daily tips |
 | `/quiz` | Take a multiple-choice quiz (native Telegram poll) |
 | `/stats` | View progress: streak, words, quiz accuracy with progress bars |
+| `/app` | Open the Telegram Mini App hub: dashboard, word list, decks, review and leaderboard (when `WEB_APP_URL` is set) |
 | `/mywords` | Browse all learned vocabulary with mastery status; `/mywords bookmarks` for bookmarked only |
 | `/bookmark [word]` | Toggle bookmark on a word, or view bookmarks (no argument) |
 | `/level [beginner\|intermediate\|upper-intermediate\|advanced]` | Set difficulty level |
@@ -149,7 +151,7 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 | `STORY_TIME` | `17:00` | Local time to send the daily mini story (`off` to disable) |
 | `BACKUP_TIME` | `02:00` | Local time to send nightly SQLite backup to the maintainer (`off` to disable) |
 | `AI_PROVIDER_ORDER` | `gemini,groq,...` | Comma-separated provider priority |
-| `WEB_APP_URL` | *(unset)* | Public HTTPS URL of the bot server (e.g. `https://bot.example.com`). When set, `/stats` includes a "📊 Full Dashboard" button opening the Telegram Mini App stats page. Leave unset to disable. |
+| `WEB_APP_URL` | *(unset)* | Public HTTPS URL of the bot server (e.g. `https://bot.example.com`). When set, the bot starts the Mini App web server, sets it as the persistent chat **menu button**, and `/stats` + `/app` expose buttons opening the Mini App hub. Leave unset to disable. |
 | `WEB_APP_PORT` | `8090` | TCP port for the embedded Mini App HTTP server (only used when `WEB_APP_URL` is set). |
 
 ## Architecture
@@ -168,11 +170,16 @@ Go application (single package main, 14 source files)
 +-- quiz.go           -- quiz building (4 types + native polls), poll registry, quiz scheduler
 +-- stats.go          -- /stats computation (progress bars), admin metrics
 +-- admin.go          -- admin panel: paginated /users, user detail, direct messaging
-+-- webapp.go         -- optional Mini App HTTP server, HMAC initData validation, /api/stats
++-- webapp.go         -- Mini App hub: HTTP server, embedded SPA, HMAC initData auth, JSON API
++-- leaderboard.go    -- cross-user ranking, display names, funny-name fallback
++-- leitner.go        -- curated Leitner decks (deck_cards/leitner_progress), box scheduler, example backfill
 +-- vocab.go          -- /mywords (browse learned words) and /bookmark (favourites) features
 ```
 
-### Goroutines (13 concurrent + optional web server)
+The Mini App frontend lives in `webapp/` (`index.html`, `app.js`, `styles.css`)
+and bundled deck data in `webapp/decks/*.json`, all embedded via `go:embed`.
+
+### Goroutines (14 concurrent + optional web server)
 
 1. **Pool filler** -- background content generation
 2. **Broadcast scheduler** -- half-hourly, per-user interval-aware delivery
@@ -186,8 +193,9 @@ Go application (single package main, 14 source files)
 10. **Mini story scheduler** -- daily reading-practice story at `STORY_TIME` (default 17:00)
 11. **Nightly backup scheduler** -- SQLite snapshot to the maintainer at `BACKUP_TIME` (default 02:00)
 12. **Telegram poller** -- long-polls for messages, callbacks, and `poll_answer` updates
-13. **Main goroutine** -- blocks on OS signal for graceful shutdown
-14. **Mini App web server** *(optional)* -- serves the stats dashboard when `WEB_APP_URL` is set
+13. **Deck example backfill** -- generates missing example sentences for curated deck cards
+14. **Main goroutine** -- blocks on OS signal for graceful shutdown
+15. **Mini App web server** *(optional)* -- serves the Mini App hub when `WEB_APP_URL` is set
 
 ### Database
 

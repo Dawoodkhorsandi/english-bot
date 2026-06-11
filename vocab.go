@@ -19,12 +19,12 @@ import (
 
 const myWordsPageSize = 8
 
-// LearnedWord is one row in the /mywords listing.
+// LearnedWord is one row in the /mywords listing (and the /api/vocab payload).
 type LearnedWord struct {
-	Term       string
-	Meaning    string
-	Mastery    string // "new", "learning", "mastered"
-	Bookmarked bool
+	Term       string `json:"term"`
+	Meaning    string `json:"meaning"`
+	Mastery    string `json:"mastery"` // "new", "learning", "mastered"
+	Bookmarked bool   `json:"bookmarked"`
 }
 
 // masteryIcon returns a display icon for a mastery level.
@@ -88,18 +88,30 @@ func (s *Store) BookmarkCount(chatID int64) int {
 // LearnedWordsCount returns the total number of vocabulary words a user has
 // received. If bookmarksOnly is true, counts only bookmarked words.
 func (s *Store) LearnedWordsCount(chatID int64, bookmarksOnly bool) int {
-	var count int
+	return s.LearnedWordsCountFiltered(chatID, bookmarksOnly, "")
+}
+
+// LearnedWordsCountFiltered is LearnedWordsCount with an optional case-insensitive
+// search over the word and its meaning.
+func (s *Store) LearnedWordsCountFiltered(chatID int64, bookmarksOnly bool, search string) int {
+	var b strings.Builder
+	args := []interface{}{chatID}
+	b.WriteString("SELECT COUNT(*) FROM sent_vocab sv ")
 	if bookmarksOnly {
-		_ = s.db.QueryRow(`
-			SELECT COUNT(*) FROM sent_vocab sv
-			JOIN bookmarks bk ON bk.chat_id = sv.chat_id AND bk.word = sv.word
-			WHERE sv.chat_id = ?`, chatID,
-		).Scan(&count)
-	} else {
-		_ = s.db.QueryRow(
-			"SELECT COUNT(*) FROM sent_vocab WHERE chat_id = ?", chatID,
-		).Scan(&count)
+		b.WriteString("JOIN bookmarks bk ON bk.chat_id = sv.chat_id AND bk.word = sv.word ")
 	}
+	if search != "" {
+		b.WriteString("LEFT JOIN content_pool cp ON cp.kind = 'word' AND cp.term = sv.word ")
+	}
+	b.WriteString("WHERE sv.chat_id = ? ")
+	if search != "" {
+		b.WriteString("AND (sv.word LIKE ? OR cp.meaning LIKE ?) ")
+		like := "%" + search + "%"
+		args = append(args, like, like)
+	}
+
+	var count int
+	_ = s.db.QueryRow(b.String(), args...).Scan(&count)
 	return count
 }
 
@@ -107,38 +119,39 @@ func (s *Store) LearnedWordsCount(chatID int64, bookmarksOnly bool) int {
 // enriched with meaning (from content_pool), mastery level (from
 // review_schedule), and bookmark status. Ordered by most recently learned.
 func (s *Store) LearnedWords(chatID int64, offset, limit int, bookmarksOnly bool) ([]LearnedWord, error) {
-	var query string
-	if bookmarksOnly {
-		query = `
-			SELECT sv.word,
-			       COALESCE(cp.meaning, ''),
-			       COALESCE(rs.interval_days, 0),
-			       COALESCE(rs.reps, 0),
-			       CASE WHEN bk.word IS NOT NULL THEN 1 ELSE 0 END
-			FROM sent_vocab sv
-			JOIN bookmarks bk ON bk.chat_id = sv.chat_id AND bk.word = sv.word
-			LEFT JOIN content_pool cp ON cp.kind = 'word' AND cp.term = sv.word
-			LEFT JOIN review_schedule rs ON rs.chat_id = sv.chat_id AND rs.word = sv.word
-			WHERE sv.chat_id = ?
-			ORDER BY sv.sent_at DESC
-			LIMIT ? OFFSET ?`
-	} else {
-		query = `
-			SELECT sv.word,
-			       COALESCE(cp.meaning, ''),
-			       COALESCE(rs.interval_days, 0),
-			       COALESCE(rs.reps, 0),
-			       CASE WHEN bk.word IS NOT NULL THEN 1 ELSE 0 END
-			FROM sent_vocab sv
-			LEFT JOIN content_pool cp ON cp.kind = 'word' AND cp.term = sv.word
-			LEFT JOIN review_schedule rs ON rs.chat_id = sv.chat_id AND rs.word = sv.word
-			LEFT JOIN bookmarks bk ON bk.chat_id = sv.chat_id AND bk.word = sv.word
-			WHERE sv.chat_id = ?
-			ORDER BY sv.sent_at DESC
-			LIMIT ? OFFSET ?`
-	}
+	return s.LearnedWordsFiltered(chatID, offset, limit, bookmarksOnly, "")
+}
 
-	rows, err := s.db.Query(query, chatID, limit, offset)
+// LearnedWordsFiltered is LearnedWords with an optional case-insensitive search
+// over the word and its meaning.
+func (s *Store) LearnedWordsFiltered(chatID int64, offset, limit int, bookmarksOnly bool, search string) ([]LearnedWord, error) {
+	var b strings.Builder
+	args := []interface{}{chatID}
+	b.WriteString(`
+		SELECT sv.word,
+		       COALESCE(cp.meaning, ''),
+		       COALESCE(rs.interval_days, 0),
+		       COALESCE(rs.reps, 0),
+		       CASE WHEN bk.word IS NOT NULL THEN 1 ELSE 0 END
+		FROM sent_vocab sv
+		LEFT JOIN content_pool cp ON cp.kind = 'word' AND cp.term = sv.word
+		LEFT JOIN review_schedule rs ON rs.chat_id = sv.chat_id AND rs.word = sv.word
+		`)
+	if bookmarksOnly {
+		b.WriteString("JOIN bookmarks bk ON bk.chat_id = sv.chat_id AND bk.word = sv.word ")
+	} else {
+		b.WriteString("LEFT JOIN bookmarks bk ON bk.chat_id = sv.chat_id AND bk.word = sv.word ")
+	}
+	b.WriteString("WHERE sv.chat_id = ? ")
+	if search != "" {
+		b.WriteString("AND (sv.word LIKE ? OR cp.meaning LIKE ?) ")
+		like := "%" + search + "%"
+		args = append(args, like, like)
+	}
+	b.WriteString("ORDER BY sv.sent_at DESC LIMIT ? OFFSET ?")
+	args = append(args, limit, offset)
+
+	rows, err := s.db.Query(b.String(), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -147,11 +160,11 @@ func (s *Store) LearnedWords(chatID int64, offset, limit int, bookmarksOnly bool
 	var items []LearnedWord
 	for rows.Next() {
 		var (
-			word        string
-			meaning     string
-			intervalD   int
-			reps        int
-			bookmarked  int
+			word       string
+			meaning    string
+			intervalD  int
+			reps       int
+			bookmarked int
 		)
 		if err := rows.Scan(&word, &meaning, &intervalD, &reps, &bookmarked); err != nil {
 			return nil, err

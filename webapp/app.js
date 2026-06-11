@@ -1,0 +1,554 @@
+'use strict';
+
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
+
+// ---------------------------------------------------------------------------
+// API helper — every request carries the Telegram initData for HMAC auth.
+// Sent as a header so GET URLs stay clean; the server also accepts ?initData=.
+// ---------------------------------------------------------------------------
+async function api(path, opts = {}) {
+  const headers = Object.assign({ 'X-Init-Data': tg.initData }, opts.headers || {});
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const ct = res.headers.get('content-type') || '';
+  return ct.includes('application/json') ? res.json() : res.text();
+}
+
+function haptic(kind) {
+  try { tg.HapticFeedback.impactOccurred(kind || 'light'); } catch (e) { /* ignore */ }
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ---------------------------------------------------------------------------
+// Tab navigation
+// ---------------------------------------------------------------------------
+const views = {};
+document.querySelectorAll('.view').forEach(v => { views[v.id.replace('view-', '')] = v; });
+let currentView = 'dashboard';
+
+function showView(name) {
+  try { tg.BackButton.hide(); } catch (e) { /* ignore */ } // reset on tab switch
+  currentView = name;
+  document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('tab-on', t.dataset.view === name));
+  views[name].hidden = false;
+  loaders[name] && loaders[name](); // always reload so data stays fresh
+}
+
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => { haptic('light'); showView(t.dataset.view); });
+});
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+function bar(pct, colour) {
+  return '<div class="bar-wrap"><div class="bar-fill" style="width:' +
+         Math.min(100, pct) + '%;background:' + colour + '"></div></div>';
+}
+
+function renderDashboard(s) {
+  const streakPct = s.longest_streak > 0
+    ? Math.round(s.current_streak * 100 / s.longest_streak) : 100;
+  const flame = s.current_streak >= 3 ? ' 🔥' : '';
+
+  let html = '<h1>📊 Your Progress</h1>';
+  if (s.paused) {
+    html += '<div class="card" style="background:rgba(244,67,54,.12)">' +
+      '<div class="sub" style="color:#f44336">⏸️ Scheduled sends are paused — send /resume in the chat.</div></div>';
+  }
+  html += '<div class="card"><h2>Streak</h2>' +
+    '<div class="big">' + s.current_streak + ' day' + (s.current_streak === 1 ? '' : 's') + flame + '</div>' +
+    '<div class="sub">Best: ' + s.longest_streak + ' days</div>' +
+    bar(streakPct, 'var(--accent)') + '</div>';
+
+  html += '<div class="grid">' +
+    '<div class="card"><h2>Words</h2><div class="big">' + s.words + '</div>' +
+    '<div class="sub">' + s.mastered + ' mastered</div></div>' +
+    '<div class="card"><h2>Drills</h2><div class="big">' + s.verbs + '</div></div>' +
+    '</div>';
+
+  if (s.quiz_answered > 0) {
+    html += '<div class="card"><h2>Quiz accuracy</h2>' +
+      '<div class="big">' + s.quiz_pct + '%</div>' +
+      '<div class="sub">' + s.quiz_correct + ' / ' + s.quiz_answered + ' correct</div>' +
+      bar(s.quiz_pct, '#4CAF50') + '</div>';
+  }
+
+  html += '<div class="card"><h2>Activity · last 30 days</h2>' +
+    '<div class="chart-box"><canvas id="actChart"></canvas></div></div>';
+
+  html += '<div class="card"><h2>Level</h2>' +
+    '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
+    '<div class="sub">' + s.active_days + ' active day' + (s.active_days === 1 ? '' : 's') + ' total' +
+    (s.member_since ? ' · member since ' + esc(s.member_since) : '') + '</div></div>';
+
+  views.dashboard.innerHTML = html;
+
+  const set = new Set(s.activity_days || []);
+  const labels = [], data = [], colors = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    labels.push(((d.getMonth() + 1) + '').padStart(2, '0') + '/' + (d.getDate() + '').padStart(2, '0'));
+    const active = set.has(key);
+    data.push(active ? 1 : 0.15);
+    colors.push(active ? 'var(--accent)' : 'rgba(128,128,128,.2)');
+  }
+  new Chart(document.getElementById('actChart'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 3, borderSkipped: false }] },
+    options: {
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false, min: 0, max: 1.4 } },
+      animation: { duration: 400 }
+    }
+  });
+}
+
+async function loadDashboard() {
+  try { renderDashboard(await api('/api/stats')); }
+  catch (e) { views.dashboard.innerHTML = '<p class="empty">Could not load your stats.<br>Try again later.</p>'; }
+}
+
+// ---------------------------------------------------------------------------
+// Vocabulary
+// ---------------------------------------------------------------------------
+const vocabState = { q: '', filter: 'all', offset: 0, total: 0, limit: 20 };
+const listEl = document.getElementById('vocab-list');
+const moreEl = document.getElementById('vocab-more');
+const emptyEl = document.getElementById('vocab-empty');
+const searchEl = document.getElementById('vocab-search');
+
+const MASTERY = { mastered: '✅', learning: '📖', new: '🆕' };
+
+function wordRow(w) {
+  const el = document.createElement('div');
+  el.className = 'word';
+  el.innerHTML =
+    '<div class="word-main"><div class="word-term">' + esc(w.term) + '</div>' +
+    '<div class="word-meaning">' + esc(w.meaning || '—') + '</div></div>' +
+    '<span class="word-mastery" title="' + w.mastery + '">' + (MASTERY[w.mastery] || '🆕') + '</span>' +
+    '<button class="star">' + (w.bookmarked ? '⭐' : '☆') + '</button>';
+  const star = el.querySelector('.star');
+  let on = w.bookmarked;
+  star.addEventListener('click', async () => {
+    on = !on;
+    star.textContent = on ? '⭐' : '☆';
+    haptic('light');
+    try { await api('/api/bookmark', { method: 'POST', body: JSON.stringify({ term: w.term, on }) }); }
+    catch (e) { on = !on; star.textContent = on ? '⭐' : '☆'; }
+  });
+  return el;
+}
+
+async function loadVocab(reset) {
+  if (reset) { vocabState.offset = 0; listEl.innerHTML = ''; }
+  const params = new URLSearchParams({
+    offset: vocabState.offset, limit: vocabState.limit,
+    bookmarks: vocabState.filter === 'bookmarks' ? '1' : '0',
+    q: vocabState.q,
+  });
+  let data;
+  try { data = await api('/api/vocab?' + params.toString()); }
+  catch (e) { emptyEl.hidden = false; emptyEl.textContent = 'Could not load your words.'; return; }
+
+  vocabState.total = data.total || 0;
+  (data.items || []).forEach(w => listEl.appendChild(wordRow(w)));
+  vocabState.offset += (data.items || []).length;
+
+  const has = listEl.children.length > 0;
+  emptyEl.hidden = has;
+  if (!has) {
+    emptyEl.textContent = vocabState.filter === 'bookmarks'
+      ? 'No bookmarks yet. Tap ☆ on a word to save it.'
+      : (vocabState.q ? 'No words match your search.' : 'No words learned yet. Send /word in the chat!');
+  }
+  moreEl.hidden = vocabState.offset >= vocabState.total;
+}
+
+moreEl.addEventListener('click', () => loadVocab(false));
+
+let searchTimer;
+searchEl.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { vocabState.q = searchEl.value.trim(); loadVocab(true); }, 250);
+});
+
+document.querySelectorAll('.chip').forEach(c => {
+  c.addEventListener('click', () => {
+    document.querySelectorAll('.chip').forEach(x => x.classList.toggle('chip-on', x === c));
+    vocabState.filter = c.dataset.filter;
+    haptic('light');
+    loadVocab(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Leaderboard
+// ---------------------------------------------------------------------------
+const boardState = { metric: 'words', promptedForName: false };
+const boardListEl = document.getElementById('board-list');
+const boardMeEl = document.getElementById('board-me');
+const boardEmptyEl = document.getElementById('board-empty');
+
+function medal(rank) {
+  return rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '#' + rank;
+}
+
+function boardRow(r) {
+  const el = document.createElement('div');
+  el.className = 'word' + (r.isMe ? ' me' : '');
+  el.innerHTML =
+    '<span class="rank">' + medal(r.rank) + '</span>' +
+    '<div class="word-main"><div class="word-term">' + esc(r.name) + (r.isMe ? ' <span class="you">you</span>' : '') + '</div></div>' +
+    '<span class="word-term">' + r.value + '</span>';
+  return el;
+}
+
+async function loadBoard() {
+  let data;
+  try { data = await api('/api/leaderboard?metric=' + boardState.metric); }
+  catch (e) { boardEmptyEl.hidden = false; boardEmptyEl.textContent = 'Could not load the leaderboard.'; return; }
+
+  // First visit and no chosen name yet → invite the user to pick one.
+  if (!boardState.promptedForName && data.me && !data.me.hasName) {
+    boardState.promptedForName = true;
+    askDisplayName();
+  }
+
+  boardListEl.innerHTML = '';
+  (data.rows || []).forEach(r => boardListEl.appendChild(boardRow(r)));
+  const has = boardListEl.children.length > 0;
+  boardEmptyEl.hidden = has;
+  if (!has) boardEmptyEl.textContent = 'No one is on the board yet. Learn some words to claim a spot!';
+
+  // Show the user's own standing if they're outside the visible rows.
+  const meInList = (data.rows || []).some(r => r.isMe);
+  if (data.me && data.me.rank > 0 && !meInList) {
+    boardMeEl.hidden = false;
+    boardMeEl.innerHTML = '<h2>Your rank</h2><div class="big" style="font-size:22px">' +
+      medal(data.me.rank) + ' · ' + data.me.value + '</div>';
+  } else {
+    boardMeEl.hidden = true;
+  }
+}
+
+document.querySelectorAll('[data-metric]').forEach(c => {
+  c.addEventListener('click', () => {
+    document.querySelectorAll('[data-metric]').forEach(x => x.classList.toggle('chip-on', x === c));
+    boardState.metric = c.dataset.metric;
+    haptic('light');
+    loadBoard();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Display-name modal (no native Telegram text input, so we roll our own)
+// ---------------------------------------------------------------------------
+function askDisplayName() {
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  back.innerHTML =
+    '<div class="modal">' +
+    '<h2>Pick a leaderboard name</h2>' +
+    '<p class="sub">This is what others see next to your rank. Skip it and you\'ll get a fun random name.</p>' +
+    '<input class="search" id="name-input" maxlength="24" placeholder="e.g. WordNinja" autocomplete="off">' +
+    '<div class="modal-actions">' +
+    '<button class="chip" id="name-skip">Skip</button>' +
+    '<button class="chip chip-on" id="name-save">Save</button>' +
+    '</div></div>';
+  document.body.appendChild(back);
+  const input = back.querySelector('#name-input');
+  input.focus();
+  const close = () => back.remove();
+  back.querySelector('#name-skip').addEventListener('click', close);
+  back.querySelector('#name-save').addEventListener('click', async () => {
+    const name = input.value.trim();
+    if (!name) { close(); return; }
+    try { await api('/api/leaderboard/name', { method: 'POST', body: JSON.stringify({ name }) }); }
+    catch (e) { /* keep funny name on failure */ }
+    close();
+    loadBoard();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Swipe trainer — reusable by Review (SRS) and Decks (Leitner).
+//   opts.load()         → Promise<[{front, back}]>  (initial + refills)
+//   opts.onAnswer(c, k) → Promise   (k = true for "knew it")
+//   opts.doneText / opts.emptyText / opts.onProgress(remaining)
+// ---------------------------------------------------------------------------
+function createSwipeSession(container, opts) {
+  let queue = [];
+  container.innerHTML =
+    '<div class="swipe-area"></div>' +
+    '<div class="swipe-actions">' +
+    '<button class="swipe-btn forgot">❌ Forgot</button>' +
+    '<button class="swipe-btn known">✅ Knew it</button>' +
+    '</div><div class="swipe-progress"></div>';
+  const area = container.querySelector('.swipe-area');
+  const actions = container.querySelector('.swipe-actions');
+  const progress = container.querySelector('.swipe-progress');
+
+  function finish(msg) {
+    area.innerHTML = '<div class="swipe-card" style="cursor:default">' +
+      '<div class="swipe-front" style="font-size:42px">🎉</div>' +
+      '<div class="swipe-back">' + esc(msg) + '</div></div>';
+    actions.style.display = 'none';
+    progress.textContent = '';
+  }
+
+  function showCard() {
+    if (!queue.length) { finish(opts.doneText || 'All done for now!'); return; }
+    actions.style.display = 'flex';
+    const card = queue[0];
+    progress.textContent = queue.length + ' card' + (queue.length === 1 ? '' : 's') + ' left';
+    if (opts.onProgress) opts.onProgress(queue.length);
+
+    const el = document.createElement('div');
+    el.className = 'swipe-card';
+    el.innerHTML =
+      '<div class="swipe-stamp known">Knew it</div>' +
+      '<div class="swipe-stamp forgot">Forgot</div>' +
+      '<div class="swipe-front">' + esc(card.front) + '</div>' +
+      '<div class="swipe-back" hidden>' + card.back + '</div>' +
+      '<div class="swipe-hint">Tap to reveal · swipe → knew it · ← forgot</div>';
+    area.innerHTML = '';
+    area.appendChild(el);
+
+    const front = el.querySelector('.swipe-front');
+    const back = el.querySelector('.swipe-back');
+    const hint = el.querySelector('.swipe-hint');
+    let revealed = false;
+    function reveal() { revealed = true; front.hidden = true; back.hidden = false; hint.textContent = 'Swipe → knew it · ← forgot'; }
+    el.addEventListener('click', () => { if (!revealed && !dragging) reveal(); });
+
+    // Drag to swipe.
+    let startX = 0, dx = 0, dragging = false;
+    const knownStamp = el.querySelector('.swipe-stamp.known');
+    const forgotStamp = el.querySelector('.swipe-stamp.forgot');
+    el.addEventListener('pointerdown', e => { dragging = true; startX = e.clientX; el.classList.add('dragging'); el.setPointerCapture(e.pointerId); });
+    el.addEventListener('pointermove', e => {
+      if (!dragging) return;
+      dx = e.clientX - startX;
+      el.style.transform = 'translateX(' + dx + 'px) rotate(' + (dx / 20) + 'deg)';
+      knownStamp.style.opacity = dx > 0 ? Math.min(1, dx / 80) : 0;
+      forgotStamp.style.opacity = dx < 0 ? Math.min(1, -dx / 80) : 0;
+    });
+    el.addEventListener('pointerup', () => {
+      el.classList.remove('dragging');
+      if (Math.abs(dx) > 90) { commit(dx > 0, el); }
+      else { el.style.transform = ''; knownStamp.style.opacity = 0; forgotStamp.style.opacity = 0; }
+      dx = 0;
+    });
+  }
+
+  function commit(known, el) {
+    haptic(known ? 'medium' : 'rigid');
+    const card = queue.shift();
+    if (el) {
+      el.classList.add('leaving');
+      el.style.transform = 'translateX(' + (known ? 600 : -600) + 'px) rotate(' + (known ? 40 : -40) + 'deg)';
+      el.style.opacity = '0';
+    }
+    Promise.resolve(opts.onAnswer(card, known)).catch(() => {});
+    setTimeout(showCard, 180);
+  }
+
+  actions.querySelector('.known').addEventListener('click', () => commit(true, area.querySelector('.swipe-card')));
+  actions.querySelector('.forgot').addEventListener('click', () => commit(false, area.querySelector('.swipe-card')));
+
+  area.innerHTML = '<div class="loading">Loading…</div>';
+  Promise.resolve(opts.load()).then(cards => {
+    queue = cards || [];
+    if (!queue.length) { finish(opts.emptyText || 'Nothing to review right now.'); return; }
+    showCard();
+  }).catch(() => { area.innerHTML = '<p class="empty">Could not load. Try again later.</p>'; });
+}
+
+// ---------------------------------------------------------------------------
+// Review (SRS) tab
+// ---------------------------------------------------------------------------
+function loadReview() {
+  createSwipeSession(document.getElementById('review-swipe'), {
+    load: async () => {
+      const data = await api('/api/review/next?limit=30');
+      return (data.items || []).map(it => ({
+        front: it.term,
+        back: it.meaning ? esc(it.meaning) : '<span class="ex">(no definition saved)</span>',
+        term: it.term,
+      }));
+    },
+    onAnswer: (card, known) => api('/api/review/answer', { method: 'POST', body: JSON.stringify({ term: card.term, known }) }),
+    emptyText: 'No words are due for review right now. Great job — come back later!',
+    doneText: 'Review complete! 🎉',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Decks (Leitner)
+// ---------------------------------------------------------------------------
+const decksHome = document.getElementById('decks-home');
+const decksStudy = document.getElementById('decks-study');
+const decksListEl = document.getElementById('decks-list');
+const decksEmptyEl = document.getElementById('decks-empty');
+
+function deckCardEl(d) {
+  const el = document.createElement('div');
+  el.className = 'card deck';
+  el.innerHTML =
+    '<div class="deck-head"><div class="word-term">' + esc(d.name) + '</div>' +
+    '<div class="deck-pct">' + d.progressPct + '%</div></div>' +
+    '<div class="sub">' + esc(d.description) + '</div>' +
+    bar(d.progressPct, 'var(--accent)') +
+    '<div class="sub" style="margin-top:8px">' +
+    (d.due > 0 ? '🔵 ' + d.due + ' to study now' : '✅ All caught up') +
+    ' · ' + d.mastered + '/' + d.total + ' mastered</div>';
+  el.addEventListener('click', () => openDeck(d));
+  return el;
+}
+
+async function loadDecks() {
+  // Always return to the deck list when (re)entering the tab.
+  closeDeck(true);
+  decksListEl.innerHTML = '<div class="loading">Loading…</div>';
+  let data;
+  try { data = await api('/api/decks'); }
+  catch (e) { decksListEl.innerHTML = ''; decksEmptyEl.hidden = false; decksEmptyEl.textContent = 'Could not load decks.'; return; }
+  decksListEl.innerHTML = '';
+  (data.decks || []).forEach(d => decksListEl.appendChild(deckCardEl(d)));
+  const has = decksListEl.children.length > 0;
+  decksEmptyEl.hidden = has;
+  if (!has) decksEmptyEl.textContent = 'No decks available yet.';
+}
+
+function openDeck(d) {
+  decksHome.hidden = true;
+  decksStudy.hidden = false;
+  document.getElementById('decks-study-title').textContent = '📚 ' + d.name;
+  haptic('light');
+  tg.BackButton.show();
+  tg.BackButton.onClick(backToDecks);
+
+  createSwipeSession(document.getElementById('decks-swipe'), {
+    load: async () => {
+      const data = await api('/api/decks/study?deck=' + encodeURIComponent(d.id) + '&limit=30');
+      return (data.items || []).map(it => ({
+        front: it.term,
+        back: esc(it.definition || '') + (it.example ? '<span class="ex">' + esc(it.example) + '</span>' : ''),
+        term: it.term,
+      }));
+    },
+    onAnswer: (card, known) => api('/api/decks/swipe', { method: 'POST', body: JSON.stringify({ deck: d.id, term: card.term, known }) }),
+    emptyText: 'Nothing due in this deck right now — come back later!',
+    doneText: 'Session complete! 🎉',
+  });
+}
+
+function backToDecks() { closeDeck(); loadDecks(); }
+
+function closeDeck(silent) {
+  decksStudy.hidden = true;
+  decksHome.hidden = false;
+  tg.BackButton.hide();
+  if (!silent) tg.BackButton.offClick(backToDecks);
+}
+
+// ---------------------------------------------------------------------------
+// Settings (opened via Telegram's native Settings button)
+// ---------------------------------------------------------------------------
+const TOGGLE_LABELS = {
+  tts: 'Pronunciation audio', tips: 'Daily grammar tips', quiz: 'Quizzes',
+  idiom: 'Idiom of the day', collocation: 'Collocation of the day', story: 'Mini stories',
+  review: 'Spaced-repetition reviews', daily_review: 'Daily word recap', digest: 'Weekly digest',
+};
+let settingsReturnView = 'dashboard';
+
+function row(label, control) {
+  return '<div class="set-row"><span>' + esc(label) + '</span>' + control + '</div>';
+}
+
+async function postSetting(key, value) {
+  haptic('light');
+  try { await api('/api/settings', { method: 'POST', body: JSON.stringify({ key, value }) }); }
+  catch (e) { /* keep optimistic UI; next open re-syncs */ }
+}
+
+function renderSettings(s) {
+  const body = document.getElementById('settings-body');
+  let html = '<div class="card"><h2>Difficulty level</h2><div class="chips" id="set-levels">';
+  s.levels.forEach(l => {
+    html += '<button class="chip' + (l === s.level ? ' chip-on' : '') + '" data-level="' + l + '">' + esc(l) + '</button>';
+  });
+  html += '</div></div>';
+
+  html += '<div class="card">' +
+    row('Pause scheduled sends', toggleHTML('paused', s.paused)) +
+    row('Delivery every (minutes)', '<input class="num" id="set-interval" type="number" min="15" max="1440" value="' + s.interval + '">') +
+    '</div>';
+
+  html += '<div class="card"><h2>Content</h2>';
+  Object.keys(TOGGLE_LABELS).forEach(k => { html += row(TOGGLE_LABELS[k], toggleHTML(k, !!s.toggles[k])); });
+  html += '</div>';
+
+  body.innerHTML = html;
+
+  body.querySelectorAll('[data-level]').forEach(c => c.addEventListener('click', () => {
+    body.querySelectorAll('[data-level]').forEach(x => x.classList.toggle('chip-on', x === c));
+    postSetting('level', c.dataset.level);
+  }));
+  body.querySelectorAll('.switch input').forEach(inp => inp.addEventListener('change', () => {
+    postSetting(inp.dataset.key, inp.checked);
+  }));
+  const intv = document.getElementById('set-interval');
+  intv.addEventListener('change', () => {
+    let n = parseInt(intv.value, 10); if (isNaN(n)) n = 60;
+    n = Math.max(15, Math.min(1440, n)); intv.value = n;
+    postSetting('interval', n);
+  });
+}
+
+function toggleHTML(key, on) {
+  return '<label class="switch"><input type="checkbox" data-key="' + key + '"' + (on ? ' checked' : '') + '><span class="slider"></span></label>';
+}
+
+async function openSettings() {
+  settingsReturnView = currentView;
+  document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
+  views.settings.hidden = false;
+  tg.BackButton.show();
+  tg.BackButton.onClick(closeSettings);
+  document.getElementById('settings-body').innerHTML = '<div class="loading">Loading…</div>';
+  try { renderSettings(await api('/api/settings')); }
+  catch (e) { document.getElementById('settings-body').innerHTML = '<p class="empty">Could not load settings.</p>'; }
+}
+
+function closeSettings() {
+  tg.BackButton.offClick(closeSettings);
+  showView(settingsReturnView);
+}
+
+try {
+  tg.SettingsButton.show();
+  tg.SettingsButton.onClick(openSettings);
+} catch (e) { /* older Telegram clients */ }
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+const loaders = {
+  dashboard: loadDashboard,
+  vocab: () => loadVocab(true),
+  decks: loadDecks,
+  board: loadBoard,
+  review: loadReview,
+};
+showView('dashboard');
