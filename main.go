@@ -305,6 +305,15 @@ var Changelogs = []ChangelogEntry{
 			"• ⚙️ Difficulty levels now wrap neatly and show friendly names in Settings\n" +
 			"• 🏆 You can now change your leaderboard name any time from Settings",
 	},
+	{
+		Version: "1.25.0",
+		Silent:  true,
+		Text: "Mini App native-feel polish (roadmap phase 1)\n" +
+			"• Full Telegram theme-token coverage (section/destructive/bottom-bar colors) + native bottom-bar blending\n" +
+			"• Haptics taxonomy: selection feedback on tabs/chips, success/error feedback on review answers\n" +
+			"• Swipe views disable the vertical collapse gesture; mid-session close shows a confirmation\n" +
+			"• Skeleton loaders on first paint; failed swipe answers re-queue; failed settings toggles roll back",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
