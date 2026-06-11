@@ -6,6 +6,8 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -52,6 +55,10 @@ func startWebServer(store *Store) {
 	mux.HandleFunc("/api/settings", withUser(store, handleAPISettings))
 	mux.HandleFunc("/api/content", withUser(store, handleAPIContent))
 	mux.HandleFunc("/api/quizzes", withUser(store, handleAPIQuizzes))
+	mux.HandleFunc("/api/vocab/card", withUser(store, handleAPIVocabCard))
+	mux.HandleFunc("/api/quiz/next", withUser(store, handleAPIQuizNext))
+	mux.HandleFunc("/api/quiz/answer", withUser(store, handleAPIQuizAnswer))
+	mux.HandleFunc("/api/practice", withUser(store, handleAPIPractice))
 	// Frontend: the SPA shell on the app routes, static files otherwise.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -198,19 +205,20 @@ func handleAPIStats(w http.ResponseWriter, _ *http.Request, chatID int64, store 
 	}
 
 	writeJSON(w, map[string]interface{}{
-		"current_streak": st.CurrentStreak,
-		"longest_streak": st.LongestStreak,
-		"words":          st.Words,
-		"mastered":       st.Mastered,
-		"verbs":          st.Verbs,
-		"quiz_answered":  st.QuizAnswered,
-		"quiz_correct":   st.QuizCorrect,
-		"quiz_pct":       quizPct,
-		"active_days":    st.ActiveDays,
-		"activity_days":  st.ActivityDays,
-		"level":          levelLabel(st.Level),
-		"paused":         st.Paused,
-		"member_since":   memberSince,
+		"current_streak":  st.CurrentStreak,
+		"longest_streak":  st.LongestStreak,
+		"words":           st.Words,
+		"mastered":        st.Mastered,
+		"verbs":           st.Verbs,
+		"quiz_answered":   st.QuizAnswered,
+		"quiz_correct":    st.QuizCorrect,
+		"quiz_pct":        quizPct,
+		"active_days":     st.ActiveDays,
+		"activity_days":   st.ActivityDays,
+		"activity_counts": st.ActivityCounts,
+		"level":           levelLabel(st.Level),
+		"paused":          st.Paused,
+		"member_since":    memberSince,
 	})
 }
 
@@ -727,6 +735,196 @@ func handleAPIQuizzes(w http.ResponseWriter, r *http.Request, chatID int64, stor
 		"total":  answered,
 		"offset": offset,
 	})
+}
+
+// handleAPIVocabCard returns the full (HTML-stripped) pooled card text for one
+// learned word, so Library word rows can expand into a detail view.
+func handleAPIVocabCard(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	term := strings.TrimSpace(r.URL.Query().Get("term"))
+	if term == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"term":    term,
+		"text":    stripTelegramHTML(store.PooledCardText(term)),
+		"meaning": store.MeaningForWord(term),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// On-demand practice — in-app quiz + fresh pool content (roadmap phase 5).
+// ---------------------------------------------------------------------------
+
+// practiceKinds whitelists what /api/practice may serve. Pool-only (never
+// generates inline with AI), so a tap can't trigger provider spend.
+var practiceKinds = map[string]bool{
+	kindWord:        true,
+	kindIdiom:       true,
+	kindCollocation: true,
+}
+
+// practiceHourlyLimit bounds /api/practice and /api/quiz/next taps per user per
+// rolling hour, echoing the bot's hourly-limiter approach for on-demand content.
+const practiceHourlyLimit = 60
+
+var (
+	practiceMu   sync.Mutex
+	practiceHits = map[int64][]time.Time{}
+)
+
+// practiceAllowed records a hit for chatID and reports whether they are still
+// under the rolling-hour budget.
+func practiceAllowed(chatID int64) bool {
+	practiceMu.Lock()
+	defer practiceMu.Unlock()
+	cutoff := time.Now().Add(-time.Hour)
+	kept := practiceHits[chatID][:0]
+	for _, t := range practiceHits[chatID] {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= practiceHourlyLimit {
+		practiceHits[chatID] = kept
+		return false
+	}
+	practiceHits[chatID] = append(kept, time.Now())
+	return true
+}
+
+// PracticeContent serves one pool item of a kind at the user's level and
+// records it to the per-user history (so SRS/daily recaps treat it like a
+// scheduled send). It mirrors serveContent's pool path but never generates
+// inline — the Mini App must not trigger AI spend.
+func (s *Store) PracticeContent(chatID int64, kind, level string) (term, text string, err error) {
+	term, _, text, ok, err := s.PooledUnseen(kind, level, chatID)
+	if err != nil {
+		return "", "", err
+	}
+	if !ok {
+		term, _, text, ok, err = s.PooledRecycled(kind, level, chatID)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	if !ok {
+		term, _, text, ok, err = s.PooledOldest(kind, level)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	if !ok {
+		return "", "", errPoolEmpty
+	}
+	if err := s.recordSentFor(kind, chatID, term); err != nil {
+		log.Printf("⚠️  [WEBAPP] Could not record practice %s %q for chat %d: %v", kind, term, chatID, err)
+	}
+	return term, text, nil
+}
+
+var errPoolEmpty = errors.New("content pool empty")
+
+// handleAPIPractice serves one fresh card (word/idiom/collocation) from the
+// content pool at the user's level.
+func handleAPIPractice(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	kind := r.URL.Query().Get("kind")
+	if !practiceKinds[kind] {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if !practiceAllowed(chatID) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return
+	}
+	term, text, err := store.PracticeContent(chatID, kind, store.GetLevel(chatID))
+	if err != nil {
+		if errors.Is(err, errPoolEmpty) {
+			writeJSON(w, map[string]interface{}{"available": false})
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"available": true,
+		"kind":      kind,
+		"term":      term,
+		"text":      stripTelegramHTML(text),
+	})
+}
+
+// quizTokenTTL bounds how long an issued in-app quiz question stays answerable.
+const quizTokenTTL = 10 * time.Minute
+
+// quizTokenMAC signs the quiz payload with a key derived from the bot token,
+// binding the answer to the user, subject word, correct index and expiry —
+// the server stays stateless between /api/quiz/next and /api/quiz/answer.
+func quizTokenMAC(chatID int64, word string, correctIdx int, exp int64) string {
+	h1 := hmac.New(sha256.New, []byte("QuizToken"))
+	h1.Write([]byte(TelegramBotToken))
+	key := h1.Sum(nil)
+	h2 := hmac.New(sha256.New, key)
+	fmt.Fprintf(h2, "%d|%s|%d|%d", chatID, word, correctIdx, exp)
+	return hex.EncodeToString(h2.Sum(nil))
+}
+
+// handleAPIQuizNext returns one multiple-choice question built from the user's
+// learned words (same generator the chat quizzes use).
+func handleAPIQuizNext(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	if !practiceAllowed(chatID) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return
+	}
+	q, ok, err := makeQuiz(store, chatID, time.Now(), newRand())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		writeJSON(w, map[string]interface{}{"available": false})
+		return
+	}
+	exp := time.Now().Add(quizTokenTTL).Unix()
+	writeJSON(w, map[string]interface{}{
+		"available": true,
+		"prompt":    stripTelegramHTML(q.prompt),
+		"options":   q.options,
+		"word":      q.word,
+		"correct":   q.correctIdx,
+		"exp":       exp,
+		"token":     quizTokenMAC(chatID, q.word, q.correctIdx, exp),
+	})
+}
+
+// handleAPIQuizAnswer validates a signed quiz token and records the result.
+func handleAPIQuizAnswer(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Word    string `json:"word"`
+		Correct int    `json:"correct"`
+		Exp     int64  `json:"exp"`
+		Token   string `json:"token"`
+		Answer  int    `json:"answer"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Word == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	expected := quizTokenMAC(chatID, body.Word, body.Correct, body.Exp)
+	if !hmac.Equal([]byte(expected), []byte(body.Token)) || time.Now().Unix() > body.Exp {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	correct := body.Answer == body.Correct
+	if err := store.RecordQuizResult(chatID, body.Word, correct); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"ok": true, "correct": correct})
 }
 
 // atoiOr parses s as an int, returning def on failure.

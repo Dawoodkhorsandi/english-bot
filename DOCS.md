@@ -727,6 +727,10 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/settings` | GET/POST | Read all prefs (incl. `level`, friendly `levelLabels`, current leaderboard `name`) / apply one `{key, value}` change via existing setters. |
 | `/api/content?kind&offset&limit` | GET | Library page over the per-user history tables (`sent_idioms` / `sent_collocations` / `sent_stories` / `sent_tips`), joined with `content_pool` for the card text (Telegram HTML stripped via `stripTelegramHTML`). `kind` is whitelisted (`libraryKinds`): `idiom`, `collocation`, `story`, `tip`. |
 | `/api/quizzes?offset&limit` | GET | Quiz attempt history from `quiz_results` (word, correct, date), most recent first. |
+| `/api/vocab/card?term` | GET | Full HTML-stripped pooled card text + meaning for one learned word (Library word-row detail). |
+| `/api/practice?kind` | GET | One fresh pool card at the user's level (`PracticeContent`: unseen → recycled → oldest; **never generates inline with AI**) and records it to the history tables. Kinds (`practiceKinds`): `word`, `idiom`, `collocation`. Rate-limited (`practiceAllowed`, 60/h per user). |
+| `/api/quiz/next` | GET | One multiple-choice question from `makeQuiz` (same generator as chat quizzes), HTML-stripped, with an HMAC token (`quizTokenMAC`) binding user/word/correct-index/expiry so the server stays stateless. Rate-limited. |
+| `/api/quiz/answer` | POST | `{word, correct, exp, token, answer}` → verifies the token + TTL, records to `quiz_results`, returns `{correct}`. |
 
 **Leaderboard** (`leaderboard.go`): cross-user ranking via `GROUP BY chat_id`
 over `sent_vocab` (words) or `review_schedule` (mastered, interval ≥ 21d). Each

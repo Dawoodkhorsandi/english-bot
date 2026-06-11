@@ -19,9 +19,9 @@ needs a bundler is out.
 - Derive every color from `--tg-theme-*` variables via the semantic tokens in
   §2 — the app must look right in any Telegram theme, light or dark.
 - Feel native: Telegram `BackButton` for drill-downs, `SettingsButton` for
-  settings, haptics on every meaningful interaction (§6), native
-  `MainButton`/`SecondaryButton` where a screen has one primary action
-  (✅ v1.26.0 in swipe sessions).
+  settings, haptics on every meaningful interaction (§6). Native
+  `MainButton`/`SecondaryButton` are NOT used for session answers (tried,
+  reverted — they render below the tab bar; see §4 swipe session).
 - Optimistic UI **with rollback**: update the UI immediately, revert on a
   failed POST. The bookmark star (`wordRow()` in `app.js`) is the canonical
   example — it flips back on error. All mutations follow it: settings
@@ -97,11 +97,11 @@ factory in `app.js` where one exists.
 | Card | `.card`, `.card h2`, `.big`, `.sub` | Section header `h2` is 13px uppercase hint-colored |
 | Progress bar | `.bar-wrap` / `.bar-fill`; `bar(pct, colour)` | Width transition .4s; colour param should be a token |
 | Stat grid | `.grid` | 2-column |
-| Activity heatmap | `.heatmap` / `.heat-cell` (+`.on`, `.today`, `.future`); `heatmapHTML(set)` | 17 week columns × 7 day rows, pure CSS grid (✅ v1.26.0, Chart.js dropped) |
+| Activity heatmap | `.heatmap` / `.heat-cell` (+`.l1`–`.l4`, `.today`, `.future`), `.heat-legend`; `heatmapHTML(counts)`, `heatLevel(n)` | 17×7 CSS grid; GitHub-style intensity from `activity_counts` (1/3/6/10+ thresholds) with Less→More legend (✅ v1.29.0) |
 | Chips | `.chips` / `.chip` / `.chip-on` | Filter + action duty; active = accent |
 | Search | `.search` | Debounce input 250ms |
 | List + row | `.list`, `.word`, `.word-main`, `.word-term`, `.word-meaning`, `.word-mastery`; `wordRow(w)` | Mastery icons: ✅ mastered · 📖 learning · 🆕 new |
-| Library row | `.word.expandable`, `.word-date`, `.word-text`; `contentRow(it)`, `quizRow(it)` | Tap toggles the full card text in place; date on the right |
+| Library row | `.word.expandable`, `.word-date`, `.word-text`; `contentRow(it)`, `quizRow(it)`, `wordRow(w)` | Every row opens its details on tap (✅ v1.29.0): content rows toggle inline; word rows lazy-fetch `/api/vocab/card`; the ⭐ star stops propagation |
 | Bookmark star | `.star` | Optimistic toggle **with rollback** — the canonical mutation pattern |
 | Load more | `.more` | Hidden when `offset >= total` |
 | Rank row | `.rank`, `.avatar`/`.avatar-fallback`, `.you`, `.word.me`; `boardRow(r)`, `medal(rank)` | 🥇🥈🥉 then `#n`; avatar falls back to the name's first letter |
@@ -126,11 +126,12 @@ Contract (`opts`): `load() → Promise<[{front, back, …}]>` ·
 Interaction constants: drag >6px distinguishes drag from tap-to-reveal ·
 commit at |dx| > 90px · 180ms advance to next card · stamps fade in over 80px.
 
-Answers re-queue once on POST failure (✅ v1.25.0). On Bot API 7.10+ clients
-the native `MainButton` ("Knew it") / `SecondaryButton` ("Forgot", left)
-replace the in-page answer buttons, and sessions end on a completion screen
-with a progress ring and known/forgot counts (✅ v1.26.0). Only one session is
-live at a time — `teardownSession` hides the native buttons on any view change.
+Answers re-queue once on POST failure (✅ v1.25.0). Sessions end on a
+completion screen with a progress ring and known/forgot counts (✅ v1.26.0).
+**Answer buttons are in-page, above the fixed tab bar** — native
+`MainButton`/`SecondaryButton` were tried in v1.26.0 and reverted in v1.29.0:
+Telegram renders them below the webview, i.e. under the navigation bar
+(maintainer decision, June 2026). Don't reintroduce them for session answers.
 
 ## 5. Screens
 
@@ -142,7 +143,7 @@ deck study is a `BackButton` drill-down inside the Decks tab.
 |---|---|---|---|
 | **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Quiz accuracy (if answered>0) → 30-day activity → Level | ✅ heatmap (v1.26.0), share-streak + home-screen offer (v1.28.0) |
 | **Library** `#view-vocab` | `GET /api/vocab` (words/bookmarks), `GET /api/content?kind=` (idiom/collocation/story/tip), `GET /api/quizzes` | Search (words only) → kind chips → list → Load more; content rows expand in place (`contentRow`), quiz rows show ✅/❌ + date (`quizRow`) | `GAP`: result count while searching |
-| **Decks** `#view-decks` | `GET /api/decks`, drill-down `GET /api/decks/study`, `POST /api/decks/swipe` | Deck cards (name, %, bar, due/mastered) → swipe session | ✅ v1.25.0/v1.26.0 |
+| **Decks** `#view-decks` | `GET /api/decks`(+`/study`,`/swipe`), `GET /api/practice?kind=`, `GET /api/quiz/next` + `POST /api/quiz/answer` | Practice-now card (quiz/word/idiom/collocation chips → BackButton drill-down) → deck cards → swipe session | ✅ practice hub v1.29.0 |
 | **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap | ✅ native buttons + completion screen (v1.26.0) |
 | **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips → your-rank card (if outside top 50) → top-50 list; first-visit name modal | ✅ avatars + 📅 weekly chip (v1.28.0) |
 | **Settings** `#view-settings` | `GET/POST /api/settings` | Level chips → leaderboard name → pause + interval → 9 content toggles | Toggle rollback on failed POST |
@@ -235,4 +236,4 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 | ~~Library (idioms / collocations / stories / tips / quiz history)~~ ✅ v1.27.0 — lives in the Words tab as kind chips, no 6th tab | 3 |
 | ~~Leaderboard avatars + weekly metric~~ ✅ v1.28.0 | 4 |
 | ~~Share-streak + `addToHomeScreen` prompt~~ ✅ v1.28.0 (share via `t.me/share` deep link — no media asset needed; `shareToStory` stays in the backlog) | 4 |
-| In-app quiz + on-demand practice | 5 |
+| ~~In-app quiz + on-demand practice~~ ✅ v1.29.0 — Practice hub on the Decks tab (`openPractice`, `.quiz-opt`) | 5 |

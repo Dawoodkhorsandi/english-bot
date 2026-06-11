@@ -44,7 +44,9 @@ kept in sync with the code and **CI enforces it** (see Testing).
   `/api/review/next`+`/answer`, `/api/decks`(+`/study`,`/swipe`), `/api/settings`
   (GET reads prefs, POST applies one `{key,value}` via existing setters),
   `/api/content?kind=` (Library history: idiom/collocation/story/tip),
-  `/api/quizzes` (quiz attempt history).
+  `/api/quizzes` (quiz attempt history), `/api/vocab/card?term=` (word detail),
+  `/api/practice?kind=` (pool-only on-demand card, rate-limited),
+  `/api/quiz/next`+`/answer` (in-app quiz, HMAC-token stateless).
 - Tabs: Stats · Library · Decks · Review · Ranks; Settings via the native
   Telegram `SettingsButton`. Drill-downs use `BackButton`. The app is the chat's
   persistent menu button (`setChatMenuButton` on startup) and opens via `/app`.

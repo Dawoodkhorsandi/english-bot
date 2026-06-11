@@ -27,7 +27,8 @@ type UserStats struct {
 	LongestStreak  int // best run of consecutive active days ever
 	MemberSince    time.Time
 	HasMemberSince bool
-	ActivityDays   []string // "2006-01-02" strings for the mini-app calendar
+	ActivityDays   []string       // "2006-01-02" strings for the mini-app calendar
+	ActivityCounts map[string]int // items received per "2006-01-02" day (heatmap intensity)
 }
 
 // parseStoredUTC interprets a SQLite DATETIME value (which the driver may hand
@@ -82,22 +83,25 @@ func (s *Store) UserStats(chatID int64) (UserStats, error) {
 		}
 	}
 
-	days, err := s.activityDays(chatID)
+	counts, err := s.activityDays(chatID)
 	if err != nil {
 		return st, err
 	}
-	st.ActiveDays = len(days)
-	st.CurrentStreak, st.LongestStreak = computeStreaks(days, time.Now().In(appLocation))
-	for d := range days {
+	st.ActivityCounts = counts
+	st.ActiveDays = len(counts)
+	days := make(map[string]bool, len(counts))
+	for d := range counts {
+		days[d] = true
 		st.ActivityDays = append(st.ActivityDays, d)
 	}
+	st.CurrentStreak, st.LongestStreak = computeStreaks(days, time.Now().In(appLocation))
 	sort.Strings(st.ActivityDays)
 	return st, nil
 }
 
-// activityDays returns the set of distinct local (appLocation) calendar dates on
-// which the user received any drill or word, keyed by "2006-01-02".
-func (s *Store) activityDays(chatID int64) (map[string]bool, error) {
+// activityDays returns, per distinct local (appLocation) calendar date keyed by
+// "2006-01-02", how many drills or words the user received that day.
+func (s *Store) activityDays(chatID int64) (map[string]int, error) {
 	rows, err := s.db.Query(`
 		SELECT sent_at FROM sent_words WHERE chat_id = ?
 		UNION ALL
@@ -109,14 +113,14 @@ func (s *Store) activityDays(chatID int64) (map[string]bool, error) {
 	}
 	defer rows.Close()
 
-	days := make(map[string]bool)
+	days := make(map[string]int)
 	for rows.Next() {
 		var raw any
 		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
 		if ts, ok := parseStoredUTC(raw); ok {
-			days[ts.In(appLocation).Format("2006-01-02")] = true
+			days[ts.In(appLocation).Format("2006-01-02")]++
 		}
 	}
 	return days, rows.Err()
