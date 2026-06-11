@@ -94,10 +94,14 @@ func withUser(store *Store, fn apiHandler) http.HandlerFunc {
 		if initData == "" {
 			initData = r.URL.Query().Get("initData")
 		}
-		chatID, ok := validateInitData(initData)
+		chatID, photoURL, ok := validateInitData(initData)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
+		}
+		// Best-effort avatar cache for the leaderboard (no-op when unchanged).
+		if photoURL != "" {
+			_ = store.SetPhotoURL(chatID, photoURL)
 		}
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		fn(w, r, chatID, store)
@@ -111,16 +115,17 @@ func writeJSON(w http.ResponseWriter, v interface{}) {
 }
 
 // validateInitData validates Telegram WebApp initData using HMAC-SHA256 and
-// returns the user ID on success. It also rejects initData whose auth_date is
-// older than initDataTTL (replay protection).
-func validateInitData(initData string) (userID int64, ok bool) {
+// returns the user ID (and their avatar URL, when Telegram includes one) on
+// success. It also rejects initData whose auth_date is older than initDataTTL
+// (replay protection).
+func validateInitData(initData string) (userID int64, photoURL string, ok bool) {
 	params, err := url.ParseQuery(initData)
 	if err != nil {
-		return 0, false
+		return 0, "", false
 	}
 	hash := params.Get("hash")
 	if hash == "" {
-		return 0, false
+		return 0, "", false
 	}
 
 	// Build check string: all fields except "hash", sorted alphabetically.
@@ -145,29 +150,30 @@ func validateInitData(initData string) (userID int64, ok bool) {
 	expected := hex.EncodeToString(h2.Sum(nil))
 
 	if !hmac.Equal([]byte(expected), []byte(hash)) {
-		return 0, false
+		return 0, "", false
 	}
 
 	// Reject stale payloads (replay protection). auth_date is unix seconds.
 	if ad := params.Get("auth_date"); ad != "" {
 		if sec, err := strconv.ParseInt(ad, 10, 64); err == nil {
 			if time.Since(time.Unix(sec, 0)) > initDataTTL {
-				return 0, false
+				return 0, "", false
 			}
 		}
 	}
 
 	userJSON := params.Get("user")
 	if userJSON == "" {
-		return 0, false
+		return 0, "", false
 	}
 	var u struct {
-		ID int64 `json:"id"`
+		ID       int64  `json:"id"`
+		PhotoURL string `json:"photo_url"`
 	}
 	if err := json.Unmarshal([]byte(userJSON), &u); err != nil || u.ID == 0 {
-		return 0, false
+		return 0, "", false
 	}
-	return u.ID, true
+	return u.ID, u.PhotoURL, true
 }
 
 // ---------------------------------------------------------------------------
@@ -270,7 +276,7 @@ func handleAPIBookmark(w http.ResponseWriter, r *http.Request, chatID int64, sto
 // own rank, and whether they've chosen a display name yet.
 func handleAPILeaderboard(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
 	metric := r.URL.Query().Get("metric")
-	if metric != "mastered" {
+	if metric != "mastered" && metric != "weekly" {
 		metric = "words"
 	}
 	rows, myRank, myValue, err := store.Leaderboard(metric, chatID)

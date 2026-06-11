@@ -105,12 +105,12 @@ func TestValidateInitDataRejectsStale(t *testing.T) {
 	saveToken(t)
 	// auth_date well past the TTL.
 	stale := signInitData(100, time.Now().Add(-2*initDataTTL))
-	if _, ok := validateInitData(stale); ok {
+	if _, _, ok := validateInitData(stale); ok {
 		t.Error("expected stale initData to be rejected")
 	}
 	// Fresh is accepted.
 	fresh := signInitData(100, time.Now())
-	if id, ok := validateInitData(fresh); !ok || id != 100 {
+	if id, _, ok := validateInitData(fresh); !ok || id != 100 {
 		t.Errorf("fresh initData: id=%d ok=%v, want 100/true", id, ok)
 	}
 }
@@ -477,5 +477,54 @@ func TestAPIContentAndQuizHistory(t *testing.T) {
 	}
 	if quiz.Items[0].Word != "pear" || quiz.Items[0].Correct {
 		t.Errorf("first item = %+v, want most recent (pear, wrong)", quiz.Items[0])
+	}
+}
+
+func TestAPILeaderboardWeeklyAndAvatar(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+
+	// Two users learned a word just now (inside the current week).
+	if err := store.RecordSentVocab(1, "alpha"); err != nil {
+		t.Fatalf("RecordSentVocab: %v", err)
+	}
+	if err := store.RecordSentVocab(2, "beta"); err != nil {
+		t.Fatalf("RecordSentVocab: %v", err)
+	}
+	if err := store.SetPhotoURL(2, "https://example.com/p.jpg"); err != nil {
+		t.Fatalf("SetPhotoURL: %v", err)
+	}
+
+	w := apiCall(store, handleAPILeaderboard, http.MethodGet, "/api/leaderboard?metric=weekly", 1, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Metric string      `json:"metric"`
+		Rows   []LeaderRow `json:"rows"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Metric != "weekly" {
+		t.Errorf("metric = %q, want weekly", resp.Metric)
+	}
+	if len(resp.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(resp.Rows))
+	}
+	var photoSeen bool
+	for _, r := range resp.Rows {
+		if r.Photo == "https://example.com/p.jpg" {
+			photoSeen = true
+		}
+	}
+	if !photoSeen {
+		t.Error("expected user 2's avatar URL in the weekly rows")
+	}
+
+	// Unknown metrics fall back to "words".
+	w = apiCall(store, handleAPILeaderboard, http.MethodGet, "/api/leaderboard?metric=bogus", 1, "")
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp.Metric != "words" {
+		t.Errorf("bogus metric = %q, want words (err %v)", resp.Metric, err)
 	}
 }

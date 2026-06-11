@@ -64,7 +64,7 @@ updated.
 |---|---|---|
 | Leaderboard avatars: pass `photo_url` from validated initData through `withUser` → leaderboard rows, fallback to initials | `webapp.go`, `leaderboard.go`, `webapp/app.js`, `webapp/styles.css` | M |
 | Weekly metric chip: leaderboard query windowed to the current week (keeps newcomers motivated vs all-time board) | `leaderboard.go`, `webapp.go`, `webapp/app.js` | S/M |
-| `shareToStory` streak card at milestones (7/30/100 days) | `webapp/app.js` | M |
+| Share-streak at a 3-day streak — shipped via the universal `t.me/share` deep link instead of `shareToStory` (which needs a hosted media asset; moved to backlog) | `webapp/app.js` | M |
 | `addToHomeScreen()` prompt at a 7-day streak (`checkHomeScreenStatus` first, once per user via `CloudStorage`) | `webapp/app.js` | S |
 
 ## Phase 5 — On-demand practice in-app
@@ -83,6 +83,8 @@ Biggest backend lift; brings chat-only features (`/quiz`, `/word`, `/idiom`,
 
 - `DeviceStorage` as a localStorage replacement — revisit if CloudStorage
   limits bite.
+- `shareToStory` streak card — needs a hosted story-sized media asset;
+  superseded for now by the `t.me/share` deep link (v1.28.0).
 - Offline audio cache via `downloadFile` — TTS stays chat-side for now.
 - User-created decks — bundled `deckRegistry` decks only.
 - Fullscreen mode — safe-area cost outweighs benefit for this app.

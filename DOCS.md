@@ -335,6 +335,7 @@ point a re-exhaustion re-alerts. Best-effort and nil-notifier-safe.
 | `quiz_interval_hours` | `INTEGER` | Hours between scheduled quizzes, default `6` (v1.17.0) |
 | `first_name` | `TEXT` | User's Telegram first name, updated on every inbound message; used in streak celebrations and personalised greetings (v1.18.0) |
 | `streak_celebrated` | `INTEGER` | Highest streak milestone (3/7/14/30/60) already celebrated; prevents repeat celebrations, default `0` (v1.18.0) |
+| `photo_url` | `TEXT` | Telegram avatar URL cached from validated Mini App initData (`SetPhotoURL`); shown on the leaderboard, default `''` (v1.28.0) |
 | `updated_at` | `DATETIME` | Last change time |
 
 Rows are created lazily via upsert (`INSERT … ON CONFLICT`) the first time a user sets
@@ -716,7 +717,7 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/stats` | GET | Dashboard payload (streak, words, mastered, drills, quiz %, full activity-day history for the heatmap, level, paused, member-since). |
 | `/api/vocab?offset&limit&bookmarks&q` | GET | Page of learned words (`LearnedWordsFiltered`), with mastery + bookmark flags and a term/meaning search. |
 | `/api/bookmark` | POST | `{term, on}` → toggle a bookmark. |
-| `/api/leaderboard?metric=words\|mastered` | GET | Ranked rows + the caller's own rank + `hasName`. |
+| `/api/leaderboard?metric=words\|mastered\|weekly` | GET | Ranked rows (incl. avatar `photo`) + the caller's own rank + `hasName`. `weekly` counts words learned since Monday 00:00 (`weekStartUTC`). |
 | `/api/leaderboard/name` | POST | `{name}` → set the caller's display name (sanitised, ≤24 chars). |
 | `/api/review/next?limit` | GET | Due SRS cards (`DueReviews`). |
 | `/api/review/answer` | POST | `{term, known}` → `ApplyReviewKnown`/`ApplyReviewForgot`. |
