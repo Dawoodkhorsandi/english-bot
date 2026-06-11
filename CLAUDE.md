@@ -36,9 +36,14 @@ kept in sync with the code and **CI enforces it** (see Testing).
   `webapp/decks/*.json`. No build step, no framework.
 - Every `/api/*` handler is wrapped by `withUser`, which validates Telegram
   `initData` (HMAC-SHA256) **and** an `auth_date` freshness TTL (`initDataTTL`),
-  resolving the `chatID`. Reuse it for any new endpoint.
+  resolving the `chatID`. The frontend sends initData in the `X-Init-Data`
+  header (server also accepts `?initData=`). Reuse `withUser` for any new endpoint.
+- API: `/api/stats`, `/api/vocab`, `/api/bookmark`, `/api/leaderboard`(+`/name`),
+  `/api/review/next`+`/answer`, `/api/decks`(+`/study`,`/swipe`), `/api/settings`
+  (GET reads prefs, POST applies one `{key,value}` via existing setters).
 - Tabs: Stats · Words · Decks · Review · Ranks; Settings via the native
-  Telegram `SettingsButton`. Drill-downs use `BackButton`.
+  Telegram `SettingsButton`. Drill-downs use `BackButton`. The app is the chat's
+  persistent menu button (`setChatMenuButton` on startup) and opens via `/app`.
 - **Adding a deck:** drop `webapp/decks/<id>.json`
   (`[{term, definition, example, group}]`) and add a `deckRegistry` entry in
   `leitner.go`. `SeedDecks` ingests it idempotently; blank `example`s are filled
@@ -66,9 +71,12 @@ kept in sync with the code and **CI enforces it** (see Testing).
 
 ## Deployment (the gotchas — learned the hard way)
 
-Prod runs in Docker on a VPS; HTTPS terminates on an external proxy → nginx:80 →
-`english-bot:8090`. The deploy is GitHub Actions `.github/workflows/deploy.yml`
-(manual `workflow_dispatch` or auto via `release.yml`):
+Prod is **live at https://bot.mardeen.ir** (Mini App hub shipped in v1.24.0).
+Runs in Docker on a VPS; HTTPS terminates on an external proxy → nginx:80 →
+`english-bot:8090`. Merging to `master` auto-deploys: `auto-tag.yml` tags the
+newest `Changelogs` version (so a docs-only change with no new entry does **not**
+redeploy), and the tag triggers `release.yml` → `deploy.yml`. The deploy can also
+be run manually via `workflow_dispatch`. Gotchas:
 
 1. **`WEB_APP_URL` must be set** or the web server never starts → reverse proxy
    returns **502** *and* `/stats` shows no button. It must be `https://`.
@@ -80,6 +88,8 @@ Prod runs in Docker on a VPS; HTTPS terminates on an external proxy → nginx:80
    is reachable on the host.
 4. Deploy uses `docker compose up -d --force-recreate` (PR #33) so `.env` changes
    actually take effect (plain `up -d` keeps the old container/env).
+5. The nginx container publishes host port **:80** — if another service already
+   holds `:80` on the VPS it will fail to start; check `docker logs english-bot-nginx`.
 
 ## Useful facts
 
