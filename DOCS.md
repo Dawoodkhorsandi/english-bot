@@ -720,13 +720,15 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/decks` | GET | Curated decks with per-user progress % + due/mastered counts. |
 | `/api/decks/study?deck&limit` | GET | Next cards to study (due first, then new). |
 | `/api/decks/swipe` | POST | `{deck, term, known}` → Leitner box update. |
-| `/api/settings` | GET/POST | Read all prefs / apply one `{key, value}` change via existing setters. |
+| `/api/settings` | GET/POST | Read all prefs (incl. `level`, friendly `levelLabels`, current leaderboard `name`) / apply one `{key, value}` change via existing setters. |
 
 **Leaderboard** (`leaderboard.go`): cross-user ranking via `GROUP BY chat_id`
 over `sent_vocab` (words) or `review_schedule` (mastered, interval ≥ 21d). Each
 user picks a display name on first open; if they skip, a deterministic friendly
 nickname (`funnyName`, adjective+noun seeded by `chat_id`) is shown — never a raw
-Telegram name and never "Anonymous". Names are sanitised (`sanitizeDisplayName`).
+Telegram name and never "Anonymous". The name can be changed any time from the
+Settings screen (which posts to `/api/leaderboard/name`). Names are sanitised
+(`sanitizeDisplayName`).
 
 **Leitner decks** (`leitner.go`): curated vocabulary decks studied with a 5-box
 Leitner system. Cards live in `deck_cards` (seeded idempotently from embedded

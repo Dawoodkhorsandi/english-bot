@@ -297,6 +297,14 @@ var Changelogs = []ChangelogEntry{
 			"⚙️ <b>Settings</b> — tweak your level, schedule and content right inside the app\n\n" +
 			"Everything syncs with the bot you already use. Give it a tap! 🎉",
 	},
+	{
+		Version: "1.24.1",
+		Silent:  true,
+		Text: "🛠️ <b>Mini App fixes</b>\n\n" +
+			"• ✅ Tap a Review/Deck card to reveal its meaning again (the tap-to-flip got stuck after the first touch)\n" +
+			"• ⚙️ Difficulty levels now wrap neatly and show friendly names in Settings\n" +
+			"• 🏆 You can now change your leaderboard name any time from Settings",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the

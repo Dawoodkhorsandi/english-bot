@@ -363,10 +363,17 @@ func TestAPISettingsRoundTrip(t *testing.T) {
 		t.Fatalf("level code = %d", w.Code)
 	}
 
+	// Give the user a leaderboard name so the settings GET surfaces it.
+	if err := store.SetDisplayName(100, "WordNinja"); err != nil {
+		t.Fatalf("set name: %v", err)
+	}
+
 	w := apiCall(store, handleAPISettings, http.MethodGet, "/api/settings", 100, "")
 	var resp struct {
-		Level   string          `json:"level"`
-		Toggles map[string]bool `json:"toggles"`
+		Level       string            `json:"level"`
+		LevelLabels map[string]string `json:"levelLabels"`
+		Name        string            `json:"name"`
+		Toggles     map[string]bool   `json:"toggles"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -376,6 +383,13 @@ func TestAPISettingsRoundTrip(t *testing.T) {
 	}
 	if resp.Toggles["idiom"] {
 		t.Error("idiom toggle should be false after update")
+	}
+	// Friendly labels are exposed so the UI need not show raw slugs.
+	if got := resp.LevelLabels["upper-intermediate"]; got != "Upper-Intermediate" {
+		t.Errorf("levelLabels[upper-intermediate] = %q, want Upper-Intermediate", got)
+	}
+	if resp.Name != "WordNinja" {
+		t.Errorf("name = %q, want WordNinja", resp.Name)
 	}
 
 	// Invalid level rejected.
