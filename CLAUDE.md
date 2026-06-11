@@ -42,8 +42,10 @@ kept in sync with the code and **CI enforces it** (see Testing).
   header (server also accepts `?initData=`). Reuse `withUser` for any new endpoint.
 - API: `/api/stats`, `/api/vocab`, `/api/bookmark`, `/api/leaderboard`(+`/name`),
   `/api/review/next`+`/answer`, `/api/decks`(+`/study`,`/swipe`), `/api/settings`
-  (GET reads prefs, POST applies one `{key,value}` via existing setters).
-- Tabs: Stats · Words · Decks · Review · Ranks; Settings via the native
+  (GET reads prefs, POST applies one `{key,value}` via existing setters),
+  `/api/content?kind=` (Library history: idiom/collocation/story/tip),
+  `/api/quizzes` (quiz attempt history).
+- Tabs: Stats · Library · Decks · Review · Ranks; Settings via the native
   Telegram `SettingsButton`. Drill-downs use `BackButton`. The app is the chat's
   persistent menu button (`setChatMenuButton` on startup) and opens via `/app`.
 - **Adding a deck:** drop `webapp/decks/<id>.json`

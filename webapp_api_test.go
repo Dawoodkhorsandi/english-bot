@@ -397,3 +397,85 @@ func TestAPISettingsRoundTrip(t *testing.T) {
 		t.Errorf("invalid level code = %d, want 400", w.Code)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Library (content history + quiz history)
+// ---------------------------------------------------------------------------
+
+func TestAPIContentAndQuizHistory(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const chatID = 777
+
+	// Seed an idiom the user has received; the pool keeps the card text.
+	if err := store.AddToPool(kindIdiom, "intermediate", "break the ice",
+		"start a conversation", "💬 <b>break the ice</b>\nTo make people feel relaxed."); err != nil {
+		t.Fatalf("AddToPool: %v", err)
+	}
+	if err := store.RecordSentIdiom(chatID, "break the ice"); err != nil {
+		t.Fatalf("RecordSentIdiom: %v", err)
+	}
+
+	w := apiCall(store, handleAPIContent, http.MethodGet, "/api/content?kind=idiom", chatID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("content code = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Items []libraryItem `json:"items"`
+		Total int           `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Total != 1 || len(resp.Items) != 1 {
+		t.Fatalf("total/items = %d/%d, want 1/1", resp.Total, len(resp.Items))
+	}
+	if resp.Items[0].Term != "break the ice" {
+		t.Errorf("term = %q", resp.Items[0].Term)
+	}
+	if strings.Contains(resp.Items[0].Text, "<") {
+		t.Errorf("text should be stripped of HTML, got %q", resp.Items[0].Text)
+	}
+	if resp.Items[0].SentAt == "" {
+		t.Error("sent_at should be set")
+	}
+
+	// Kinds outside the whitelist (including valid pool kinds like "word")
+	// are rejected.
+	for _, kind := range []string{"word", "drill", "bogus", ""} {
+		if w := apiCall(store, handleAPIContent, http.MethodGet, "/api/content?kind="+kind, chatID, ""); w.Code != http.StatusBadRequest {
+			t.Errorf("kind %q code = %d, want 400", kind, w.Code)
+		}
+	}
+
+	// Another user sees nothing.
+	w = apiCall(store, handleAPIContent, http.MethodGet, "/api/content?kind=idiom", 888, "")
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp.Total != 0 {
+		t.Errorf("other user total = %d, want 0 (err %v)", resp.Total, err)
+	}
+
+	// Quiz history, most recent first.
+	if err := store.RecordQuizResult(chatID, "apple", true); err != nil {
+		t.Fatalf("RecordQuizResult: %v", err)
+	}
+	if err := store.RecordQuizResult(chatID, "pear", false); err != nil {
+		t.Fatalf("RecordQuizResult: %v", err)
+	}
+	w = apiCall(store, handleAPIQuizzes, http.MethodGet, "/api/quizzes", chatID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("quizzes code = %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	var quiz struct {
+		Items []quizHistoryItem `json:"items"`
+		Total int               `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &quiz); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if quiz.Total != 2 || len(quiz.Items) != 2 {
+		t.Fatalf("quiz total/items = %d/%d, want 2/2", quiz.Total, len(quiz.Items))
+	}
+	if quiz.Items[0].Word != "pear" || quiz.Items[0].Correct {
+		t.Errorf("first item = %+v, want most recent (pear, wrong)", quiz.Items[0])
+	}
+}

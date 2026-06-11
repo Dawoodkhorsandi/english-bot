@@ -101,6 +101,7 @@ factory in `app.js` where one exists.
 | Chips | `.chips` / `.chip` / `.chip-on` | Filter + action duty; active = accent |
 | Search | `.search` | Debounce input 250ms |
 | List + row | `.list`, `.word`, `.word-main`, `.word-term`, `.word-meaning`, `.word-mastery`; `wordRow(w)` | Mastery icons: ✅ mastered · 📖 learning · 🆕 new |
+| Library row | `.word.expandable`, `.word-date`, `.word-text`; `contentRow(it)`, `quizRow(it)` | Tap toggles the full card text in place; date on the right |
 | Bookmark star | `.star` | Optimistic toggle **with rollback** — the canonical mutation pattern |
 | Load more | `.more` | Hidden when `offset >= total` |
 | Rank row | `.rank`, `.you`, `.word.me`; `boardRow(r)`, `medal(rank)` | 🥇🥈🥉 then `#n` |
@@ -140,7 +141,7 @@ deck study is a `BackButton` drill-down inside the Decks tab.
 | Screen | Data | Layout | Target additions (`GAP`) |
 |---|---|---|---|
 | **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Quiz accuracy (if answered>0) → 30-day activity → Level | ✅ heatmap (v1.26.0); `GAP`: share-streak action at milestones |
-| **Words** `#view-vocab` | `GET /api/vocab?offset&limit&bookmarks&q` | Search → chips (All/⭐Bookmarks) → list → Load more | Skeleton rows; result count while searching |
+| **Library** `#view-vocab` | `GET /api/vocab` (words/bookmarks), `GET /api/content?kind=` (idiom/collocation/story/tip), `GET /api/quizzes` | Search (words only) → kind chips → list → Load more; content rows expand in place (`contentRow`), quiz rows show ✅/❌ + date (`quizRow`) | `GAP`: result count while searching |
 | **Decks** `#view-decks` | `GET /api/decks`, drill-down `GET /api/decks/study`, `POST /api/decks/swipe` | Deck cards (name, %, bar, due/mastered) → swipe session | ✅ v1.25.0/v1.26.0 |
 | **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap | ✅ native buttons + completion screen (v1.26.0) |
 | **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips → your-rank card (if outside top 50) → top-50 list; first-visit name modal | Avatars via `WebAppUser.photo_url`; weekly metric chip |
@@ -231,7 +232,7 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 | ~~Session completion screen with per-session stats~~ ✅ v1.26.0 | 2 |
 | ~~Activity heatmap (drop Chart.js)~~ ✅ v1.26.0 | 2 |
 | ~~`CloudStorage` last-tab restore + `ui.*` state~~ ✅ v1.26.0 | 2 |
-| Library tab (idioms / collocations / stories / tips / quiz history) | 3 |
+| ~~Library (idioms / collocations / stories / tips / quiz history)~~ ✅ v1.27.0 — lives in the Words tab as kind chips, no 6th tab | 3 |
 | Leaderboard avatars + weekly metric | 4 |
 | `shareToStory` streak card + `addToHomeScreen` prompt | 4 |
 | In-app quiz + on-demand practice | 5 |

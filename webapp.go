@@ -50,6 +50,8 @@ func startWebServer(store *Store) {
 	mux.HandleFunc("/api/decks/study", withUser(store, handleAPIDeckStudy))
 	mux.HandleFunc("/api/decks/swipe", withUser(store, handleAPIDeckSwipe))
 	mux.HandleFunc("/api/settings", withUser(store, handleAPISettings))
+	mux.HandleFunc("/api/content", withUser(store, handleAPIContent))
+	mux.HandleFunc("/api/quizzes", withUser(store, handleAPIQuizzes))
 	// Frontend: the SPA shell on the app routes, static files otherwise.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -532,6 +534,193 @@ func updateAPISetting(w http.ResponseWriter, r *http.Request, chatID int64, stor
 		return
 	}
 	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
+// ---------------------------------------------------------------------------
+// Library — browse received idioms / collocations / stories / tips and the
+// quiz history (Mini App "Library" chips on the Words tab).
+// ---------------------------------------------------------------------------
+
+// libraryKinds whitelists the content kinds browsable via /api/content. The
+// kind also picks the per-user history table via sentTableFor, so the
+// whitelist doubles as SQL-injection protection for the table name.
+var libraryKinds = map[string]bool{
+	kindIdiom:       true,
+	kindCollocation: true,
+	kindStory:       true,
+	kindTip:         true,
+}
+
+// libraryItem is one row of the Library listing.
+type libraryItem struct {
+	Term    string `json:"term"`
+	Meaning string `json:"meaning"`
+	Text    string `json:"text"`
+	SentAt  string `json:"sent_at"` // "2 Jan 2006", appLocation
+}
+
+// stripTelegramHTML removes the simple HTML markup (<b>, <i>, …) that pool
+// card texts carry for Telegram, so the Mini App can escape and render them
+// as plain text.
+func stripTelegramHTML(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// ContentHistory returns one page of the content of a kind the user has
+// received, most recent first, enriched with the card text from content_pool
+// (the pool keeps consumed rows, mirroring LearnedWordsFiltered's join).
+func (s *Store) ContentHistory(chatID int64, kind string, offset, limit int) ([]libraryItem, error) {
+	table := sentTableFor(kind)
+	rows, err := s.db.Query(`
+		SELECT st.word, COALESCE(MAX(cp.meaning), ''), COALESCE(MAX(cp.text), ''), MAX(st.sent_at)
+		FROM `+table+` st
+		LEFT JOIN content_pool cp ON cp.kind = ? AND cp.term = st.word
+		WHERE st.chat_id = ?
+		GROUP BY st.word
+		ORDER BY MAX(st.sent_at) DESC
+		LIMIT ? OFFSET ?`,
+		kind, chatID, limit, offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []libraryItem
+	for rows.Next() {
+		var (
+			it    libraryItem
+			rawAt any
+		)
+		if err := rows.Scan(&it.Term, &it.Meaning, &it.Text, &rawAt); err != nil {
+			return nil, err
+		}
+		it.Text = stripTelegramHTML(it.Text)
+		if ts, ok := parseStoredUTC(rawAt); ok {
+			it.SentAt = ts.In(appLocation).Format("2 Jan 2006")
+		}
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
+// ContentHistoryCount returns how many distinct items of a kind the user has
+// received.
+func (s *Store) ContentHistoryCount(chatID int64, kind string) int {
+	var n int
+	_ = s.db.QueryRow(
+		"SELECT COUNT(DISTINCT word) FROM "+sentTableFor(kind)+" WHERE chat_id = ?", chatID,
+	).Scan(&n)
+	return n
+}
+
+// quizHistoryItem is one past quiz attempt.
+type quizHistoryItem struct {
+	Word       string `json:"word"`
+	Correct    bool   `json:"correct"`
+	AnsweredAt string `json:"answered_at"` // "2 Jan 2006", appLocation
+}
+
+// QuizHistory returns one page of the user's quiz attempts, most recent first.
+func (s *Store) QuizHistory(chatID int64, offset, limit int) ([]quizHistoryItem, error) {
+	rows, err := s.db.Query(`
+		SELECT word, correct, answered_at FROM quiz_results
+		WHERE chat_id = ? ORDER BY answered_at DESC, id DESC LIMIT ? OFFSET ?`,
+		chatID, limit, offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []quizHistoryItem
+	for rows.Next() {
+		var (
+			it      quizHistoryItem
+			correct int
+			rawAt   any
+		)
+		if err := rows.Scan(&it.Word, &correct, &rawAt); err != nil {
+			return nil, err
+		}
+		it.Correct = correct == 1
+		if ts, ok := parseStoredUTC(rawAt); ok {
+			it.AnsweredAt = ts.In(appLocation).Format("2 Jan 2006")
+		}
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
+// handleAPIContent returns a page of the user's received idioms /
+// collocations / stories / tips for the Library.
+func handleAPIContent(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	q := r.URL.Query()
+	kind := q.Get("kind")
+	if !libraryKinds[kind] {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	offset := atoiOr(q.Get("offset"), 0)
+	if offset < 0 {
+		offset = 0
+	}
+	limit := atoiOr(q.Get("limit"), 20)
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	items, err := store.ContentHistory(chatID, kind, offset, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if items == nil {
+		items = []libraryItem{}
+	}
+	writeJSON(w, map[string]interface{}{
+		"items":  items,
+		"total":  store.ContentHistoryCount(chatID, kind),
+		"offset": offset,
+	})
+}
+
+// handleAPIQuizzes returns a page of the user's quiz attempt history.
+func handleAPIQuizzes(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	q := r.URL.Query()
+	offset := atoiOr(q.Get("offset"), 0)
+	if offset < 0 {
+		offset = 0
+	}
+	limit := atoiOr(q.Get("limit"), 20)
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	items, err := store.QuizHistory(chatID, offset, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if items == nil {
+		items = []quizHistoryItem{}
+	}
+	answered, _, _ := store.QuizStats(chatID)
+	writeJSON(w, map[string]interface{}{
+		"items":  items,
+		"total":  answered,
+		"offset": offset,
+	})
 }
 
 // atoiOr parses s as an int, returning def on failure.

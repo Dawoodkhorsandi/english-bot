@@ -100,6 +100,11 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
   line-height: 1; padding: 4px; opacity: .9;
 }
 
+/* Library rows expand in place to show the full card text. */
+.word.expandable { cursor: pointer; }
+.word-date { font-size: 11px; color: var(--hint); white-space: nowrap; align-self: flex-start; margin-top: 2px; }
+.word-text { font-size: 13px; color: var(--text); line-height: 1.55; margin-top: 8px; white-space: pre-line; }
+
 .more {
   display: block; width: 100%; margin-top: 14px; padding: 12px;
   border: none; border-radius: 10px; background: var(--card); color: var(--link);
