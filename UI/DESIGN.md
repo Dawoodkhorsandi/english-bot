@@ -1,0 +1,234 @@
+# Mini App design system
+
+> **This documents the app as it SHOULD be — the target state.** Items marked
+> **`GAP`** are not yet implemented; every gap maps to a phase in
+> [ROADMAP.md](ROADMAP.md). When a PR changes the UI, update this doc (and tick
+> off gaps) in the same PR.
+
+The doc governs the Telegram Mini App frontend only: `webapp/index.html`,
+`webapp/app.js`, `webapp/styles.css`, served by `webapp.go` via `go:embed`.
+Hard constraint: **vanilla JS, no framework, no build step** — anything that
+needs a bundler is out.
+
+---
+
+## 1. Principles
+
+**Do**
+
+- Derive every color from `--tg-theme-*` variables via the semantic tokens in
+  §2 — the app must look right in any Telegram theme, light or dark.
+- Feel native: Telegram `BackButton` for drill-downs, `SettingsButton` for
+  settings, haptics on every meaningful interaction (§6), native
+  `MainButton`/`SecondaryButton` where a screen has one primary action (`GAP`).
+- Optimistic UI **with rollback**: update the UI immediately, revert on a
+  failed POST. The bookmark star (`wordRow()` in `app.js`) is the canonical
+  example — it flips back on error. All mutations must follow it (`GAP`:
+  settings toggles and swipe answers don't yet).
+- Reuse `createSwipeSession(container, opts)` for any card-based flow.
+- `esc()` every interpolated string — user names, AI-generated content, all of it.
+- Every screen has explicit loading / empty / error states with actionable copy (§4).
+
+**Don't**
+
+- No pull-to-refresh — it conflicts with Telegram's swipe-to-close gesture.
+  Tabs reload on every switch (`showView`) instead.
+- No horizontal swipe targets hugging the screen edges (iOS edge-swipe
+  conflict); the swipe card is inset by body padding.
+- No hardcoded hex colors outside the token block in `styles.css` (`GAP`:
+  a few `#4CAF50`/`#f44336` remain — see §2).
+- No custom in-page back buttons or bottom sheets where native chrome exists.
+- Don't drop a swiped card from the queue before its POST is durable (`GAP`:
+  today `commit()` fires-and-forgets `onAnswer`).
+- No new CDN dependencies without strong cause; prefer removing them
+  (Chart.js is slated for removal — see ROADMAP Phase 2).
+
+## 2. Theme tokens
+
+All colors live in the `:root` block of `styles.css` and map Telegram theme
+variables to semantic app tokens. Components reference only the app tokens.
+
+| Telegram variable | App token | Fallback | Status |
+|---|---|---|---|
+| `--tg-theme-bg-color` | `--bg` | `#fff` | ✅ exists |
+| `--tg-theme-text-color` | `--text` | `#111` | ✅ exists |
+| `--tg-theme-secondary-bg-color` | `--card` | `#f5f5f5` | ✅ exists |
+| `--tg-theme-hint-color` | `--hint` | `#888` | ✅ exists |
+| `--tg-theme-button-color` | `--accent` | `#2196F3` | ✅ exists |
+| `--tg-theme-button-text-color` | `--accent-text` | `#fff` | ✅ exists |
+| `--tg-theme-link-color` | `--link` | `#2196F3` | ✅ exists |
+| `--tg-theme-section-bg-color` | `--section` | `var(--card)` | **`GAP`** |
+| `--tg-theme-accent-text-color` | `--accent-fg` | `var(--accent)` | **`GAP`** |
+| `--tg-theme-destructive-text-color` | `--danger` | `#f44336` | **`GAP`** |
+| `--tg-theme-subtitle-text-color` | `--subtitle` | `var(--hint)` | **`GAP`** |
+| `--tg-theme-bottom-bar-bg-color` | `--bottom-bar` | `var(--bg)` | **`GAP`** |
+| — (semantic) | `--success` | `#4CAF50` | **`GAP`** |
+| — (semantic) | `--border` | `rgba(128,128,128,.15)` | **`GAP`** |
+
+Hardcoded colors to migrate when the tokens land: `.swipe-stamp.known` /
+`.swipe-btn.known` / quiz-accuracy bar (→ `--success`), `.swipe-stamp.forgot` /
+`.swipe-btn.forgot` / paused banner (→ `--danger`), the `rgba(128,128,128,…)`
+borders in `.set-row`, `.bar-wrap`, `.slider`, `#tabbar` (→ `--border`).
+
+Boot rule (**`GAP`**): call `tg.setBottomBarColor('secondary_bg_color')` so the
+tab bar blends with Telegram's chrome.
+
+## 3. Typography, spacing, shape
+
+Codified from the current CSS — reuse these steps, don't invent new ones.
+
+- **Type scale:** 34px/700 display (`.big`) · 30px/700 card front
+  (`.swipe-front`) · 20px/700 deck % (`.deck-pct`) · 19px/700 page title (`h1`)
+  · 17px swipe back · 15px body (`.word-term`, `.set-row`) · 13px secondary
+  (`.sub`, `.chip`, section header `h2` uppercase) · 12px micro (`.swipe-hint`)
+  · 11px tab label.
+- **Radii:** 14 card · 18 swipe card · 16 modal · 12 list row/buttons ·
+  10 inputs · 8 small · 20/999 pill (chips).
+- **Spacing steps:** 4 / 8 / 12 / 16. Card padding 16; list gap 8; grid gap 12.
+- **Font:** system stack (`-apple-system, … sans-serif`).
+
+## 4. Components
+
+Each component lists its CSS classes (exact names in `styles.css`) and JS
+factory in `app.js` where one exists.
+
+| Component | Classes / factory | Notes |
+|---|---|---|
+| Card | `.card`, `.card h2`, `.big`, `.sub` | Section header `h2` is 13px uppercase hint-colored |
+| Progress bar | `.bar-wrap` / `.bar-fill`; `bar(pct, colour)` | Width transition .4s; colour param should be a token |
+| Stat grid | `.grid` | 2-column |
+| Chart box | `.chart-box` | **`GAP`**: replace Chart.js bars with a CSS-grid activity heatmap |
+| Chips | `.chips` / `.chip` / `.chip-on` | Filter + action duty; active = accent |
+| Search | `.search` | Debounce input 250ms |
+| List + row | `.list`, `.word`, `.word-main`, `.word-term`, `.word-meaning`, `.word-mastery`; `wordRow(w)` | Mastery icons: ✅ mastered · 📖 learning · 🆕 new |
+| Bookmark star | `.star` | Optimistic toggle **with rollback** — the canonical mutation pattern |
+| Load more | `.more` | Hidden when `offset >= total` |
+| Rank row | `.rank`, `.you`, `.word.me`; `boardRow(r)`, `medal(rank)` | 🥇🥈🥉 then `#n` |
+| Deck card | `.card.deck`, `.deck-head`, `.deck-pct`; `deckCardEl(d)` | Whole card is the tap target |
+| Settings row | `.set-row`, `.num`, `.switch`, `.slider`; `row()`, `toggleHTML()` | Rows divided by `--border` |
+| Modal | `.modal-back`, `.modal`, `.modal-actions`; `askDisplayName()` | Only for text input (no native equivalent) |
+| Tab bar | `#tabbar`, `.tab`, `.tab-on` | Fixed bottom, `safe-area-inset-bottom`; inactive icons grayscaled |
+| States | `.loading`, `.empty` | **`GAP`**: `.skeleton` shimmer blocks replace `Loading…` text on Stats/Words/Ranks first paint |
+
+### Swipe session (`createSwipeSession(container, opts)`)
+
+The one card engine — Review (SRS) and Decks (Leitner) both use it; any future
+card flow must too. Classes: `.swipe-area`, `.swipe-card` (+`.dragging`,
+`.leaving`), `.swipe-front`, `.swipe-back` (+`.ex` example line),
+`.swipe-stamp.known/.forgot`, `.swipe-actions`, `.swipe-btn.known/.forgot`,
+`.swipe-hint`, `.swipe-progress`.
+
+Contract (`opts`): `load() → Promise<[{front, back, …}]>` ·
+`onAnswer(card, known) → Promise` · `doneText` · `emptyText` ·
+`onProgress(remaining)`.
+
+Interaction constants: drag >6px distinguishes drag from tap-to-reveal ·
+commit at |dx| > 90px · 180ms advance to next card · stamps fade in over 80px.
+
+Target state (**`GAP`**): answers retry/re-queue on POST failure;
+`MainButton`/`SecondaryButton` mirror the in-page answer buttons; session ends
+on a completion screen with per-session stats (X known / Y forgot) instead of
+only the 🎉 card.
+
+## 5. Screens
+
+Navigation rules: tab switch hides `BackButton` and reloads the view
+(`showView`); Settings is an overlay that returns to `settingsReturnView`;
+deck study is a `BackButton` drill-down inside the Decks tab.
+
+| Screen | Data | Layout | Target additions (`GAP`) |
+|---|---|---|---|
+| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Quiz accuracy (if answered>0) → 30-day activity → Level | GitHub-style heatmap (~120 days) replacing Chart.js; share-streak action at milestones; skeleton first paint |
+| **Words** `#view-vocab` | `GET /api/vocab?offset&limit&bookmarks&q` | Search → chips (All/⭐Bookmarks) → list → Load more | Skeleton rows; result count while searching |
+| **Decks** `#view-decks` | `GET /api/decks`, drill-down `GET /api/decks/study`, `POST /api/decks/swipe` | Deck cards (name, %, bar, due/mastered) → swipe session | `disableVerticalSwipes` while studying; native answer buttons |
+| **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap | Same as Decks + completion screen |
+| **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips → your-rank card (if outside top 50) → top-50 list; first-visit name modal | Avatars via `WebAppUser.photo_url`; weekly metric chip |
+| **Settings** `#view-settings` | `GET/POST /api/settings` | Level chips → leaderboard name → pause + interval → 9 content toggles | Toggle rollback on failed POST |
+
+State copy conventions — every screen ships all four states:
+
+- **Loading:** skeleton (`GAP`) or `Loading…`.
+- **Empty:** always actionable, e.g. *"No words learned yet. Send /word in the
+  chat!"*, *"No bookmarks yet. Tap ☆ on a word to save it."*
+- **Error:** short + retryable, e.g. *"Could not load your stats. Try again later."*
+- **Done (sessions):** celebratory, e.g. *"Review complete! 🎉"*.
+
+## 6. Interaction rules
+
+### Haptics taxonomy
+
+All haptics wrapped in try/catch (see `haptic()` — older clients throw).
+
+| Event | Call | Status |
+|---|---|---|
+| Tab / chip selection | `selectionChanged()` | **`GAP`** (today `impactOccurred('light')`) |
+| Button tap, card flip, deck open | `impactOccurred('light')` | ✅ |
+| Answer: knew it | `notificationOccurred('success')` | **`GAP`** (today `impactOccurred('medium')`) |
+| Answer: forgot | `notificationOccurred('error')` | **`GAP`** (today `impactOccurred('rigid')`) |
+| Session complete | `notificationOccurred('success')` | **`GAP`** |
+
+### Native chrome
+
+- `BackButton`: drill-downs only (deck study, settings overlay). Always
+  `offClick` the old handler when leaving.
+- `SettingsButton`: opens Settings; remembers and restores the previous view.
+- `MainButton` ("✅ Knew it") + `SecondaryButton` ("❌ Forgot", `position:
+  'left'`) during swipe sessions, hidden elsewhere — **`GAP`**.
+
+### Gestures & lifecycle
+
+- **`GAP`** `tg.disableVerticalSwipes()` on entering a swipe view,
+  `enableVerticalSwipes()` on leaving — prevents a card drag from collapsing
+  the Mini App.
+- **`GAP`** `tg.enableClosingConfirmation()` once a session has ≥1 answered
+  card; disable on completion/exit.
+- `.swipe-card` keeps `touch-action: pan-y` so vertical page scroll still works.
+
+### Telegram WebApp API matrix
+
+| Used today | Target (`GAP`) | Explicitly avoided |
+|---|---|---|
+| `ready`, `expand`, `initData`, `HapticFeedback.impactOccurred`, `BackButton`, `SettingsButton` | `notificationOccurred`, `selectionChanged`, `MainButton`, `SecondaryButton`, `disableVerticalSwipes`, `enableClosingConfirmation`, `setBottomBarColor`, `CloudStorage`, `shareToStory`/`shareMessage`, `addToHomeScreen`, `photo_url` | fullscreen mode, `setEmojiStatus`, `downloadFile`, biometrics, sensors, pull-to-refresh |
+
+## 7. Network & state
+
+- `api(path, opts)` is the only fetch wrapper: sends `tg.initData` in the
+  `X-Init-Data` header, sets JSON content type on bodies, throws on `!res.ok`.
+  Server-side every `/api/*` route is wrapped by `withUser` (`webapp.go`) —
+  reuse it for any new endpoint.
+- **Mutation policy:** optimistic update + rollback on rejection (bookmark
+  star pattern). **`GAP`**: settings toggles must flip back on failure; swipe
+  answers must re-queue or retry instead of `catch(() => {})`.
+- **`GAP`** `CloudStorage` keys, all prefixed: `lastTab` (restore on boot),
+  `ui.*` (per-view UI state, e.g. last leaderboard metric). Never store
+  learning data client-side — SQLite is the source of truth.
+- One screen = one primary fetch; refills inside a session go through the
+  session's `load()`.
+
+## 8. Content & accessibility
+
+- `esc()` is mandatory for every interpolated string. AI-generated text and
+  user names are untrusted.
+- Emoji conventions: exactly one leading emoji per `h1` (📊 📘 📚 🧠 🏆 ⚙️);
+  mastery ✅/📖/🆕; medals 🥇🥈🥉; streak flame 🔥 at ≥3 days; celebration 🎉.
+- Copy tone: short, encouraging, second person. Empty states always tell the
+  user what to do next.
+- Keep tap targets ≥ 40px tall (list rows, tabs, switches already comply).
+
+## 9. Gap checklist
+
+| Gap | Roadmap phase |
+|---|---|
+| Missing theme tokens + `setBottomBarColor` + hardcoded color migration | 1 |
+| Haptics taxonomy (`selectionChanged`, `notificationOccurred`) | 1 |
+| `disableVerticalSwipes` + `enableClosingConfirmation` in sessions | 1 |
+| Skeleton loaders | 1 |
+| Mutation rollback (settings toggles) + swipe answer retry queue | 1 |
+| `MainButton`/`SecondaryButton` session answers | 2 |
+| Session completion screen with per-session stats | 2 |
+| Activity heatmap (drop Chart.js) | 2 |
+| `CloudStorage` last-tab restore + `ui.*` state | 2 |
+| Library tab (idioms / collocations / stories / tips / quiz history) | 3 |
+| Leaderboard avatars + weekly metric | 4 |
+| `shareToStory` streak card + `addToHomeScreen` prompt | 4 |
+| In-app quiz + on-demand practice | 5 |
