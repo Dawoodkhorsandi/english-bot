@@ -696,7 +696,8 @@ becomes the chat's **persistent menu button** — always one tap from the input 
 Telegram's native `SettingsButton`. It uses the Telegram WebApp SDK
 (`BackButton` for drill-downs, `HapticFeedback` on swipes, `MainButton` where
 useful) and themes to `--tg-theme-*` CSS variables (light/dark) with safe-area
-insets. Chart.js renders the 30-day activity chart. UI conventions (theme
+insets. A dependency-free CSS-grid heatmap renders ~4 months of activity
+(no chart library). UI conventions (theme
 tokens, components, screen specs, interaction rules) are documented in
 `UI/DESIGN.md`; the phased feature roadmap lives in `UI/ROADMAP.md`.
 

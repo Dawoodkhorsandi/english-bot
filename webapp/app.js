@@ -42,6 +42,19 @@ function setCloseGuard(on) {
   try { on ? tg.enableClosingConfirmation() : tg.disableClosingConfirmation(); } catch (e) { /* ignore */ }
 }
 
+// Telegram CloudStorage (Bot API 6.9+) for cross-device UI state — never
+// learning data; SQLite stays the source of truth.
+function cloudGet(key) {
+  return new Promise(resolve => {
+    try { tg.CloudStorage.getItem(key, (err, v) => resolve(err ? null : v)); }
+    catch (e) { resolve(null); }
+  });
+}
+
+function cloudSet(key, value) {
+  try { tg.CloudStorage.setItem(key, String(value)); } catch (e) { /* ignore */ }
+}
+
 function skeletonRows(n) {
   let html = '';
   for (let i = 0; i < n; i++) html += '<div class="skeleton skel-row"></div>';
@@ -71,9 +84,11 @@ let currentView = 'dashboard';
 
 function showView(name) {
   try { tg.BackButton.hide(); } catch (e) { /* ignore */ } // reset on tab switch
+  if (teardownSession) teardownSession(); // hide native session buttons
   setSwipeGuard(name === 'review'); // deck study sets its own guard
   setCloseGuard(false);
   currentView = name;
+  if (name !== 'settings') cloudSet('lastTab', name);
   document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('tab-on', t.dataset.view === name));
   views[name].hidden = false;
@@ -90,6 +105,20 @@ document.querySelectorAll('.tab').forEach(t => {
 function bar(pct, colour) {
   return '<div class="bar-wrap"><div class="bar-fill" style="width:' +
          Math.min(100, pct) + '%;background:' + colour + '"></div></div>';
+}
+
+// SVG progress ring for the session completion screen.
+function completionRing(known, total) {
+  const pct = Math.round(known * 100 / total);
+  const r = 28, c = 2 * Math.PI * r;
+  const off = c * (1 - known / total);
+  return '<div class="ring-wrap">' +
+    '<svg class="ring" width="68" height="68" viewBox="0 0 68 68">' +
+    '<circle class="track" cx="34" cy="34" r="' + r + '" fill="none" stroke-width="6"></circle>' +
+    '<circle class="fill" cx="34" cy="34" r="' + r + '" fill="none" stroke-width="6" stroke-linecap="round"' +
+    ' stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '"></circle></svg>' +
+    '<div><div class="ring-pct">' + pct + '% known</div>' +
+    '<div class="sub">✅ ' + known + ' · ❌ ' + (total - known) + '</div></div></div>';
 }
 
 function renderDashboard(s) {
@@ -120,8 +149,8 @@ function renderDashboard(s) {
       bar(s.quiz_pct, 'var(--success)') + '</div>';
   }
 
-  html += '<div class="card"><h2>Activity · last 30 days</h2>' +
-    '<div class="chart-box"><canvas id="actChart"></canvas></div></div>';
+  html += '<div class="card"><h2>Activity · last 4 months</h2>' +
+    heatmapHTML(new Set(s.activity_days || [])) + '</div>';
 
   html += '<div class="card"><h2>Level</h2>' +
     '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
@@ -129,26 +158,33 @@ function renderDashboard(s) {
     (s.member_since ? ' · member since ' + esc(s.member_since) : '') + '</div></div>';
 
   views.dashboard.innerHTML = html;
+}
 
-  const set = new Set(s.activity_days || []);
-  const labels = [], data = [], colors = [];
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    labels.push(((d.getMonth() + 1) + '').padStart(2, '0') + '/' + (d.getDate() + '').padStart(2, '0'));
-    const active = set.has(key);
-    data.push(active ? 1 : 0.15);
-    colors.push(active ? 'var(--accent)' : 'rgba(128,128,128,.2)');
+// GitHub-style activity heatmap: 17 week columns × 7 day rows (Mon top),
+// ending in the current week. Pure CSS grid — no chart library.
+function heatmapHTML(activeSet) {
+  const WEEKS = 17;
+  const today = new Date();
+  const todayKey = localDateKey(today);
+  const start = new Date(today);
+  start.setDate(today.getDate() - ((today.getDay() + 6) % 7) - (WEEKS - 1) * 7);
+  let cells = '';
+  const d = new Date(start);
+  for (let i = 0; i < WEEKS * 7; i++) {
+    const key = localDateKey(d);
+    let cls = 'heat-cell';
+    if (key > todayKey) cls += ' future';
+    else if (activeSet.has(key)) cls += ' on';
+    if (key === todayKey) cls += ' today';
+    cells += '<div class="' + cls + '"></div>';
+    d.setDate(d.getDate() + 1);
   }
-  new Chart(document.getElementById('actChart'), {
-    type: 'bar',
-    data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 3, borderSkipped: false }] },
-    options: {
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      scales: { x: { display: false }, y: { display: false, min: 0, max: 1.4 } },
-      animation: { duration: 400 }
-    }
-  });
+  return '<div class="heatmap">' + cells + '</div>';
+}
+
+function localDateKey(d) {
+  return d.getFullYear() + '-' + ((d.getMonth() + 1) + '').padStart(2, '0') +
+         '-' + (d.getDate() + '').padStart(2, '0');
 }
 
 async function loadDashboard() {
@@ -290,6 +326,7 @@ document.querySelectorAll('[data-metric]').forEach(c => {
   c.addEventListener('click', () => {
     document.querySelectorAll('[data-metric]').forEach(x => x.classList.toggle('chip-on', x === c));
     boardState.metric = c.dataset.metric;
+    cloudSet('ui.board.metric', boardState.metric);
     hapticSelect();
     loadBoard();
   });
@@ -331,10 +368,44 @@ function askDisplayName() {
 //   opts.onAnswer(c, k) → Promise   (k = true for "knew it")
 //   opts.doneText / opts.emptyText / opts.onProgress(remaining)
 // ---------------------------------------------------------------------------
+
+// Native bottom buttons (Bot API 7.10+) replace the in-page answer buttons.
+const SUCCESS_HEX = '#4CAF50', DANGER_HEX = '#f44336'; // mirror --success/--danger
+const nativeAnswerButtons = (() => {
+  try { return tg.isVersionAtLeast && tg.isVersionAtLeast('7.10') && !!tg.SecondaryButton; }
+  catch (e) { return false; }
+})();
+
+// Only one swipe session is live at a time; switching tabs/views tears the
+// previous one down so its native buttons can't leak onto other screens.
+let teardownSession = null;
+
 function createSwipeSession(container, opts) {
   let queue = [];
-  let answered = 0;
+  let answered = 0, knownCount = 0;
   let finished = false;
+
+  if (teardownSession) teardownSession();
+  const onMain = () => commit(true, area.querySelector('.swipe-card'));
+  const onSecondary = () => commit(false, area.querySelector('.swipe-card'));
+  let buttonsShown = false;
+  function showNativeButtons(on) {
+    // Idempotent: showCard() runs once per card and onClick must not stack.
+    if (!nativeAnswerButtons || on === buttonsShown) return;
+    buttonsShown = on;
+    try {
+      if (on) {
+        tg.MainButton.setParams({ text: '✅ Knew it', color: SUCCESS_HEX, text_color: '#ffffff', is_visible: true, is_active: true });
+        tg.SecondaryButton.setParams({ text: '❌ Forgot', color: DANGER_HEX, text_color: '#ffffff', position: 'left', is_visible: true, is_active: true });
+        tg.MainButton.onClick(onMain);
+        tg.SecondaryButton.onClick(onSecondary);
+      } else {
+        tg.MainButton.offClick(onMain); tg.MainButton.hide();
+        tg.SecondaryButton.offClick(onSecondary); tg.SecondaryButton.hide();
+      }
+    } catch (e) { /* ignore */ }
+  }
+  teardownSession = () => { showNativeButtons(false); teardownSession = null; };
   container.innerHTML =
     '<div class="swipe-area"></div>' +
     '<div class="swipe-actions">' +
@@ -348,10 +419,15 @@ function createSwipeSession(container, opts) {
   function finish(msg) {
     finished = true;
     setCloseGuard(false);
-    if (answered > 0) hapticNotify('success');
+    showNativeButtons(false);
+    let summary = '';
+    if (answered > 0) {
+      hapticNotify('success');
+      summary = completionRing(knownCount, answered);
+    }
     area.innerHTML = '<div class="swipe-card" style="cursor:default">' +
       '<div class="swipe-front" style="font-size:42px">🎉</div>' +
-      '<div class="swipe-back">' + esc(msg) + '</div></div>';
+      '<div class="swipe-back">' + esc(msg) + '</div>' + summary + '</div>';
     actions.style.display = 'none';
     progress.textContent = '';
   }
@@ -359,7 +435,8 @@ function createSwipeSession(container, opts) {
   function showCard() {
     if (!queue.length) { finish(opts.doneText || 'All done for now!'); return; }
     finished = false;
-    actions.style.display = 'flex';
+    showNativeButtons(true);
+    actions.style.display = nativeAnswerButtons ? 'none' : 'flex';
     const card = queue[0];
     progress.textContent = queue.length + ' card' + (queue.length === 1 ? '' : 's') + ' left';
     if (opts.onProgress) opts.onProgress(queue.length);
@@ -406,9 +483,11 @@ function createSwipeSession(container, opts) {
   }
 
   function commit(known, el) {
+    if (finished || !queue.length) return; // native buttons can race the teardown
     hapticNotify(known ? 'success' : 'error');
     const card = queue.shift();
     answered++;
+    if (known) knownCount++;
     setCloseGuard(true); // a stray swipe-down must not lose the session
     if (el) {
       el.classList.add('leaving');
@@ -452,7 +531,7 @@ function loadReview() {
     },
     onAnswer: (card, known) => api('/api/review/answer', { method: 'POST', body: JSON.stringify({ term: card.term, known }) }),
     emptyText: 'No words are due for review right now. Great job — come back later!',
-    doneText: 'Review complete! 🎉',
+    doneText: 'Review complete! Come back tomorrow to keep your streak going.',
   });
 }
 
@@ -522,6 +601,7 @@ function backToDecks() { closeDeck(); loadDecks(); }
 function closeDeck(silent) {
   decksStudy.hidden = true;
   decksHome.hidden = false;
+  if (teardownSession) teardownSession();
   setSwipeGuard(false);
   setCloseGuard(false);
   tg.BackButton.hide();
@@ -618,6 +698,7 @@ function toggleHTML(key, on) {
 }
 
 async function openSettings() {
+  if (teardownSession) teardownSession(); // hide native session buttons
   settingsReturnView = currentView;
   document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
   views.settings.hidden = false;
@@ -648,4 +729,16 @@ const loaders = {
   board: loadBoard,
   review: loadReview,
 };
-showView('dashboard');
+
+// Restore cross-device UI state, then land on the user's last tab.
+(async () => {
+  const metric = await cloudGet('ui.board.metric');
+  if (metric === 'words' || metric === 'mastered') {
+    boardState.metric = metric;
+    document.querySelectorAll('[data-metric]').forEach(x =>
+      x.classList.toggle('chip-on', x.dataset.metric === metric));
+  }
+  let tab = await cloudGet('lastTab');
+  if (!tab || !loaders[tab]) tab = 'dashboard';
+  showView(tab);
+})();

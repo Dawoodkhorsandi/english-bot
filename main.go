@@ -314,6 +314,15 @@ var Changelogs = []ChangelogEntry{
 			"• Swipe views disable the vertical collapse gesture; mid-session close shows a confirmation\n" +
 			"• Skeleton loaders on first paint; failed swipe answers re-queue; failed settings toggles roll back",
 	},
+	{
+		Version: "1.26.0",
+		Silent:  true,
+		Text: "Mini App session & dashboard experience (roadmap phase 2)\n" +
+			"• Native Telegram MainButton/SecondaryButton answer review/deck cards on Bot API 7.10+ clients\n" +
+			"• Sessions end on a completion screen with a progress ring and known/forgot counts\n" +
+			"• GitHub-style 4-month activity heatmap replaces the Chart.js bar chart (CDN dependency dropped)\n" +
+			"• CloudStorage remembers your last tab and leaderboard metric across devices",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
