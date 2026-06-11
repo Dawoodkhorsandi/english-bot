@@ -104,7 +104,7 @@ factory in `app.js` where one exists.
 | Library row | `.word.expandable`, `.word-date`, `.word-text`; `contentRow(it)`, `quizRow(it)` | Tap toggles the full card text in place; date on the right |
 | Bookmark star | `.star` | Optimistic toggle **with rollback** — the canonical mutation pattern |
 | Load more | `.more` | Hidden when `offset >= total` |
-| Rank row | `.rank`, `.you`, `.word.me`; `boardRow(r)`, `medal(rank)` | 🥇🥈🥉 then `#n` |
+| Rank row | `.rank`, `.avatar`/`.avatar-fallback`, `.you`, `.word.me`; `boardRow(r)`, `medal(rank)` | 🥇🥈🥉 then `#n`; avatar falls back to the name's first letter |
 | Deck card | `.card.deck`, `.deck-head`, `.deck-pct`; `deckCardEl(d)` | Whole card is the tap target |
 | Settings row | `.set-row`, `.num`, `.switch`, `.slider`; `row()`, `toggleHTML()` | Rows divided by `--border` |
 | Modal | `.modal-back`, `.modal`, `.modal-actions`; `askDisplayName()` | Only for text input (no native equivalent) |
@@ -140,11 +140,11 @@ deck study is a `BackButton` drill-down inside the Decks tab.
 
 | Screen | Data | Layout | Target additions (`GAP`) |
 |---|---|---|---|
-| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Quiz accuracy (if answered>0) → 30-day activity → Level | ✅ heatmap (v1.26.0); `GAP`: share-streak action at milestones |
+| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Quiz accuracy (if answered>0) → 30-day activity → Level | ✅ heatmap (v1.26.0), share-streak + home-screen offer (v1.28.0) |
 | **Library** `#view-vocab` | `GET /api/vocab` (words/bookmarks), `GET /api/content?kind=` (idiom/collocation/story/tip), `GET /api/quizzes` | Search (words only) → kind chips → list → Load more; content rows expand in place (`contentRow`), quiz rows show ✅/❌ + date (`quizRow`) | `GAP`: result count while searching |
 | **Decks** `#view-decks` | `GET /api/decks`, drill-down `GET /api/decks/study`, `POST /api/decks/swipe` | Deck cards (name, %, bar, due/mastered) → swipe session | ✅ v1.25.0/v1.26.0 |
 | **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap | ✅ native buttons + completion screen (v1.26.0) |
-| **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips → your-rank card (if outside top 50) → top-50 list; first-visit name modal | Avatars via `WebAppUser.photo_url`; weekly metric chip |
+| **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips → your-rank card (if outside top 50) → top-50 list; first-visit name modal | ✅ avatars + 📅 weekly chip (v1.28.0) |
 | **Settings** `#view-settings` | `GET/POST /api/settings` | Level chips → leaderboard name → pause + interval → 9 content toggles | Toggle rollback on failed POST |
 
 State copy conventions — every screen ships all four states:
@@ -192,7 +192,7 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 
 | Used today | Target (`GAP`) | Explicitly avoided |
 |---|---|---|
-| `ready`, `expand`, `initData`, `HapticFeedback` (impact/notification/selection), `BackButton`, `SettingsButton`, `MainButton`, `SecondaryButton`, `disableVerticalSwipes`, `enableClosingConfirmation`, `setBottomBarColor`, `CloudStorage` | `shareToStory`/`shareMessage`, `addToHomeScreen`, `photo_url` | fullscreen mode, `setEmojiStatus`, `downloadFile`, biometrics, sensors, pull-to-refresh |
+| `ready`, `expand`, `initData` (+`photo_url`), `HapticFeedback` (impact/notification/selection), `BackButton`, `SettingsButton`, `MainButton`, `SecondaryButton`, `disableVerticalSwipes`, `enableClosingConfirmation`, `setBottomBarColor`, `CloudStorage`, `addToHomeScreen`/`checkHomeScreenStatus`, `openTelegramLink` (t.me/share) | `shareToStory`/`shareMessage` (need a media asset / prepared messages — backlog) | fullscreen mode, `setEmojiStatus`, `downloadFile`, biometrics, sensors, pull-to-refresh |
 
 ## 7. Network & state
 
@@ -233,6 +233,6 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 | ~~Activity heatmap (drop Chart.js)~~ ✅ v1.26.0 | 2 |
 | ~~`CloudStorage` last-tab restore + `ui.*` state~~ ✅ v1.26.0 | 2 |
 | ~~Library (idioms / collocations / stories / tips / quiz history)~~ ✅ v1.27.0 — lives in the Words tab as kind chips, no 6th tab | 3 |
-| Leaderboard avatars + weekly metric | 4 |
-| `shareToStory` streak card + `addToHomeScreen` prompt | 4 |
+| ~~Leaderboard avatars + weekly metric~~ ✅ v1.28.0 | 4 |
+| ~~Share-streak + `addToHomeScreen` prompt~~ ✅ v1.28.0 (share via `t.me/share` deep link — no media asset needed; `shareToStory` stays in the backlog) | 4 |
 | In-app quiz + on-demand practice | 5 |

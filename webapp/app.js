@@ -131,10 +131,12 @@ function renderDashboard(s) {
     html += '<div class="card" style="background:rgba(244,67,54,.12)">' +
       '<div class="sub" style="color:var(--danger)">⏸️ Scheduled sends are paused — send /resume in the chat.</div></div>';
   }
+  const shareBtn = s.current_streak >= 3
+    ? '<button class="chip" id="share-streak" style="margin-top:12px">📣 Share my streak</button>' : '';
   html += '<div class="card"><h2>Streak</h2>' +
     '<div class="big">' + s.current_streak + ' day' + (s.current_streak === 1 ? '' : 's') + flame + '</div>' +
     '<div class="sub">Best: ' + s.longest_streak + ' days</div>' +
-    bar(streakPct, 'var(--accent)') + '</div>';
+    bar(streakPct, 'var(--accent)') + shareBtn + '</div>';
 
   html += '<div class="grid">' +
     '<div class="card"><h2>Words</h2><div class="big">' + s.words + '</div>' +
@@ -158,6 +160,49 @@ function renderDashboard(s) {
     (s.member_since ? ' · member since ' + esc(s.member_since) : '') + '</div></div>';
 
   views.dashboard.innerHTML = html;
+
+  const share = document.getElementById('share-streak');
+  if (share) {
+    share.addEventListener('click', () => {
+      haptic('light');
+      // t.me/share works on every client — no media asset or Bot API needed.
+      const text = '🔥 I\'m on a ' + s.current_streak + '-day English learning streak! Join me:';
+      const link = 'https://t.me/share/url?url=' + encodeURIComponent(location.origin) +
+                   '&text=' + encodeURIComponent(text);
+      try { tg.openTelegramLink(link); } catch (e) { window.open(link, '_blank'); }
+    });
+  }
+
+  maybeOfferHomeScreen(s.current_streak);
+}
+
+// After a week-long streak, offer the home-screen shortcut once (Bot API 8.0+).
+async function maybeOfferHomeScreen(streak) {
+  if (streak < 7 || typeof tg.addToHomeScreen !== 'function') return;
+  if (await cloudGet('ui.hs.prompted')) return;
+  try {
+    tg.checkHomeScreenStatus(status => {
+      if (status !== 'missed' && status !== 'unknown') return;
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = '<h2>One tap away</h2>' +
+        '<div class="sub">A ' + streak + '-day streak! Add the app to your home screen to keep it going.</div>' +
+        '<div class="chips" style="margin:12px 0 0">' +
+        '<button class="chip chip-on" id="hs-add">➕ Add to Home Screen</button>' +
+        '<button class="chip" id="hs-later">Not now</button></div>';
+      views.dashboard.prepend(card);
+      card.querySelector('#hs-add').addEventListener('click', () => {
+        haptic('light');
+        try { tg.addToHomeScreen(); } catch (e) { /* ignore */ }
+        cloudSet('ui.hs.prompted', '1');
+        card.remove();
+      });
+      card.querySelector('#hs-later').addEventListener('click', () => {
+        cloudSet('ui.hs.prompted', '1');
+        card.remove();
+      });
+    });
+  } catch (e) { /* older clients */ }
 }
 
 // GitHub-style activity heatmap: 17 week columns × 7 day rows (Mon top),
@@ -343,8 +388,13 @@ function medal(rank) {
 function boardRow(r) {
   const el = document.createElement('div');
   el.className = 'word' + (r.isMe ? ' me' : '');
+  // Real avatar when Telegram shared one; first-letter fallback otherwise.
+  const initial = (r.name || '?').trim().charAt(0).toUpperCase();
+  const avatar = r.photo
+    ? '<img class="avatar" src="' + esc(r.photo) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
+    : '<div class="avatar-fallback">' + esc(initial) + '</div>';
   el.innerHTML =
-    '<span class="rank">' + medal(r.rank) + '</span>' +
+    '<span class="rank">' + medal(r.rank) + '</span>' + avatar +
     '<div class="word-main"><div class="word-term">' + esc(r.name) + (r.isMe ? ' <span class="you">you</span>' : '') + '</div></div>' +
     '<span class="word-term">' + r.value + '</span>';
   return el;
@@ -790,7 +840,7 @@ const loaders = {
 // Restore cross-device UI state, then land on the user's last tab.
 (async () => {
   const metric = await cloudGet('ui.board.metric');
-  if (metric === 'words' || metric === 'mastered') {
+  if (metric === 'words' || metric === 'mastered' || metric === 'weekly') {
     boardState.metric = metric;
     document.querySelectorAll('[data-metric]').forEach(x =>
       x.classList.toggle('chip-on', x.dataset.metric === metric));

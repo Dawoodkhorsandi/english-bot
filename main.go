@@ -331,6 +331,15 @@ var Changelogs = []ChangelogEntry{
 			"• New /api/content (history tables joined with content_pool, HTML stripped) and /api/quizzes endpoints\n" +
 			"• Library rows expand in place to re-read the full card; quiz rows show ✅/❌ + date",
 	},
+	{
+		Version: "1.28.0",
+		Silent:  true,
+		Text: "Mini App gamification & growth (roadmap phase 4)\n" +
+			"• Leaderboard avatars: Telegram photos cached from validated initData (user_prefs.photo_url), initial-letter fallback\n" +
+			"• New 📅 This-week leaderboard metric (words learned since Monday) keeps newcomers motivated\n" +
+			"• 📣 Share-my-streak button (t.me/share deep link) at a 3-day streak\n" +
+			"• Add-to-home-screen offer at a 7-day streak (Bot API 8.0+, asked once via CloudStorage)",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -3801,11 +3810,12 @@ func (s *Store) migrate() error {
 		}
 	}
 	// user_prefs UI-enhancement columns added in v1.18.0; display_name (Mini App
-	// leaderboard) added in v1.24.0.
+	// leaderboard) added in v1.24.0; photo_url (leaderboard avatars) in v1.28.0.
 	for col, def := range map[string]string{
 		"first_name":        "TEXT NOT NULL DEFAULT ''",
 		"display_name":      "TEXT NOT NULL DEFAULT ''",
 		"streak_celebrated": "INTEGER NOT NULL DEFAULT 0",
+		"photo_url":         "TEXT NOT NULL DEFAULT ''",
 	} {
 		if !s.columnExists("user_prefs", col) {
 			log.Printf("💾 [DB_MIGRATE] Adding user_prefs.%s column...", col)
