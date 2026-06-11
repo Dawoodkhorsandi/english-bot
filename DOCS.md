@@ -692,7 +692,7 @@ On startup the bot also calls `setChatMenuButton` (`main.go`) so the Mini App
 becomes the chat's **persistent menu button** — always one tap from the input box.
 
 **Frontend** is a lightweight vanilla-JS SPA (no framework) with a bottom tab bar
-(Stats · Words · Decks · Review · Ranks) plus a Settings screen opened via
+(Stats · Library · Decks · Review · Ranks) plus a Settings screen opened via
 Telegram's native `SettingsButton`. It uses the Telegram WebApp SDK
 (`BackButton` for drill-downs, `HapticFeedback` on swipes, `MainButton` where
 useful) and themes to `--tg-theme-*` CSS variables (light/dark) with safe-area
@@ -713,7 +713,7 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/stats` | GET | Dashboard payload (streak, words, mastered, drills, quiz %, 30-day activity, level, paused, member-since). |
+| `/api/stats` | GET | Dashboard payload (streak, words, mastered, drills, quiz %, full activity-day history for the heatmap, level, paused, member-since). |
 | `/api/vocab?offset&limit&bookmarks&q` | GET | Page of learned words (`LearnedWordsFiltered`), with mastery + bookmark flags and a term/meaning search. |
 | `/api/bookmark` | POST | `{term, on}` → toggle a bookmark. |
 | `/api/leaderboard?metric=words\|mastered` | GET | Ranked rows + the caller's own rank + `hasName`. |
@@ -724,6 +724,8 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/decks/study?deck&limit` | GET | Next cards to study (due first, then new). |
 | `/api/decks/swipe` | POST | `{deck, term, known}` → Leitner box update. |
 | `/api/settings` | GET/POST | Read all prefs (incl. `level`, friendly `levelLabels`, current leaderboard `name`) / apply one `{key, value}` change via existing setters. |
+| `/api/content?kind&offset&limit` | GET | Library page over the per-user history tables (`sent_idioms` / `sent_collocations` / `sent_stories` / `sent_tips`), joined with `content_pool` for the card text (Telegram HTML stripped via `stripTelegramHTML`). `kind` is whitelisted (`libraryKinds`): `idiom`, `collocation`, `story`, `tip`. |
+| `/api/quizzes?offset&limit` | GET | Quiz attempt history from `quiz_results` (word, correct, date), most recent first. |
 
 **Leaderboard** (`leaderboard.go`): cross-user ranking via `GROUP BY chat_id`
 over `sent_vocab` (words) or `review_schedule` (mastered, interval ≥ 21d). Each

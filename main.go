@@ -323,6 +323,14 @@ var Changelogs = []ChangelogEntry{
 			"• GitHub-style 4-month activity heatmap replaces the Chart.js bar chart (CDN dependency dropped)\n" +
 			"• CloudStorage remembers your last tab and leaderboard metric across devices",
 	},
+	{
+		Version: "1.27.0",
+		Silent:  true,
+		Text: "Mini App Library (roadmap phase 3)\n" +
+			"• The Words tab became a Library: chips for Words, Bookmarks, Idioms, Collocations, Stories, Tips and Quizzes\n" +
+			"• New /api/content (history tables joined with content_pool, HTML stripped) and /api/quizzes endpoints\n" +
+			"• Library rows expand in place to re-read the full card; quiz rows show ✅/❌ + date",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the

@@ -15,11 +15,16 @@
   </section>
 
   <section class="view" id="view-vocab" hidden>
-    <h1>📘 Your Words</h1>
+    <h1>📘 Library</h1>
     <input id="vocab-search" class="search" type="search" placeholder="Search words or meanings…" autocomplete="off">
     <div class="chips">
-      <button class="chip chip-on" data-filter="all">All</button>
+      <button class="chip chip-on" data-filter="all">Words</button>
       <button class="chip" data-filter="bookmarks">⭐ Bookmarks</button>
+      <button class="chip" data-filter="idiom">💬 Idioms</button>
+      <button class="chip" data-filter="collocation">🔗 Collocations</button>
+      <button class="chip" data-filter="story">📖 Stories</button>
+      <button class="chip" data-filter="tip">💡 Tips</button>
+      <button class="chip" data-filter="quiz">🧩 Quizzes</button>
     </div>
     <div id="vocab-list" class="list"></div>
     <button id="vocab-more" class="more" hidden>Load more</button>
@@ -64,7 +69,7 @@
 <!-- Bottom tab bar. Tabs are added here as later phases land. -->
 <nav id="tabbar">
   <button class="tab tab-on" data-view="dashboard"><span>📊</span>Stats</button>
-  <button class="tab" data-view="vocab"><span>📘</span>Words</button>
+  <button class="tab" data-view="vocab"><span>📘</span>Library</button>
   <button class="tab" data-view="decks"><span>📚</span>Decks</button>
   <button class="tab" data-view="review"><span>🧠</span>Review</button>
   <button class="tab" data-view="board"><span>🏆</span>Ranks</button>

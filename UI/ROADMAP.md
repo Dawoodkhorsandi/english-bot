@@ -53,9 +53,10 @@ per-attempt `quiz_results`.
 | Library view: kind chips, reuse `.list`/`.word` rows, story/long-text detail via `BackButton` drill-down | `webapp/index.html`, `webapp/app.js`, `webapp/styles.css` | M/L |
 | API tests for both endpoints | `webapp_api_test.go` | S |
 
-**Decision point:** the tab bar would grow to 6. Pick one before building:
-fold Review into Decks (both are swipe sessions), or keep 5 tabs and put
-Library behind a "More" pattern. Update DESIGN.md §5 with the choice.
+**Decision (v1.27.0):** no 6th tab and no Review demotion — the Words tab
+became the **Library**: its filter chips grew to Words / Bookmarks / Idioms /
+Collocations / Stories / Tips / Quizzes, reusing the list UI. DESIGN.md §5
+updated.
 
 ## Phase 4 — Gamification & growth
 

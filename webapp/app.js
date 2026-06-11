@@ -228,28 +228,85 @@ function wordRow(w) {
   return el;
 }
 
+// Library chips beyond words/bookmarks browse other content kinds.
+const LIBRARY_EMPTY = {
+  idiom: 'No idioms yet. They arrive with your daily mix — or send /idiom in the chat!',
+  collocation: 'No collocations yet. Send /collocation in the chat to get one!',
+  story: 'No stories yet. Send /story in the chat to read one!',
+  tip: 'No grammar tips yet. Send /tip in the chat to get one!',
+  quiz: 'No quizzes answered yet. Send /quiz in the chat to play!',
+};
+
+// contentRow renders one Library item; tapping it expands the full card text.
+function contentRow(it) {
+  const el = document.createElement('div');
+  el.className = 'word' + (it.text ? ' expandable' : '');
+  const preview = it.meaning || (it.text ? it.text.slice(0, 90) : '—');
+  el.innerHTML =
+    '<div class="word-main"><div class="word-term">' + esc(it.term) + '</div>' +
+    '<div class="word-meaning">' + esc(preview) + '</div>' +
+    (it.text ? '<div class="word-text" hidden>' + esc(it.text) + '</div>' : '') +
+    '</div>' +
+    '<span class="word-date">' + esc(it.sent_at || '') + '</span>';
+  const body = el.querySelector('.word-text');
+  if (body) {
+    el.addEventListener('click', () => {
+      haptic('light');
+      body.hidden = !body.hidden;
+      el.querySelector('.word-meaning').hidden = !body.hidden;
+    });
+  }
+  return el;
+}
+
+// quizRow renders one past quiz attempt.
+function quizRow(it) {
+  const el = document.createElement('div');
+  el.className = 'word';
+  el.innerHTML =
+    '<div class="word-main"><div class="word-term">' + esc(it.word) + '</div></div>' +
+    '<span class="word-mastery">' + (it.correct ? '✅' : '❌') + '</span>' +
+    '<span class="word-date">' + esc(it.answered_at || '') + '</span>';
+  return el;
+}
+
 async function loadVocab(reset) {
+  const f = vocabState.filter;
+  const isWords = f === 'all' || f === 'bookmarks';
+  searchEl.hidden = !isWords; // server search covers words only
   if (reset) { vocabState.offset = 0; listEl.innerHTML = skeletonRows(5); }
-  const params = new URLSearchParams({
-    offset: vocabState.offset, limit: vocabState.limit,
-    bookmarks: vocabState.filter === 'bookmarks' ? '1' : '0',
-    q: vocabState.q,
-  });
+
+  let path;
+  if (isWords) {
+    path = '/api/vocab?' + new URLSearchParams({
+      offset: vocabState.offset, limit: vocabState.limit,
+      bookmarks: f === 'bookmarks' ? '1' : '0',
+      q: vocabState.q,
+    });
+  } else if (f === 'quiz') {
+    path = '/api/quizzes?offset=' + vocabState.offset + '&limit=' + vocabState.limit;
+  } else {
+    path = '/api/content?kind=' + f + '&offset=' + vocabState.offset + '&limit=' + vocabState.limit;
+  }
+
   let data;
-  try { data = await api('/api/vocab?' + params.toString()); }
-  catch (e) { listEl.innerHTML = ''; emptyEl.hidden = false; emptyEl.textContent = 'Could not load your words.'; return; }
+  try { data = await api(path); }
+  catch (e) { listEl.innerHTML = ''; emptyEl.hidden = false; emptyEl.textContent = 'Could not load. Try again later.'; return; }
+  if (f !== vocabState.filter) return; // user switched chips mid-flight
 
   if (reset) listEl.innerHTML = '';
   vocabState.total = data.total || 0;
-  (data.items || []).forEach(w => listEl.appendChild(wordRow(w)));
+  (data.items || []).forEach(it => {
+    listEl.appendChild(isWords ? wordRow(it) : (f === 'quiz' ? quizRow(it) : contentRow(it)));
+  });
   vocabState.offset += (data.items || []).length;
 
   const has = listEl.children.length > 0;
   emptyEl.hidden = has;
   if (!has) {
-    emptyEl.textContent = vocabState.filter === 'bookmarks'
-      ? 'No bookmarks yet. Tap ☆ on a word to save it.'
-      : (vocabState.q ? 'No words match your search.' : 'No words learned yet. Send /word in the chat!');
+    if (f === 'bookmarks') emptyEl.textContent = 'No bookmarks yet. Tap ☆ on a word to save it.';
+    else if (f === 'all') emptyEl.textContent = vocabState.q ? 'No words match your search.' : 'No words learned yet. Send /word in the chat!';
+    else emptyEl.textContent = LIBRARY_EMPTY[f] || 'Nothing here yet.';
   }
   moreEl.hidden = vocabState.offset >= vocabState.total;
 }
