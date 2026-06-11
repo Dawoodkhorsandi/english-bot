@@ -22,7 +22,7 @@ A Telegram bot that sends subscribers AI-generated English practice on a configu
 - **Streak Celebrations** -- personalised congratulations at 3, 7, 14, 30, and 60-day streaks
 - **Reply Keyboard** -- four persistent shortcut buttons (Word / Drill / Quiz / Stats) always visible at the bottom of the chat
 - **Progress Dashboard** -- `/stats` shows Unicode progress bars for streak and quiz accuracy; optional Telegram Mini App with a 30-day activity chart (set `WEB_APP_URL`)
-- **Mini App hub** -- a multi-tab Telegram Mini App (opened from the persistent menu button or `/app`): progress dashboard, searchable vocabulary list, swipe-to-review (SRS), curated **Leitner word decks** (e.g. Barron's GRE), a cross-user **leaderboard**, and an in-app settings panel
+- **Mini App hub** -- a multi-tab Telegram Mini App (opened from the persistent menu button or `/app`): progress dashboard, searchable vocabulary list, swipe-to-review (SRS), curated **Leitner word decks** (504 Essential Words + Barron's GRE), a cross-user **leaderboard**, and an in-app settings panel
 - **Typing Indicator** -- "typing…" chat action fires before every AI generation call
 - **Multi-Provider AI** -- Gemini, Groq, Cerebras, OpenRouter, GitHub Models, Cloudflare, Mistral, Gemini2, SambaNova, Cohere with automatic fallback
 - **Pre-Generated Pool** -- background worker keeps a content pool topped up; broadcasts never block on AI calls

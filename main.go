@@ -291,7 +291,7 @@ var Changelogs = []ChangelogEntry{
 			"Tap the <b>menu button</b> next to the message box (or send /app) to open a whole new in-app experience:\n\n" +
 			"📊 <b>Dashboard</b> — your streak, words, quiz accuracy and 30-day activity, beautifully laid out\n" +
 			"📘 <b>Word list</b> — search every word you've learned, filter your ⭐ bookmarks, all in one scroll\n" +
-			"📚 <b>Word decks</b> — swipe through curated vocabulary decks (starting with Barron's GRE) using a smart Leitner system that brings tricky words back more often\n" +
+			"📚 <b>Word decks</b> — swipe through curated decks (the classic <b>504 Essential Words</b> and <b>Barron's GRE</b>) with a smart Leitner system that brings tricky words back more often\n" +
 			"🧠 <b>Quick review</b> — swipe ✅/❌ through your due words to lock them into memory\n" +
 			"🏆 <b>Leaderboard</b> — see how you rank against other learners (pick a name, or get a fun random one!)\n" +
 			"⚙️ <b>Settings</b> — tweak your level, schedule and content right inside the app\n\n" +

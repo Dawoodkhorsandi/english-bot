@@ -736,9 +736,8 @@ Leitner system. Cards live in `deck_cards` (seeded idempotently from embedded
 `sum(box-1) / (total*4)`. Decks ship word+definition (+examples where available);
 missing example sentences are generated in the background by `runDeckBackfill`
 via the `ProviderChain` and cached into `deck_cards`. Bundled at launch:
-**Barron's GRE 333**. (The famous **504 Absolutely Essential Words** deck is
-pending a complete authentic source — only a 156-word partial is published
-online; drop `webapp/decks/504.json` in and add a `deckRegistry` entry to enable.)
+**504 Absolutely Essential Words** (504 words across 42 lessons, each with a
+definition + example) and **Barron's GRE 333** (definitions; examples AI-filled).
 
 > Deck word lists are community reproductions of copyrighted study books — fine
 > for personal/educational use; review licensing before public distribution.

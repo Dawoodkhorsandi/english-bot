@@ -43,9 +43,9 @@ kept in sync with the code and **CI enforces it** (see Testing).
   (`[{term, definition, example, group}]`) and add a `deckRegistry` entry in
   `leitner.go`. `SeedDecks` ingests it idempotently; blank `example`s are filled
   by `runDeckBackfill`. Leitner: 5 boxes, known→+1 (0/1/3/7/21d), miss→box 1.
-- **Pending:** the "504 Absolutely Essential Words" deck — no complete public
-  dataset found (only a 156/504 partial at github.com/BumbuKhan/api.504.bumbu.tv).
-  The maintainer will supply a PDF/list; ingest it to `webapp/decks/504.json`.
+- Bundled decks: **504 Absolutely Essential Words** (full 504, def+example, from
+  github.com/ashkan-jafarzadeh/504-essential-words, pipe-delimited CSV) and
+  **Barron's GRE 333** (def only; examples AI-backfilled).
 
 ## Testing & docs sync (CI-enforced — `doc_test.go`)
 

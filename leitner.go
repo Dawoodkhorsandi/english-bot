@@ -38,12 +38,13 @@ type DeckMeta struct {
 
 // deckRegistry lists the curated decks bundled with the bot. Adding a deck is a
 // new embedded JSON file plus one entry here.
-//
-// NOTE: the famous "504 Absolutely Essential Words" deck is intentionally absent
-// until a complete, authentic source is available — the only machine-readable
-// copy found online holds just 156 of the 504 words. Drop webapp/decks/504.json
-// in and add its entry here to enable it.
 var deckRegistry = []DeckMeta{
+	{
+		ID:          "504",
+		Name:        "504 Absolutely Essential Words",
+		Description: "The classic 504 high-utility English words, grouped into 42 lessons.",
+		file:        "webapp/decks/504.json",
+	},
 	{
 		ID:          "barrons",
 		Name:        "Barron's GRE 333",
