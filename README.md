@@ -89,6 +89,7 @@ go test ./... -v
 | `/story` | Get a mini story to read at your level |
 | `/tip` | Get a grammar tip now; `/tip on` or `/tip off` to control daily tips |
 | `/quiz` | Take a multiple-choice quiz (native Telegram poll) |
+| `/grammar` | Browse bite-size grammar lessons (easy → advanced); `/grammar 1` opens a lesson |
 | `/stats` | View progress: streak, words, quiz accuracy with progress bars |
 | `/app` | Open the Telegram Mini App hub: dashboard, word list, decks, review and leaderboard (when `WEB_APP_URL` is set) |
 | `/mywords` | Browse all learned vocabulary with mastery status; `/mywords bookmarks` for bookmarked only |
@@ -172,7 +173,8 @@ Go application (single package main, 14 source files)
 +-- admin.go          -- admin panel: paginated /users, user detail, direct messaging
 +-- webapp.go         -- Mini App hub: HTTP server, embedded SPA, HMAC initData auth, JSON API
 +-- leaderboard.go    -- cross-user ranking, display names, funny-name fallback
-+-- leitner.go        -- curated Leitner decks (deck_cards/leitner_progress), box scheduler, example backfill
++-- leitner.go        -- curated Leitner decks (deck_cards/leitner_progress), box scheduler, field backfill
++-- grammar.go        -- static grammar lessons curriculum (/grammar + Mini App)
 +-- vocab.go          -- /mywords (browse learned words) and /bookmark (favourites) features
 ```
 

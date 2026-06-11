@@ -6,6 +6,10 @@ tg.expand();
 // Blend the native bottom-bar area with the app's tab bar.
 try { tg.setBottomBarColor(tg.themeParams.bottom_bar_bg_color || 'bg_color'); } catch (e) { /* older clients */ }
 
+// Public config (bot handle + web app URL) for the share/invite link. Filled
+// from /api/config at boot; defaults keep the share button working offline.
+const config = { botUsername: '@mymusclememorybot', webAppURL: '' };
+
 // ---------------------------------------------------------------------------
 // API helper — every request carries the Telegram initData for HMAC auth.
 // Sent as a header so GET URLs stay clean; the server also accepts ?initData=.
@@ -106,6 +110,20 @@ function bar(pct, colour) {
          Math.min(100, pct) + '%;background:' + colour + '"></div></div>';
 }
 
+// streakRing renders the hero streak ring: a circular gauge (current toward
+// best) with the streak count + flame centred.
+function streakRing(current, best) {
+  const pct = best > 0 ? Math.min(100, current * 100 / best) : (current > 0 ? 100 : 0);
+  const r = 34, c = 2 * Math.PI * r, off = c * (1 - pct / 100);
+  return '<div class="streak-ring">' +
+    '<svg class="ring" width="84" height="84" viewBox="0 0 84 84">' +
+    '<circle class="track" cx="42" cy="42" r="' + r + '" fill="none" stroke-width="7"></circle>' +
+    '<circle class="fill streak" cx="42" cy="42" r="' + r + '" fill="none" stroke-width="7" stroke-linecap="round"' +
+    ' stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '"></circle></svg>' +
+    '<div class="streak-center"><div class="streak-num">' + current + '</div>' +
+    '<div class="streak-flame">' + (current >= 3 ? '🔥' : '✨') + '</div></div></div>';
+}
+
 // SVG progress ring for the session completion screen.
 function completionRing(known, total) {
   const pct = Math.round(known * 100 / total);
@@ -121,8 +139,6 @@ function completionRing(known, total) {
 }
 
 function renderDashboard(s) {
-  const streakPct = s.longest_streak > 0
-    ? Math.round(s.current_streak * 100 / s.longest_streak) : 100;
   const flame = s.current_streak >= 3 ? ' 🔥' : '';
 
   let html = '<h1>📊 Your Progress</h1>';
@@ -131,17 +147,26 @@ function renderDashboard(s) {
       '<div class="sub" style="color:var(--danger)">⏸️ Scheduled sends are paused — send /resume in the chat.</div></div>';
   }
   const shareBtn = s.current_streak >= 3
-    ? '<button class="chip" id="share-streak" style="margin-top:12px">📣 Share my streak</button>' : '';
-  html += '<div class="card"><h2>Streak</h2>' +
-    '<div class="big">' + s.current_streak + ' day' + (s.current_streak === 1 ? '' : 's') + flame + '</div>' +
-    '<div class="sub">Best: ' + s.longest_streak + ' days</div>' +
-    bar(streakPct, 'var(--accent)') + shareBtn + '</div>';
-
-  html += '<div class="grid">' +
-    '<div class="card"><h2>Words</h2><div class="big">' + s.words + '</div>' +
-    '<div class="sub">' + s.mastered + ' mastered</div></div>' +
-    '<div class="card"><h2>Drills</h2><div class="big">' + s.verbs + '</div></div>' +
+    ? '<button class="chip" id="share-streak">📣 Share my streak</button>' : '';
+  html += '<div class="card hero"><h2>Daily Streak</h2>' +
+    '<div class="hero-row">' + streakRing(s.current_streak, s.longest_streak) +
+    '<div class="hero-meta">' +
+    '<div class="hero-line">' + s.current_streak + ' day' + (s.current_streak === 1 ? '' : 's') + flame + '</div>' +
+    '<div class="sub">Best: ' + s.longest_streak + ' day' + (s.longest_streak === 1 ? '' : 's') + '</div>' +
+    '<button class="link-btn" id="streak-info">ⓘ How streaks work</button>' +
+    '</div></div>' +
+    '<div id="streak-explain" class="explain" hidden>A <b>streak</b> is how many days in a row you keep learning. ' +
+    'Do anything that counts — get a new word, finish a Review, or study a deck — at least once a day to keep it alive. ' +
+    'Miss a whole day and it resets to zero, so a little every day beats a lot once a week. 💪</div>' +
+    (shareBtn ? '<div class="hero-actions">' + shareBtn + '</div>' : '') +
     '</div>';
+
+  html += '<div class="card"><h2>Vocabulary</h2><div class="stat-tiles">' +
+    '<div class="stat-tile"><div class="stat-emoji">📘</div><div class="stat-n">' + s.words + '</div><div class="sub">Words</div></div>' +
+    '<div class="stat-tile"><div class="stat-emoji">✅</div><div class="stat-n">' + s.mastered + '</div><div class="sub">Mastered</div></div>' +
+    '<div class="stat-tile"><div class="stat-emoji">🎯</div><div class="stat-n">' + s.verbs + '</div><div class="sub">Drills</div></div>' +
+    (s.quiz_answered > 0 ? '<div class="stat-tile"><div class="stat-emoji">🧩</div><div class="stat-n">' + s.quiz_pct + '%</div><div class="sub">Quiz</div></div>' : '') +
+    '</div></div>';
 
   // Library content received, by kind. Only shown once there's anything to show.
   const lib = [
@@ -177,13 +202,26 @@ function renderDashboard(s) {
 
   views.dashboard.innerHTML = html;
 
+  const info = document.getElementById('streak-info');
+  if (info) {
+    info.addEventListener('click', () => {
+      hapticSelect();
+      const ex = document.getElementById('streak-explain');
+      ex.hidden = !ex.hidden;
+    });
+  }
+
   const share = document.getElementById('share-streak');
   if (share) {
     share.addEventListener('click', () => {
       haptic('light');
-      // t.me/share works on every client — no media asset or Bot API needed.
-      const text = '🔥 I\'m on a ' + s.current_streak + '-day English learning streak! Join me:';
-      const link = 'https://t.me/share/url?url=' + encodeURIComponent(location.origin) +
+      // Invite friends to the bot itself (t.me/<handle>); t.me/share works on
+      // every client with no media asset or Bot API needed.
+      const handle = (config.botUsername || '@mymusclememorybot').replace(/^@/, '');
+      const botLink = 'https://t.me/' + handle;
+      const text = 'I\'m learning English with @' + handle + ' — ' + s.current_streak +
+                   '-day streak! 🔥 Join me:';
+      const link = 'https://t.me/share/url?url=' + encodeURIComponent(botLink) +
                    '&text=' + encodeURIComponent(text);
       try { tg.openTelegramLink(link); } catch (e) { window.open(link, '_blank'); }
     });
@@ -435,11 +473,9 @@ function medal(rank) {
 function boardRow(r) {
   const el = document.createElement('div');
   el.className = 'word' + (r.isMe ? ' me' : '');
-  // Real avatar when Telegram shared one; first-letter fallback otherwise.
+  // Privacy: we never show user profile photos — just an initial-letter badge.
   const initial = (r.name || '?').trim().charAt(0).toUpperCase();
-  const avatar = r.photo
-    ? '<img class="avatar" src="' + esc(r.photo) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
-    : '<div class="avatar-fallback">' + esc(initial) + '</div>';
+  const avatar = '<div class="avatar-fallback">' + esc(initial) + '</div>';
   el.innerHTML =
     '<span class="rank">' + medal(r.rank) + '</span>' + avatar +
     '<div class="word-main"><div class="word-term">' + esc(r.name) + (r.isMe ? ' <span class="you">you</span>' : '') + '</div></div>' +
@@ -523,6 +559,19 @@ function askDisplayName() {
 //   opts.doneText / opts.emptyText / opts.onProgress(remaining)
 // ---------------------------------------------------------------------------
 
+// cardBack builds the reveal face shared by Review and Deck swipe cards:
+// meaning/definition, then example, then Persian (RTL). Fields may be absent.
+function cardBack(it) {
+  const meaning = it.meaning || it.definition || '';
+  let html = meaning
+    ? '<div class="rev-meaning">' + esc(meaning) + '</div>'
+    : '<div class="rev-meaning">(no definition saved)</div>';
+  if (it.example) html += '<div class="ex">“' + esc(it.example) + '”</div>';
+  if (it.persian) html += '<div class="rev-fa" dir="rtl">🇮🇷 ' + esc(it.persian) + '</div>';
+  if (it.mnemonic) html += '<div class="rev-mnem">💡 ' + esc(it.mnemonic) + '</div>';
+  return html;
+}
+
 // Note: native MainButton/SecondaryButton were tried as answer buttons
 // (v1.26.0) and reverted — Telegram renders them below the webview, i.e.
 // under the fixed tab bar. The in-page buttons stay above the navigation.
@@ -569,12 +618,14 @@ function createSwipeSession(container, opts) {
       '<div class="swipe-stamp known">Knew it</div>' +
       '<div class="swipe-stamp forgot">Forgot</div>' +
       '<div class="swipe-front">' + esc(card.front) + '</div>' +
+      (card.sub ? '<div class="swipe-sub">' + esc(card.sub) + '</div>' : '') +
       '<div class="swipe-back" hidden>' + card.back + '</div>' +
       '<div class="swipe-hint">Tap to reveal · swipe → knew it · ← forgot</div>';
     area.innerHTML = '';
     area.appendChild(el);
 
     const front = el.querySelector('.swipe-front');
+    const sub = el.querySelector('.swipe-sub');
     const back = el.querySelector('.swipe-back');
     const hint = el.querySelector('.swipe-hint');
     let revealed = false;
@@ -583,31 +634,48 @@ function createSwipeSession(container, opts) {
     function flip() {
       revealed = !revealed;
       front.hidden = revealed;
+      if (sub) sub.hidden = revealed;
       back.hidden = !revealed;
       hint.textContent = (revealed ? 'Tap to hide' : 'Tap to reveal') + ' · swipe → knew it · ← forgot';
     }
     el.addEventListener('click', () => { if (!moved) flip(); });
 
-    // Drag to swipe.
-    let startX = 0, dx = 0, dragging = false, moved = false;
+    // Drag to swipe — Touch events are primary (reliable in the iOS Telegram
+    // webview), Pointer events are the desktop/non-touch fallback. `usingTouch`
+    // stops the two pipelines double-firing on touchscreens.
+    let startX = 0, dx = 0, dragging = false, moved = false, usingTouch = false;
     const knownStamp = el.querySelector('.swipe-stamp.known');
     const forgotStamp = el.querySelector('.swipe-stamp.forgot');
-    el.addEventListener('pointerdown', e => { dragging = true; moved = false; startX = e.clientX; el.classList.add('dragging'); el.setPointerCapture(e.pointerId); });
-    el.addEventListener('pointermove', e => {
+    function dragStart(x) { dragging = true; moved = false; startX = x; el.classList.add('dragging'); }
+    function dragMove(x) {
       if (!dragging) return;
-      dx = e.clientX - startX;
+      dx = x - startX;
       if (Math.abs(dx) > 6) moved = true;
       el.style.transform = 'translateX(' + dx + 'px) rotate(' + (dx / 20) + 'deg)';
       knownStamp.style.opacity = dx > 0 ? Math.min(1, dx / 80) : 0;
       forgotStamp.style.opacity = dx < 0 ? Math.min(1, -dx / 80) : 0;
-    });
-    el.addEventListener('pointerup', () => {
+    }
+    function dragEnd() {
+      if (!dragging) return;
       dragging = false;
       el.classList.remove('dragging');
       if (Math.abs(dx) > 90) { commit(dx > 0, el); }
       else { el.style.transform = ''; knownStamp.style.opacity = 0; forgotStamp.style.opacity = 0; }
       dx = 0;
+    }
+
+    el.addEventListener('touchstart', e => { usingTouch = true; dragStart(e.touches[0].clientX); }, { passive: true });
+    el.addEventListener('touchmove', e => { if (dragging) e.preventDefault(); dragMove(e.touches[0].clientX); }, { passive: false });
+    el.addEventListener('touchend', () => { dragEnd(); setTimeout(() => { usingTouch = false; }, 0); });
+    el.addEventListener('touchcancel', () => { dragEnd(); usingTouch = false; });
+
+    el.addEventListener('pointerdown', e => {
+      if (usingTouch || e.pointerType === 'touch') return;
+      dragStart(e.clientX);
+      try { el.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
     });
+    el.addEventListener('pointermove', e => { if (!usingTouch && e.pointerType !== 'touch') dragMove(e.clientX); });
+    el.addEventListener('pointerup', e => { if (!usingTouch && e.pointerType !== 'touch') dragEnd(); });
   }
 
   function commit(known, el) {
@@ -653,7 +721,8 @@ function loadReview() {
       const data = await api('/api/review/next?limit=30');
       return (data.items || []).map(it => ({
         front: it.term,
-        back: it.meaning ? esc(it.meaning) : '<span class="ex">(no definition saved)</span>',
+        sub: it.pronunciation || '',
+        back: cardBack(it),
         term: it.term,
       }));
     },
@@ -664,12 +733,27 @@ function loadReview() {
 }
 
 // ---------------------------------------------------------------------------
-// Decks (Leitner)
+// Decks (Leitner) — the Study tab hosts several subviews (deck list, deck
+// detail, study session, practice, grammar). showDeckSub switches between them
+// and wires a single BackButton so handlers never stack.
 // ---------------------------------------------------------------------------
-const decksHome = document.getElementById('decks-home');
-const decksStudy = document.getElementById('decks-study');
 const decksListEl = document.getElementById('decks-list');
 const decksEmptyEl = document.getElementById('decks-empty');
+const DECK_SUBVIEWS = ['decks-home', 'decks-detail', 'decks-study', 'decks-practice', 'decks-grammar'];
+let deckBack = null;
+
+function showDeckSub(id, onBack) {
+  DECK_SUBVIEWS.forEach(s => { const el = document.getElementById(s); if (el) el.hidden = (s !== id); });
+  if (deckBack) { try { tg.BackButton.offClick(deckBack); } catch (e) { /* ignore */ } deckBack = null; }
+  if (id === 'decks-home') {
+    setSwipeGuard(false); setCloseGuard(false);
+    try { tg.BackButton.hide(); } catch (e) { /* ignore */ }
+  } else {
+    deckBack = onBack || backToDeckHome;
+    try { tg.BackButton.onClick(deckBack); tg.BackButton.show(); } catch (e) { /* ignore */ }
+  }
+}
+function backToDeckHome() { setSwipeGuard(false); setCloseGuard(false); showDeckSub('decks-home'); loadDecks(); }
 
 function deckCardEl(d) {
   const el = document.createElement('div');
@@ -682,13 +766,12 @@ function deckCardEl(d) {
     '<div class="sub" style="margin-top:8px">' +
     (d.due > 0 ? '🔵 ' + d.due + ' to study now' : '✅ All caught up') +
     ' · ' + d.mastered + '/' + d.total + ' mastered</div>';
-  el.addEventListener('click', () => openDeck(d));
+  el.addEventListener('click', () => openDeckDetail(d));
   return el;
 }
 
 async function loadDecks() {
-  // Always return to the deck list when (re)entering the tab.
-  closeDeck(true);
+  showDeckSub('decks-home'); // reset to the list when (re)entering the tab
   decksListEl.innerHTML = skeletonRows(2);
   let data;
   try { data = await api('/api/decks'); }
@@ -700,21 +783,55 @@ async function loadDecks() {
   if (!has) decksEmptyEl.textContent = 'No decks available yet.';
 }
 
-function openDeck(d) {
-  decksHome.hidden = true;
-  decksStudy.hidden = false;
+// renderDeckDetail builds the deck detail page: progress, Leitner box
+// distribution, key stats and a Study call-to-action.
+function renderDeckDetail(det) {
+  const maxc = Math.max(1, det.new, ...det.boxes.map(b => b.count));
+  const row = (label, count, lvl) =>
+    '<div class="box-row"><span class="box-label">' + esc(label) + '</span>' +
+    '<div class="box-bar"><div class="box-fill l' + lvl + '" style="width:' + (count * 100 / maxc) + '%"></div></div>' +
+    '<span class="box-n">' + count + '</span></div>';
+  const boxes = det.boxes.map(b => row(b.label, b.count, b.box)).join('') + row('New', det.new, 0);
+  return '<h1>📚 ' + esc(det.name) + '</h1>' +
+    '<div class="card"><div class="sub">' + esc(det.description) + '</div>' +
+    bar(det.progressPct, 'var(--accent)') +
+    '<div class="sub" style="margin-top:8px">' + det.progressPct + '% mastered · ' +
+    det.mastered + '/' + det.total + ' cards</div></div>' +
+    '<div class="card"><h2>Your boxes</h2>' + boxes + '</div>' +
+    '<div class="card"><div class="stat-tiles">' +
+    '<div class="stat-tile"><div class="stat-n">' + det.due + '</div><div class="sub">Due now</div></div>' +
+    '<div class="stat-tile"><div class="stat-n">' + det.mastered + '</div><div class="sub">Mastered</div></div>' +
+    '<div class="stat-tile"><div class="stat-n">' + det.new + '</div><div class="sub">New</div></div>' +
+    '<div class="stat-tile"><div class="stat-n" style="font-size:15px">' + (det.nextReview || '—') + '</div><div class="sub">Next</div></div>' +
+    '</div></div>' +
+    '<button class="quiz-next" id="deck-study-btn">' +
+    (det.due > 0 ? 'Study ' + det.due + ' due' : 'Study deck') + ' →</button>';
+}
+
+async function openDeckDetail(d) {
+  haptic('light');
+  showDeckSub('decks-detail', backToDeckHome);
+  const body = document.getElementById('detail-body');
+  body.innerHTML = '<h1>📚 ' + esc(d.name) + '</h1>' + skeletonCards(2);
+  let det;
+  try { det = await api('/api/decks/detail?deck=' + encodeURIComponent(d.id)); }
+  catch (e) { body.innerHTML = '<h1>📚 ' + esc(d.name) + '</h1><p class="empty">Could not load this deck.</p>'; return; }
+  body.innerHTML = renderDeckDetail(det);
+  document.getElementById('deck-study-btn').addEventListener('click', () => startDeckStudy(d));
+}
+
+function startDeckStudy(d) {
+  showDeckSub('decks-study', () => openDeckDetail(d)); // Back returns to detail
   document.getElementById('decks-study-title').textContent = '📚 ' + d.name;
   haptic('light');
   setSwipeGuard(true);
-  tg.BackButton.show();
-  tg.BackButton.onClick(backToDecks);
-
   createSwipeSession(document.getElementById('decks-swipe'), {
     load: async () => {
       const data = await api('/api/decks/study?deck=' + encodeURIComponent(d.id) + '&limit=30');
       return (data.items || []).map(it => ({
         front: it.term,
-        back: esc(it.definition || '') + (it.example ? '<span class="ex">' + esc(it.example) + '</span>' : ''),
+        sub: it.pronunciation || '',
+        back: cardBack(it),
         term: it.term,
       }));
     },
@@ -724,40 +841,18 @@ function openDeck(d) {
   });
 }
 
-function backToDecks() { closeDeck(); loadDecks(); }
-
-function closeDeck(silent) {
-  decksStudy.hidden = true;
-  decksPractice.hidden = true;
-  decksHome.hidden = false;
-  setSwipeGuard(false);
-  setCloseGuard(false);
-  tg.BackButton.hide();
-  if (!silent) {
-    tg.BackButton.offClick(backToDecks);
-    tg.BackButton.offClick(backFromPractice);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Practice — on-demand quiz / word / idiom / collocation (Decks tab)
 // ---------------------------------------------------------------------------
-const decksPractice = document.getElementById('decks-practice');
 const practiceBody = document.getElementById('practice-body');
 const PRACTICE_TITLES = {
   quiz: '🧩 Quiz', word: '📘 New word', idiom: '💬 Idiom', collocation: '🔗 Collocation',
 };
 
-function backFromPractice() { closeDeck(); loadDecks(); }
-
 function openPractice(kind) {
-  decksHome.hidden = true;
-  decksStudy.hidden = true;
-  decksPractice.hidden = false;
+  showDeckSub('decks-practice', backToDeckHome);
   document.getElementById('practice-title').textContent = PRACTICE_TITLES[kind] || 'Practice';
   haptic('light');
-  tg.BackButton.show();
-  tg.BackButton.onClick(backFromPractice);
   if (kind === 'quiz') loadQuizQuestion({ asked: 0, right: 0 });
   else loadPracticeCard(kind);
 }
@@ -801,15 +896,19 @@ async function loadQuizQuestion(score) {
     return;
   }
 
-  let html = '<div class="card"><div class="practice-text">' + esc(q.prompt) + '</div>' +
+  const letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+  let html = '<div class="quiz-head">' +
+    '<span class="quiz-progress">Question ' + (score.asked + 1) + '</span>' +
+    (score.asked > 0 ? '<span class="quiz-score-pill">✓ ' + score.right + '/' + score.asked + '</span>' : '') +
+    '</div>' +
+    '<div class="card quiz-q"><div class="practice-text">' + esc(q.prompt) + '</div></div>' +
     '<div class="quiz-opts">';
   q.options.forEach((opt, i) => {
-    html += '<button class="quiz-opt" data-i="' + i + '">' + esc(opt) + '</button>';
+    html += '<button class="quiz-opt" data-i="' + i + '">' +
+      '<span class="quiz-badge">' + letters[i] + '</span>' +
+      '<span class="quiz-opt-text">' + esc(opt) + '</span></button>';
   });
-  html += '</div></div>';
-  if (score.asked > 0) {
-    html += '<div class="quiz-score">Session: ' + score.right + ' / ' + score.asked + ' correct</div>';
-  }
+  html += '</div>';
   practiceBody.innerHTML = html;
 
   const buttons = practiceBody.querySelectorAll('.quiz-opt');
@@ -829,19 +928,18 @@ async function loadQuizQuestion(score) {
     }
     hapticNotify(res.correct ? 'success' : 'error');
     btn.classList.add(res.correct ? 'correct' : 'wrong');
-    if (!res.correct) buttons[q.correct].classList.add('correct');
+    btn.querySelector('.quiz-badge').textContent = res.correct ? '✓' : '✗';
+    if (!res.correct) {
+      buttons[q.correct].classList.add('correct');
+      buttons[q.correct].querySelector('.quiz-badge').textContent = '✓';
+    }
     score.asked++;
     if (res.correct) score.right++;
 
-    const next = document.createElement('div');
-    next.className = 'chips';
-    next.style.marginTop = '14px';
-    next.innerHTML = '<button class="chip chip-on">' +
-      (res.correct ? '🎉 Next question' : '➡️ Next question') + '</button>';
-    next.querySelector('button').addEventListener('click', () => {
-      hapticSelect();
-      loadQuizQuestion(score);
-    });
+    const next = document.createElement('button');
+    next.className = 'quiz-next';
+    next.textContent = res.correct ? '🎉 Next question' : 'Next question →';
+    next.addEventListener('click', () => { hapticSelect(); loadQuizQuestion(score); });
     practiceBody.appendChild(next);
   }));
 }
@@ -849,6 +947,101 @@ async function loadQuizQuestion(score) {
 document.querySelectorAll('[data-practice]').forEach(c => {
   c.addEventListener('click', () => { hapticSelect(); openPractice(c.dataset.practice); });
 });
+
+// ---------------------------------------------------------------------------
+// Grammar lessons (static; lives on the Study tab as a drill-down)
+// ---------------------------------------------------------------------------
+const grammarBody = document.getElementById('grammar-body');
+const GRAMMAR_LEVELS = [
+  ['beginner', 'Beginner'], ['elementary', 'Elementary'],
+  ['intermediate', 'Intermediate'], ['upper-intermediate', 'Upper-Intermediate'],
+  ['advanced', 'Advanced'],
+];
+
+function openGrammar() {
+  showDeckSub('decks-grammar', backToDeckHome);
+  haptic('light');
+  loadGrammarList();
+}
+
+async function loadGrammarList() {
+  grammarBody.innerHTML = skeletonRows(5);
+  let data;
+  try { data = await api('/api/grammar'); }
+  catch (e) { grammarBody.innerHTML = '<p class="empty">Could not load lessons. Try again later.</p>'; return; }
+  const lessons = data.lessons || [];
+  let html = '';
+  GRAMMAR_LEVELS.forEach(([key, label]) => {
+    const inLevel = lessons.filter(l => l.level === key);
+    if (!inLevel.length) return;
+    html += '<h2 class="grammar-level">' + esc(label) + '</h2><div class="list">';
+    inLevel.forEach(l => {
+      html += '<div class="word expandable" data-lesson="' + esc(l.id) + '">' +
+        '<span class="rank">' + l.order + '</span>' +
+        '<div class="word-main"><div class="word-term">' + esc(l.title) + '</div></div>' +
+        '<span class="word-mastery">›</span></div>';
+    });
+    html += '</div>';
+  });
+  grammarBody.innerHTML = '<h1>📖 Grammar</h1>' + (html || '<p class="empty">No lessons yet.</p>');
+  grammarBody.querySelectorAll('[data-lesson]').forEach(row => {
+    row.addEventListener('click', () => openGrammarLesson(row.dataset.lesson));
+  });
+}
+
+async function openGrammarLesson(id) {
+  showDeckSub('decks-grammar', loadGrammarList); // Back returns to the lesson list
+  haptic('light');
+  grammarBody.innerHTML = skeletonCards(2);
+  let l;
+  try { l = await api('/api/grammar/lesson?id=' + encodeURIComponent(id)); }
+  catch (e) { grammarBody.innerHTML = '<p class="empty">Could not load this lesson.</p>'; return; }
+
+  let html = '<h1>📖 ' + esc(l.title) + '</h1>';
+  if (l.image) html += '<div class="card"><img class="grammar-img" src="' + esc(l.image) + '" alt="" loading="lazy"></div>';
+  html += '<div class="card"><h2>Pattern</h2><div class="grammar-pattern">' + esc(l.pattern) + '</div></div>';
+  html += '<div class="card"><h2>How it works</h2><div class="grammar-text">' + esc(l.explanation) + '</div></div>';
+  if ((l.examples || []).length) {
+    html += '<div class="card"><h2>Examples</h2>' +
+      l.examples.map(e => '<div class="grammar-ex">• ' + esc(e) + '</div>').join('') + '</div>';
+  }
+  if (l.tip) html += '<div class="card"><div class="grammar-tip">💡 ' + esc(l.tip) + '</div></div>';
+  if ((l.practice || []).length) html += '<div class="card"><h2>Practice</h2><div id="grammar-practice"></div></div>';
+  grammarBody.innerHTML = html;
+
+  if ((l.practice || []).length) renderGrammarPractice(l.practice);
+}
+
+// renderGrammarPractice scores the pre-authored multiple-choice items entirely
+// client-side (answers ship in the lesson data — no AI, instant feedback).
+function renderGrammarPractice(items) {
+  const root = document.getElementById('grammar-practice');
+  root.innerHTML = items.map((p, qi) =>
+    '<div class="gp-item" data-answer="' + p.answer + '"><div class="gp-q">' + (qi + 1) + '. ' + esc(p.q) + '</div>' +
+    '<div class="quiz-opts">' + p.options.map((o, oi) =>
+      '<button class="quiz-opt" data-i="' + oi + '"><span class="quiz-badge">' +
+      'ABCD'[oi] + '</span><span class="quiz-opt-text">' + esc(o) + '</span></button>').join('') +
+    '</div></div>').join('');
+  root.querySelectorAll('.gp-item').forEach(item => {
+    const answer = parseInt(item.dataset.answer, 10);
+    const opts = item.querySelectorAll('.quiz-opt');
+    opts.forEach(btn => btn.addEventListener('click', () => {
+      const chosen = parseInt(btn.dataset.i, 10);
+      const ok = chosen === answer;
+      opts.forEach(b => { b.disabled = true; });
+      btn.classList.add(ok ? 'correct' : 'wrong');
+      btn.querySelector('.quiz-badge').textContent = ok ? '✓' : '✗';
+      if (!ok) {
+        opts[answer].classList.add('correct');
+        opts[answer].querySelector('.quiz-badge').textContent = '✓';
+      }
+      hapticNotify(ok ? 'success' : 'error');
+    }));
+  });
+}
+
+const grammarOpen = document.getElementById('grammar-open');
+if (grammarOpen) grammarOpen.addEventListener('click', () => { hapticSelect(); openGrammar(); });
 
 // ---------------------------------------------------------------------------
 // Settings (opened via Telegram's native Settings button)
@@ -973,8 +1166,9 @@ const loaders = {
 
 // Restore cross-device UI state, then land on the user's last tab.
 (async () => {
+  try { Object.assign(config, await (await fetch('/api/config')).json()); } catch (e) { /* keep defaults */ }
   const metric = await cloudGet('ui.board.metric');
-  if (metric === 'words' || metric === 'mastered' || metric === 'weekly') {
+  if (['words', 'mastered', 'weekly', 'today'].includes(metric)) {
     boardState.metric = metric;
     document.querySelectorAll('[data-metric]').forEach(x =>
       x.classList.toggle('chip-on', x.dataset.metric === metric));

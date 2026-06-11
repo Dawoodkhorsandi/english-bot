@@ -36,7 +36,8 @@ Go application (multi-file, single package main)
 ├── admin.go          — admin panel: paginated /users list, user detail view, direct messaging to users
 ├── webapp.go         — Mini App hub: HTTP server, embedded SPA, HMAC-SHA256 initData auth (+auth_date TTL), JSON API
 ├── leaderboard.go    — cross-user ranking, display names, deterministic funny-name fallback
-├── leitner.go        — curated Leitner decks (deck_cards/leitner_progress), 5-box scheduler, example backfill worker
+├── leitner.go        — curated Leitner decks (deck_cards/leitner_progress), 5-box scheduler, field backfill worker (example/Persian/pronunciation)
+├── grammar.go        — static grammar-lesson curriculum loaded from webapp/grammar/lessons.json (/grammar + /api/grammar)
 └── vocab.go          — /mywords (browse learned vocabulary) and /bookmark (save favourite words) features
 ```
 
@@ -575,6 +576,7 @@ All messages use `parse_mode: HTML`.
 | `/stats` | Sends a progress summary with Unicode progress bars for streak and quiz accuracy; personalised greeting from `user_prefs.first_name`. When `WEB_APP_URL` is configured, includes a `📊 Full Dashboard` inline button that opens the Telegram Mini App. (`UserStats` / `formatStats(st, firstName)`) (v1.5.0; v1.18.0: bars, greeting, mini-app button) |
 | `/app` | Sends a button that opens the Telegram Mini App hub (dashboard, vocabulary, decks, review, leaderboard). No-op message when `WEB_APP_URL` is unset. (v1.24.0) |
 | `/quiz` | Sends a native Telegram quiz poll (`sendPoll type:quiz`); Telegram highlights the correct answer after the user taps. The `poll_answer` update is routed to `handleQuizPollAnswer` which grades the result and feeds SRS. Falls back to inline keyboard if `sendPoll` fails. (v1.9.0; v1.18.0: native polls) |
+| `/grammar [n]` | Static grammar lessons (`grammar.go`, `handleGrammar`). With no argument, sends the numbered lesson index; with a number, sends that lesson's card (pattern, explanation, examples, tip). All content is pre-authored in `webapp/grammar/lessons.json` — no AI at request time. (v1.30.0) |
 | `/pause` | Sets `user_prefs.paused = 1`; scheduled sends are skipped, on-demand still works. (v1.4.0) |
 | `/resume` | Clears the paused flag. (v1.4.0) |
 | `/interval [min]` | With a numeric argument, sets the send interval directly; without, shows the current interval + an inline keyboard of options (`handleInterval`). Allowed: 30/60/120/180/240/360/480/720 min. (v1.6.0) |
@@ -717,13 +719,17 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/stats` | GET | Dashboard payload (streak, words, mastered, drills, quiz %, full activity-day history for the heatmap, level, paused, member-since). |
 | `/api/vocab?offset&limit&bookmarks&q` | GET | Page of learned words (`LearnedWordsFiltered`), with mastery + bookmark flags and a term/meaning search. |
 | `/api/bookmark` | POST | `{term, on}` → toggle a bookmark. |
-| `/api/leaderboard?metric=words\|mastered\|weekly` | GET | Ranked rows (incl. avatar `photo`) + the caller's own rank + `hasName`. `weekly` counts words learned since Monday 00:00 (`weekStartUTC`). |
+| `/api/config` | GET | **Public** (no auth): `{botUsername, webAppURL}` for the Mini App's share/invite link. (v1.30.0) |
+| `/api/leaderboard?metric=words\|mastered\|weekly\|today` | GET | Ranked rows + the caller's own rank + `hasName`. `weekly`/`today` count words learned since Monday/local-midnight (`weekStartUTC`/`dayStartUTC`). **No profile photos exposed** (privacy, v1.30.0). |
 | `/api/leaderboard/name` | POST | `{name}` → set the caller's display name (sanitised, ≤24 chars). |
-| `/api/review/next?limit` | GET | Due SRS cards (`DueReviews`). |
+| `/api/review/next?limit` | GET | Due SRS cards (`DueReviews`, deduped per word). Each item carries `{term, meaning, pronunciation, persian, example}` parsed from the pooled card. (v1.30.0) |
 | `/api/review/answer` | POST | `{term, known}` → `ApplyReviewKnown`/`ApplyReviewForgot`. |
 | `/api/decks` | GET | Curated decks with per-user progress % + due/mastered counts. |
-| `/api/decks/study?deck&limit` | GET | Next cards to study (due first, then new). |
+| `/api/decks/study?deck&limit` | GET | Next cards to study (due first, then new), with `persian`/`pronunciation`/`mnemonic`. |
+| `/api/decks/detail?deck` | GET | Deck detail: Leitner box distribution, total/mastered/due/new, progress %, next-review date (`DeckDetail`). (v1.30.0) |
 | `/api/decks/swipe` | POST | `{deck, term, known}` → Leitner box update. |
+| `/api/grammar` | GET | Grammar lesson index (id, order, level, title). (v1.30.0) |
+| `/api/grammar/lesson?id` | GET | One full grammar lesson (pattern, explanation, examples, tip, practice). (v1.30.0) |
 | `/api/settings` | GET/POST | Read all prefs (incl. `level`, friendly `levelLabels`, current leaderboard `name`) / apply one `{key, value}` change via existing setters. |
 | `/api/content?kind&offset&limit` | GET | Library page over the per-user history tables (`sent_idioms` / `sent_collocations` / `sent_stories` / `sent_tips`), joined with `content_pool` for the card text (Telegram HTML stripped via `stripTelegramHTML`). `kind` is whitelisted (`libraryKinds`): `idiom`, `collocation`, `story`, `tip`. |
 | `/api/quizzes?offset&limit` | GET | Quiz attempt history from `quiz_results` (word, correct, date), most recent first. |
@@ -742,17 +748,40 @@ Settings screen (which posts to `/api/leaderboard/name`). Names are sanitised
 
 **Leitner decks** (`leitner.go`): curated vocabulary decks studied with a 5-box
 Leitner system. Cards live in `deck_cards` (seeded idempotently from embedded
-`webapp/decks/*.json` by `SeedDecks`); per-user progress in `leitner_progress`
-(box 1–5 per card). A correct recall promotes one box (longer interval:
-0/1/3/7/21 days), a miss resets to box 1; box 5 = mastered. Progress % =
-`sum(box-1) / (total*4)`. Decks ship word+definition (+examples where available);
-missing example sentences are generated in the background by `runDeckBackfill`
-via the `ProviderChain` and cached into `deck_cards`. Bundled at launch:
-**504 Absolutely Essential Words** (504 words across 42 lessons, each with a
-definition + example) and **Barron's GRE 333** (definitions; examples AI-filled).
+`webapp/decks/*.json` by `SeedDecks`, whose UPSERT fills blank columns from the
+JSON without overwriting backfilled values); per-user progress in
+`leitner_progress` (box 1–5 per card). A correct recall promotes one box (longer
+interval: 0/1/3/7/21 days), a miss resets to box 1; box 5 = mastered.
+Progress % = `sum(box-1) / (total*4)`. `deck_cards` also has `persian`,
+`pronunciation` and `mnemonic` columns (v1.30.0); a card ships whatever its
+source JSON provides and the rest (example, Persian, pronunciation) are filled
+in the background by `runDeckBackfill` → `backfillOneDeckField` (one field per
+30s tick) via the `ProviderChain`, cached back into `deck_cards`. The study card
+and the `/api/decks/study` payload surface these fields; `/api/decks/detail`
+returns the per-deck Leitner box distribution for the deck detail page. Bundled:
+**504 Absolutely Essential Words** (def + example + Persian), **Barron's GRE
+333** (def + mnemonic; Persian/pronunciation AI-filled), and curated **Common
+Phrasal Verbs**, **Business & Workplace English**, **Academic Word List** and
+**IELTS/TOEFL High-Frequency** decks.
 
 > Deck word lists are community reproductions of copyrighted study books — fine
 > for personal/educational use; review licensing before public distribution.
+
+---
+
+### Grammar lessons — `grammar.go`
+
+A static, pre-authored grammar curriculum loaded once from the embedded
+`webapp/grammar/lessons.json` (`loadGrammarLessons`, cached via `sync.Once`,
+sorted by `order` easy→hard). **No AI runs at request time** — free-tier model
+latency/quota make live grammar chat impractical, so every lesson, example and
+practice question is baked in and served instantly. Each lesson has
+`{id, order, level, title, pattern, explanation, examples[], tip, image?,
+practice[]}`; `practice` items are multiple-choice with a known `answer` index,
+scored client-side in the Mini App. Served to chat via `/grammar [n]`
+(`handleGrammar`) and to the Mini App via `/api/grammar` (index) +
+`/api/grammar/lesson?id=` (full lesson). Lessons render on the **Study** tab as
+a drill-down; an optional `image` URL is shown when present.
 
 ---
 

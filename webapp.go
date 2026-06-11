@@ -52,6 +52,7 @@ func startWebServer(store *Store) {
 	mux.HandleFunc("/api/decks", withUser(store, handleAPIDecks))
 	mux.HandleFunc("/api/decks/study", withUser(store, handleAPIDeckStudy))
 	mux.HandleFunc("/api/decks/swipe", withUser(store, handleAPIDeckSwipe))
+	mux.HandleFunc("/api/decks/detail", withUser(store, handleAPIDeckDetail))
 	mux.HandleFunc("/api/settings", withUser(store, handleAPISettings))
 	mux.HandleFunc("/api/content", withUser(store, handleAPIContent))
 	mux.HandleFunc("/api/quizzes", withUser(store, handleAPIQuizzes))
@@ -59,6 +60,11 @@ func startWebServer(store *Store) {
 	mux.HandleFunc("/api/quiz/next", withUser(store, handleAPIQuizNext))
 	mux.HandleFunc("/api/quiz/answer", withUser(store, handleAPIQuizAnswer))
 	mux.HandleFunc("/api/practice", withUser(store, handleAPIPractice))
+	mux.HandleFunc("/api/grammar", withUser(store, handleAPIGrammar))
+	mux.HandleFunc("/api/grammar/lesson", withUser(store, handleAPIGrammarLesson))
+	// Public config (no auth): the frontend needs the bot handle + web app URL
+	// before it can build an invite link.
+	mux.HandleFunc("/api/config", handleAPIConfig)
 	// Frontend: the SPA shell on the app routes, static files otherwise.
 	// Embedded files carry no modtime, so without an explicit Cache-Control
 	// webviews cache them heuristically and users keep running a stale SPA
@@ -106,15 +112,12 @@ func withUser(store *Store, fn apiHandler) http.HandlerFunc {
 		if initData == "" {
 			initData = r.URL.Query().Get("initData")
 		}
-		chatID, photoURL, ok := validateInitData(initData)
+		chatID, _, ok := validateInitData(initData)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		// Best-effort avatar cache for the leaderboard (no-op when unchanged).
-		if photoURL != "" {
-			_ = store.SetPhotoURL(chatID, photoURL)
-		}
+		// Profile photos are intentionally not captured or shown (privacy).
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		fn(w, r, chatID, store)
 	}
@@ -293,7 +296,7 @@ func handleAPIBookmark(w http.ResponseWriter, r *http.Request, chatID int64, sto
 // own rank, and whether they've chosen a display name yet.
 func handleAPILeaderboard(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
 	metric := r.URL.Query().Get("metric")
-	if metric != "mastered" && metric != "weekly" {
+	if metric != "mastered" && metric != "weekly" && metric != "today" {
 		metric = "words"
 	}
 	rows, myRank, myValue, err := store.Leaderboard(metric, chatID)
@@ -353,7 +356,13 @@ func handleAPIReviewNext(w http.ResponseWriter, r *http.Request, chatID int64, s
 	}
 	items := make([]map[string]interface{}, 0, len(due))
 	for _, d := range due {
-		items = append(items, map[string]interface{}{"term": d.term, "meaning": d.meaning})
+		items = append(items, map[string]interface{}{
+			"term":          d.term,
+			"meaning":       d.meaning,
+			"pronunciation": parsePronunciation(d.text),
+			"persian":       parsePersian(d.text),
+			"example":       parseExample(d.text),
+		})
 	}
 	writeJSON(w, map[string]interface{}{"items": items})
 }
@@ -418,6 +427,26 @@ func handleAPIDeckStudy(w http.ResponseWriter, r *http.Request, chatID int64, st
 		cards = []DeckStudyCard{}
 	}
 	writeJSON(w, map[string]interface{}{"items": cards})
+}
+
+// handleAPIDeckDetail returns the box distribution + stats for one deck (the
+// deck detail page).
+func handleAPIDeckDetail(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	deckID := strings.TrimSpace(r.URL.Query().Get("deck"))
+	if deckID == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	det, ok, err := store.DeckDetail(chatID, deckID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, det)
 }
 
 // handleAPIDeckSwipe records a Leitner answer for a deck card.
@@ -743,6 +772,16 @@ func handleAPIQuizzes(w http.ResponseWriter, r *http.Request, chatID int64, stor
 		"items":  items,
 		"total":  answered,
 		"offset": offset,
+	})
+}
+
+// handleAPIConfig serves public frontend config (bot handle + web app URL). No
+// auth — it carries nothing user-specific and the share link needs it at boot.
+func handleAPIConfig(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	writeJSON(w, map[string]interface{}{
+		"botUsername": botUsername,
+		"webAppURL":   webAppURL,
 	})
 }
 

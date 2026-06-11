@@ -26,7 +26,6 @@ type LeaderRow struct {
 	Name  string `json:"name"`
 	Value int    `json:"value"`
 	IsMe  bool   `json:"isMe"`
-	Photo string `json:"photo"` // Telegram avatar URL, may be ""
 }
 
 // funnyAdjectives / funnyNouns build a stable nickname for users who haven't
@@ -83,21 +82,6 @@ func (s *Store) SetDisplayName(chatID int64, name string) error {
 	return err
 }
 
-// SetPhotoURL caches the user's Telegram avatar URL (from validated Mini App
-// initData) for the leaderboard. Empty URLs are ignored.
-func (s *Store) SetPhotoURL(chatID int64, photoURL string) error {
-	if photoURL == "" {
-		return nil
-	}
-	_, err := s.db.Exec(`
-		INSERT INTO user_prefs (chat_id, photo_url) VALUES (?, ?)
-		ON CONFLICT(chat_id) DO UPDATE SET photo_url = excluded.photo_url, updated_at = CURRENT_TIMESTAMP
-		WHERE COALESCE(user_prefs.photo_url, '') != excluded.photo_url`,
-		chatID, photoURL,
-	)
-	return err
-}
-
 // weekStartUTC returns the start of the current ISO week (Monday 00:00 in
 // appLocation) formatted like the stored sent_at values (UTC DATETIME).
 func weekStartUTC(now time.Time) string {
@@ -108,10 +92,19 @@ func weekStartUTC(now time.Time) string {
 	return monday.UTC().Format("2006-01-02 15:04:05")
 }
 
+// dayStartUTC returns the start of today (00:00 in appLocation) formatted like
+// the stored sent_at values (UTC DATETIME).
+func dayStartUTC(now time.Time) string {
+	local := now.In(appLocation)
+	midnight := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, appLocation)
+	return midnight.UTC().Format("2006-01-02 15:04:05")
+}
+
 // Leaderboard returns the ranked rows for a metric plus the requesting user's own
 // rank and value. metric is "mastered" (words in long-term memory), "weekly"
-// (words learned since Monday) or "words" (default — total vocabulary learned).
-// Users with a zero value are excluded.
+// (words learned since Monday), "today" (words learned since local midnight) or
+// "words" (default — total vocabulary learned). Users with a zero value are
+// excluded. Profile photos are deliberately not exposed (privacy).
 func (s *Store) Leaderboard(metric string, me int64) (rows []LeaderRow, myRank, myValue int, err error) {
 	var inner string
 	var args []interface{}
@@ -122,12 +115,15 @@ func (s *Store) Leaderboard(metric string, me int64) (rows []LeaderRow, myRank, 
 	case "weekly":
 		inner = "SELECT chat_id, COUNT(*) AS v FROM sent_vocab WHERE sent_at >= ? GROUP BY chat_id"
 		args = append(args, weekStartUTC(time.Now()))
+	case "today":
+		inner = "SELECT chat_id, COUNT(*) AS v FROM sent_vocab WHERE sent_at >= ? GROUP BY chat_id"
+		args = append(args, dayStartUTC(time.Now()))
 	default:
 		inner = "SELECT chat_id, COUNT(*) AS v FROM sent_vocab GROUP BY chat_id"
 	}
 
 	query := `
-		SELECT t.chat_id, t.v, COALESCE(up.display_name, ''), COALESCE(up.photo_url, '')
+		SELECT t.chat_id, t.v, COALESCE(up.display_name, '')
 		FROM (` + inner + `) t
 		LEFT JOIN user_prefs up ON up.chat_id = t.chat_id
 		WHERE t.v > 0
@@ -145,9 +141,8 @@ func (s *Store) Leaderboard(metric string, me int64) (rows []LeaderRow, myRank, 
 			chatID  int64
 			value   int
 			display string
-			photo   string
 		)
-		if err := qrows.Scan(&chatID, &value, &display, &photo); err != nil {
+		if err := qrows.Scan(&chatID, &value, &display); err != nil {
 			return nil, 0, 0, err
 		}
 		rank++
@@ -161,7 +156,7 @@ func (s *Store) Leaderboard(metric string, me int64) (rows []LeaderRow, myRank, 
 			name = funnyName(chatID)
 		}
 		if rank <= leaderboardSize {
-			rows = append(rows, LeaderRow{Rank: rank, Name: name, Value: value, IsMe: isMe, Photo: photo})
+			rows = append(rows, LeaderRow{Rank: rank, Name: name, Value: value, IsMe: isMe})
 		}
 	}
 	return rows, myRank, myValue, qrows.Err()

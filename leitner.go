@@ -48,17 +48,46 @@ var deckRegistry = []DeckMeta{
 	{
 		ID:          "barrons",
 		Name:        "Barron's GRE 333",
-		Description: "High-frequency GRE vocabulary from Barron's classic list.",
+		Description: "High-frequency GRE vocabulary from Barron's classic list, with memory mnemonics.",
 		file:        "webapp/decks/barrons.json",
+	},
+	{
+		ID:          "phrasalverbs",
+		Name:        "Common Phrasal Verbs",
+		Description: "Everyday English phrasal verbs (get by, look after, turn down…) with examples.",
+		file:        "webapp/decks/phrasalverbs.json",
+	},
+	{
+		ID:          "business",
+		Name:        "Business & Workplace English",
+		Description: "Meetings, email and negotiation vocabulary (stakeholder, deadline, leverage…).",
+		file:        "webapp/decks/business.json",
+	},
+	{
+		ID:          "awl",
+		Name:        "Academic Word List",
+		Description: "Core academic vocabulary for essays, IELTS and TOEFL (analyze, significant…).",
+		file:        "webapp/decks/awl.json",
+	},
+	{
+		ID:          "ielts",
+		Name:        "IELTS / TOEFL High-Frequency",
+		Description: "Common test vocabulary (abundant, deteriorate, prominent…) with examples.",
+		file:        "webapp/decks/ielts.json",
 	},
 }
 
-// deckCard mirrors one entry in an embedded deck JSON file.
+// deckCard mirrors one entry in an embedded deck JSON file. persian /
+// pronunciation / mnemonic are optional in the source JSON; blanks are filled
+// later by the backfill worker (persian/pronunciation) or simply omitted.
 type deckCard struct {
-	Term       string `json:"term"`
-	Definition string `json:"definition"`
-	Example    string `json:"example"`
-	Group      string `json:"group"`
+	Term          string `json:"term"`
+	Definition    string `json:"definition"`
+	Example       string `json:"example"`
+	Group         string `json:"group"`
+	Persian       string `json:"persian"`
+	Pronunciation string `json:"pronunciation"`
+	Mnemonic      string `json:"mnemonic"`
 }
 
 // DeckProgress is the per-user summary shown on the Decks tab.
@@ -74,10 +103,13 @@ type DeckProgress struct {
 
 // DeckStudyCard is one card delivered to a study session.
 type DeckStudyCard struct {
-	Term       string `json:"term"`
-	Definition string `json:"definition"`
-	Example    string `json:"example"`
-	Box        int    `json:"box"`
+	Term          string `json:"term"`
+	Definition    string `json:"definition"`
+	Example       string `json:"example"`
+	Persian       string `json:"persian"`
+	Pronunciation string `json:"pronunciation"`
+	Mnemonic      string `json:"mnemonic"`
+	Box           int    `json:"box"`
 }
 
 // leitnerNextBox returns the next box after an answer. Correct recall promotes
@@ -120,10 +152,20 @@ func (s *Store) SeedDecks() error {
 			if term == "" {
 				continue
 			}
+			// UPSERT that only fills BLANK columns from the JSON: new fields
+			// (persian/pronunciation/mnemonic) reach already-seeded rows on
+			// existing databases, without ever clobbering AI-backfilled values.
 			res, err := s.db.Exec(`
-				INSERT OR IGNORE INTO deck_cards (deck_id, term, definition, example, group_label, ordering)
-				VALUES (?, ?, ?, ?, ?, ?)`,
-				d.ID, term, c.Definition, c.Example, c.Group, i,
+				INSERT INTO deck_cards (deck_id, term, definition, example, group_label, ordering, persian, pronunciation, mnemonic)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(deck_id, term) DO UPDATE SET
+					definition    = CASE WHEN deck_cards.definition = ''    THEN excluded.definition    ELSE deck_cards.definition END,
+					example       = CASE WHEN deck_cards.example = ''       THEN excluded.example       ELSE deck_cards.example END,
+					group_label   = CASE WHEN deck_cards.group_label = ''   THEN excluded.group_label   ELSE deck_cards.group_label END,
+					persian       = CASE WHEN deck_cards.persian = ''       THEN excluded.persian       ELSE deck_cards.persian END,
+					pronunciation = CASE WHEN deck_cards.pronunciation = '' THEN excluded.pronunciation ELSE deck_cards.pronunciation END,
+					mnemonic      = CASE WHEN deck_cards.mnemonic = ''      THEN excluded.mnemonic      ELSE deck_cards.mnemonic END`,
+				d.ID, term, c.Definition, c.Example, c.Group, i, c.Persian, c.Pronunciation, c.Mnemonic,
 			)
 			if err != nil {
 				return err
@@ -209,7 +251,9 @@ func (s *Store) Decks(chatID int64) ([]DeckProgress, error) {
 func (s *Store) DeckStudy(chatID int64, deckID string, limit int) ([]DeckStudyCard, error) {
 	now := time.Now().UTC().Format(srsTimeLayout)
 	rows, err := s.db.Query(`
-		SELECT dc.term, dc.definition, dc.example, COALESCE(lp.box, 0)
+		SELECT dc.term, dc.definition, dc.example,
+		       COALESCE(dc.persian, ''), COALESCE(dc.pronunciation, ''), COALESCE(dc.mnemonic, ''),
+		       COALESCE(lp.box, 0)
 		FROM deck_cards dc
 		LEFT JOIN leitner_progress lp
 		  ON lp.chat_id = ? AND lp.deck_id = dc.deck_id AND lp.term = dc.term
@@ -226,12 +270,115 @@ func (s *Store) DeckStudy(chatID int64, deckID string, limit int) ([]DeckStudyCa
 	var out []DeckStudyCard
 	for rows.Next() {
 		var c DeckStudyCard
-		if err := rows.Scan(&c.Term, &c.Definition, &c.Example, &c.Box); err != nil {
+		if err := rows.Scan(&c.Term, &c.Definition, &c.Example, &c.Persian, &c.Pronunciation, &c.Mnemonic, &c.Box); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// DeckBox is one bucket of the Leitner box distribution for a deck.
+type DeckBox struct {
+	Box   int    `json:"box"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+// DeckDetail is the per-user deep view of a single deck.
+type DeckDetail struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Total       int       `json:"total"`
+	Mastered    int       `json:"mastered"`
+	Due         int       `json:"due"`
+	New         int       `json:"new"` // never-studied cards
+	ProgressPct int       `json:"progressPct"`
+	NextReview  string    `json:"nextReview"` // "2 Jan", or "" if none scheduled
+	Boxes       []DeckBox `json:"boxes"`      // box 1..5 distribution (studied cards)
+}
+
+// leitnerBoxLabels names the five Leitner boxes for the detail view.
+var leitnerBoxLabels = map[int]string{1: "Learning", 2: "Familiar", 3: "Comfortable", 4: "Confident", 5: "Mastered"}
+
+// DeckDetail returns the box distribution + summary stats for one deck and user.
+func (s *Store) DeckDetail(chatID int64, deckID string) (DeckDetail, bool, error) {
+	var meta DeckMeta
+	for _, d := range deckRegistry {
+		if d.ID == deckID {
+			meta = d
+			break
+		}
+	}
+	if meta.ID == "" {
+		return DeckDetail{}, false, nil
+	}
+	det := DeckDetail{ID: meta.ID, Name: meta.Name, Description: meta.Description}
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM deck_cards WHERE deck_id = ?", deckID).Scan(&det.Total); err != nil {
+		return det, false, err
+	}
+	if det.Total == 0 {
+		return det, false, nil
+	}
+
+	counts := map[int]int{}
+	studied, points := 0, 0
+	rows, err := s.db.Query(
+		"SELECT box, COUNT(*) FROM leitner_progress WHERE chat_id = ? AND deck_id = ? GROUP BY box",
+		chatID, deckID,
+	)
+	if err != nil {
+		return det, false, err
+	}
+	for rows.Next() {
+		var box, cnt int
+		if err := rows.Scan(&box, &cnt); err != nil {
+			rows.Close()
+			return det, false, err
+		}
+		if box < 1 {
+			box = 1
+		}
+		counts[box] += cnt
+		studied += cnt
+		if box > 1 {
+			points += (box - 1) * cnt
+		}
+		if box >= leitnerMaxBox {
+			det.Mastered += cnt
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return det, false, err
+	}
+
+	for b := 1; b <= leitnerMaxBox; b++ {
+		det.Boxes = append(det.Boxes, DeckBox{Box: b, Label: leitnerBoxLabels[b], Count: counts[b]})
+	}
+	det.New = det.Total - studied
+	det.ProgressPct = points * 100 / (det.Total * (leitnerMaxBox - 1))
+
+	now := time.Now().UTC().Format(srsTimeLayout)
+	_ = s.db.QueryRow(`
+		SELECT COUNT(*) FROM deck_cards dc
+		LEFT JOIN leitner_progress lp
+		  ON lp.chat_id = ? AND lp.deck_id = dc.deck_id AND lp.term = dc.term
+		WHERE dc.deck_id = ? AND (lp.term IS NULL OR lp.due_at <= ?)`,
+		chatID, deckID, now,
+	).Scan(&det.Due)
+
+	var nextRaw any
+	if err := s.db.QueryRow(
+		"SELECT MIN(due_at) FROM leitner_progress WHERE chat_id = ? AND deck_id = ? AND due_at > ?",
+		chatID, deckID, now,
+	).Scan(&nextRaw); err == nil {
+		if ts, ok := parseStoredUTC(nextRaw); ok {
+			det.NextReview = ts.In(appLocation).Format("2 Jan")
+		}
+	}
+	return det, true, nil
 }
 
 // DeckSwipe records a study answer for a card and reschedules it via Leitner.
@@ -260,18 +407,38 @@ func (s *Store) DeckSwipe(chatID int64, deckID, term string, known bool, now tim
 }
 
 // ---------------------------------------------------------------------------
-// Background example backfill
+// Background field backfill (example, Persian, pronunciation)
 // ---------------------------------------------------------------------------
 
-// runDeckBackfill periodically generates a natural example sentence for deck
-// cards that don't have one (e.g. Barron's, which ships definitions only),
-// caching the result back into deck_cards. It is a no-op when no AI provider is
-// configured. Cards that already have an example (e.g. the 504 set) are skipped.
+// deckBackfillFields lists the deck_cards columns the worker fills, in priority
+// order, with a prompt builder for each. Each builder gets (term, definition).
+var deckBackfillFields = []struct {
+	column string
+	prompt func(term, definition string) string
+}{
+	{"example", func(term, def string) string {
+		return fmt.Sprintf("Write ONE natural English example sentence (max 18 words) that uses the word %q "+
+			"in the sense of %q. Return only the sentence, no quotes or labels.", term, def)
+	}},
+	{"persian", func(term, def string) string {
+		return fmt.Sprintf("Translate the English word %q (meaning: %q) into Persian/Farsi. "+
+			"Reply with ONLY the Persian translation (1–3 words), no English, no transliteration, no quotes.", term, def)
+	}},
+	{"pronunciation", func(term, def string) string {
+		return fmt.Sprintf("Give the IPA phonetic transcription of the English word %q. "+
+			"Reply with ONLY the IPA between slashes, e.g. /əˈbændən/ — no other text.", term)
+	}},
+}
+
+// runDeckBackfill periodically fills a single missing field (example, then
+// Persian, then pronunciation) on deck cards that lack one — e.g. Barron's ships
+// definitions only, and the new decks ship without Persian/pronunciation. The
+// result is cached back into deck_cards. No-op when no AI provider is configured.
 func runDeckBackfill(ctx context.Context, chain *ProviderChain, store *Store) {
 	if chain == nil || !chain.HasAny() {
 		return
 	}
-	log.Println("📚 [DECKS] Example backfill worker started.")
+	log.Println("📚 [DECKS] Field backfill worker started (example · Persian · pronunciation).")
 	ticker := time.NewTicker(deckBackfillInterval)
 	defer ticker.Stop()
 	for {
@@ -279,37 +446,36 @@ func runDeckBackfill(ctx context.Context, chain *ProviderChain, store *Store) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			store.backfillOneDeckExample(ctx, chain)
+			store.backfillOneDeckField(ctx, chain)
 		}
 	}
 }
 
-// backfillOneDeckExample fills in a single missing example, keeping AI usage low.
-func (s *Store) backfillOneDeckExample(ctx context.Context, chain *ProviderChain) {
-	var deckID, term, definition string
-	err := s.db.QueryRow(
-		"SELECT deck_id, term, definition FROM deck_cards WHERE example = '' LIMIT 1",
-	).Scan(&deckID, &term, &definition)
-	if err != nil {
-		return // none left, or transient error
-	}
-	prompt := fmt.Sprintf(
-		"Write ONE natural English example sentence (max 18 words) that uses the word %q "+
-			"in the sense of \"%s\". Return only the sentence, no quotes or labels.",
-		term, definition,
-	)
-	out, _, err := chain.Generate(ctx, prompt)
-	if err != nil {
-		return
-	}
-	example := strings.TrimSpace(strings.Trim(strings.TrimSpace(out), "\"'"))
-	if example == "" {
-		return
-	}
-	if _, err := s.db.Exec(
-		"UPDATE deck_cards SET example = ? WHERE deck_id = ? AND term = ?",
-		example, deckID, term,
-	); err != nil {
-		log.Printf("⚠️  [DECKS] Could not cache example for %q: %v", term, err)
+// backfillOneDeckField fills one missing field on one card per call, keeping AI
+// usage low. Fields are tried in deckBackfillFields order.
+func (s *Store) backfillOneDeckField(ctx context.Context, chain *ProviderChain) {
+	for _, f := range deckBackfillFields {
+		var deckID, term, definition string
+		err := s.db.QueryRow(
+			"SELECT deck_id, term, definition FROM deck_cards WHERE "+f.column+" = '' LIMIT 1",
+		).Scan(&deckID, &term, &definition)
+		if err != nil {
+			continue // none missing for this field (or transient) — try the next
+		}
+		out, _, err := chain.Generate(ctx, f.prompt(term, definition))
+		if err != nil {
+			return
+		}
+		val := strings.TrimSpace(strings.Trim(strings.TrimSpace(out), "\"'"))
+		if val == "" {
+			return
+		}
+		if _, err := s.db.Exec(
+			"UPDATE deck_cards SET "+f.column+" = ? WHERE deck_id = ? AND term = ?",
+			val, deckID, term,
+		); err != nil {
+			log.Printf("⚠️  [DECKS] Could not cache %s for %q: %v", f.column, term, err)
+		}
+		return // one field per tick
 	}
 }
