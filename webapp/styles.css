@@ -45,7 +45,7 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
   background: var(--card); color: var(--text); font-size: 15px; margin-bottom: 10px;
 }
 .search::placeholder { color: var(--hint); }
-.chips { display: flex; gap: 8px; margin-bottom: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .chip {
   border: none; background: var(--card); color: var(--text); font-size: 13px;
   padding: 7px 14px; border-radius: 20px; cursor: pointer;

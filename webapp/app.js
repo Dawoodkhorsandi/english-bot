@@ -329,21 +329,24 @@ function createSwipeSession(container, opts) {
     const hint = el.querySelector('.swipe-hint');
     let revealed = false;
     function reveal() { revealed = true; front.hidden = true; back.hidden = false; hint.textContent = 'Swipe → knew it · ← forgot'; }
-    el.addEventListener('click', () => { if (!revealed && !dragging) reveal(); });
+    // A tap reveals the back; a drag must not. `moved` tells them apart.
+    el.addEventListener('click', () => { if (!revealed && !moved) reveal(); });
 
     // Drag to swipe.
-    let startX = 0, dx = 0, dragging = false;
+    let startX = 0, dx = 0, dragging = false, moved = false;
     const knownStamp = el.querySelector('.swipe-stamp.known');
     const forgotStamp = el.querySelector('.swipe-stamp.forgot');
-    el.addEventListener('pointerdown', e => { dragging = true; startX = e.clientX; el.classList.add('dragging'); el.setPointerCapture(e.pointerId); });
+    el.addEventListener('pointerdown', e => { dragging = true; moved = false; startX = e.clientX; el.classList.add('dragging'); el.setPointerCapture(e.pointerId); });
     el.addEventListener('pointermove', e => {
       if (!dragging) return;
       dx = e.clientX - startX;
+      if (Math.abs(dx) > 6) moved = true;
       el.style.transform = 'translateX(' + dx + 'px) rotate(' + (dx / 20) + 'deg)';
       knownStamp.style.opacity = dx > 0 ? Math.min(1, dx / 80) : 0;
       forgotStamp.style.opacity = dx < 0 ? Math.min(1, -dx / 80) : 0;
     });
     el.addEventListener('pointerup', () => {
+      dragging = false;
       el.classList.remove('dragging');
       if (Math.abs(dx) > 90) { commit(dx > 0, el); }
       else { el.style.transform = ''; knownStamp.style.opacity = 0; forgotStamp.style.opacity = 0; }
@@ -484,11 +487,18 @@ async function postSetting(key, value) {
 
 function renderSettings(s) {
   const body = document.getElementById('settings-body');
+  const labels = s.levelLabels || {};
   let html = '<div class="card"><h2>Difficulty level</h2><div class="chips" id="set-levels">';
   s.levels.forEach(l => {
-    html += '<button class="chip' + (l === s.level ? ' chip-on' : '') + '" data-level="' + l + '">' + esc(l) + '</button>';
+    html += '<button class="chip' + (l === s.level ? ' chip-on' : '') + '" data-level="' + l + '">' + esc(labels[l] || l) + '</button>';
   });
   html += '</div></div>';
+
+  html += '<div class="card"><h2>Leaderboard name</h2>' +
+    '<div class="set-row" style="gap:8px">' +
+    '<input class="search" id="set-name" maxlength="24" style="margin-bottom:0" placeholder="Choose a name…" value="' + esc(s.name || '') + '">' +
+    '<button class="chip chip-on" id="set-name-save">Save</button></div>' +
+    '<div class="sub">This is what others see next to your rank. Leave blank for a fun random name.</div></div>';
 
   html += '<div class="card">' +
     row('Pause scheduled sends', toggleHTML('paused', s.paused)) +
@@ -505,6 +515,19 @@ function renderSettings(s) {
     body.querySelectorAll('[data-level]').forEach(x => x.classList.toggle('chip-on', x === c));
     postSetting('level', c.dataset.level);
   }));
+
+  const nameInput = document.getElementById('set-name');
+  const nameSave = document.getElementById('set-name-save');
+  nameSave.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name) return;
+    haptic('light');
+    nameSave.disabled = true;
+    nameSave.textContent = 'Saved ✓';
+    try { await api('/api/leaderboard/name', { method: 'POST', body: JSON.stringify({ name }) }); }
+    catch (e) { nameSave.textContent = 'Retry'; nameSave.disabled = false; return; }
+    setTimeout(() => { nameSave.textContent = 'Save'; nameSave.disabled = false; }, 1200);
+  });
   body.querySelectorAll('.switch input').forEach(inp => inp.addEventListener('change', () => {
     postSetting(inp.dataset.key, inp.checked);
   }));

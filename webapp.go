@@ -445,11 +445,17 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request, chatID int64, sto
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	levelLabels := make(map[string]string, len(allLevels))
+	for _, l := range allLevels {
+		levelLabels[l] = levelLabel(l)
+	}
 	writeJSON(w, map[string]interface{}{
-		"level":    p.Level,
-		"levels":   allLevels,
-		"paused":   p.Paused,
-		"interval": p.Interval,
+		"level":       p.Level,
+		"levels":      allLevels,
+		"levelLabels": levelLabels,
+		"name":        store.GetDisplayName(chatID),
+		"paused":      p.Paused,
+		"interval":    p.Interval,
 		"toggles": map[string]bool{
 			"tts":          p.TTSEnabled,
 			"tips":         p.TipsEnabled,
