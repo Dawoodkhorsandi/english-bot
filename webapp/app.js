@@ -84,7 +84,6 @@ let currentView = 'dashboard';
 
 function showView(name) {
   try { tg.BackButton.hide(); } catch (e) { /* ignore */ } // reset on tab switch
-  if (teardownSession) teardownSession(); // hide native session buttons
   setSwipeGuard(name === 'review'); // deck study sets its own guard
   setCloseGuard(false);
   currentView = name;
@@ -152,7 +151,10 @@ function renderDashboard(s) {
   }
 
   html += '<div class="card"><h2>Activity · last 4 months</h2>' +
-    heatmapHTML(new Set(s.activity_days || [])) + '</div>';
+    heatmapHTML(s.activity_counts || {}) +
+    '<div class="heat-legend"><span>Less</span>' +
+    '<i class="heat-cell"></i><i class="heat-cell l1"></i><i class="heat-cell l2"></i>' +
+    '<i class="heat-cell l3"></i><i class="heat-cell l4"></i><span>More</span></div></div>';
 
   html += '<div class="card"><h2>Level</h2>' +
     '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
@@ -206,8 +208,17 @@ async function maybeOfferHomeScreen(streak) {
 }
 
 // GitHub-style activity heatmap: 17 week columns × 7 day rows (Mon top),
-// ending in the current week. Pure CSS grid — no chart library.
-function heatmapHTML(activeSet) {
+// ending in the current week. Shade deepens with the day's activity count,
+// GitHub-commit style. Pure CSS grid — no chart library.
+function heatLevel(n) {
+  if (n >= 10) return 4;
+  if (n >= 6) return 3;
+  if (n >= 3) return 2;
+  if (n >= 1) return 1;
+  return 0;
+}
+
+function heatmapHTML(counts) {
   const WEEKS = 17;
   const today = new Date();
   const todayKey = localDateKey(today);
@@ -217,11 +228,13 @@ function heatmapHTML(activeSet) {
   const d = new Date(start);
   for (let i = 0; i < WEEKS * 7; i++) {
     const key = localDateKey(d);
+    const n = counts[key] || 0;
     let cls = 'heat-cell';
     if (key > todayKey) cls += ' future';
-    else if (activeSet.has(key)) cls += ' on';
+    else if (n > 0) cls += ' l' + heatLevel(n);
     if (key === todayKey) cls += ' today';
-    cells += '<div class="' + cls + '"></div>';
+    const tip = n > 0 ? n + ' item' + (n === 1 ? '' : 's') + ' on ' + key : key;
+    cells += '<div class="' + cls + '" title="' + tip + '"></div>';
     d.setDate(d.getDate() + 1);
   }
   return '<div class="heatmap">' + cells + '</div>';
@@ -255,20 +268,40 @@ const MASTERY = { mastered: '✅', learning: '📖', new: '🆕' };
 
 function wordRow(w) {
   const el = document.createElement('div');
-  el.className = 'word';
+  el.className = 'word expandable';
   el.innerHTML =
     '<div class="word-main"><div class="word-term">' + esc(w.term) + '</div>' +
-    '<div class="word-meaning">' + esc(w.meaning || '—') + '</div></div>' +
+    '<div class="word-meaning">' + esc(w.meaning || '—') + '</div>' +
+    '<div class="word-text" hidden></div></div>' +
     '<span class="word-mastery" title="' + w.mastery + '">' + (MASTERY[w.mastery] || '🆕') + '</span>' +
     '<button class="star">' + (w.bookmarked ? '⭐' : '☆') + '</button>';
   const star = el.querySelector('.star');
   let on = w.bookmarked;
-  star.addEventListener('click', async () => {
+  star.addEventListener('click', async ev => {
+    ev.stopPropagation(); // the row itself toggles the detail view
     on = !on;
     star.textContent = on ? '⭐' : '☆';
     haptic('light');
     try { await api('/api/bookmark', { method: 'POST', body: JSON.stringify({ term: w.term, on }) }); }
     catch (e) { on = !on; star.textContent = on ? '⭐' : '☆'; hapticNotify('error'); }
+  });
+
+  // Tap the row to open the full word card (fetched once, then toggled).
+  const body = el.querySelector('.word-text');
+  let loaded = false;
+  el.addEventListener('click', async () => {
+    haptic('light');
+    if (loaded) { body.hidden = !body.hidden; return; }
+    loaded = true;
+    body.hidden = false;
+    body.textContent = 'Loading…';
+    try {
+      const card = await api('/api/vocab/card?term=' + encodeURIComponent(w.term));
+      body.textContent = card.text || card.meaning || 'No saved card for this word yet.';
+    } catch (e) {
+      loaded = false;
+      body.textContent = 'Could not load the card. Tap to retry.';
+    }
   });
   return el;
 }
@@ -282,25 +315,25 @@ const LIBRARY_EMPTY = {
   quiz: 'No quizzes answered yet. Send /quiz in the chat to play!',
 };
 
-// contentRow renders one Library item; tapping it expands the full card text.
+// contentRow renders one Library item; tapping it always opens the details
+// (full card text when the pool still has it, otherwise the full meaning).
 function contentRow(it) {
   const el = document.createElement('div');
-  el.className = 'word' + (it.text ? ' expandable' : '');
+  el.className = 'word expandable';
+  const detail = it.text || it.meaning || 'No saved card for this item.';
   const preview = it.meaning || (it.text ? it.text.slice(0, 90) : '—');
   el.innerHTML =
     '<div class="word-main"><div class="word-term">' + esc(it.term) + '</div>' +
     '<div class="word-meaning">' + esc(preview) + '</div>' +
-    (it.text ? '<div class="word-text" hidden>' + esc(it.text) + '</div>' : '') +
+    '<div class="word-text" hidden>' + esc(detail) + '</div>' +
     '</div>' +
     '<span class="word-date">' + esc(it.sent_at || '') + '</span>';
   const body = el.querySelector('.word-text');
-  if (body) {
-    el.addEventListener('click', () => {
-      haptic('light');
-      body.hidden = !body.hidden;
-      el.querySelector('.word-meaning').hidden = !body.hidden;
-    });
-  }
+  el.addEventListener('click', () => {
+    haptic('light');
+    body.hidden = !body.hidden;
+    el.querySelector('.word-meaning').hidden = !body.hidden;
+  });
   return el;
 }
 
@@ -476,43 +509,13 @@ function askDisplayName() {
 //   opts.doneText / opts.emptyText / opts.onProgress(remaining)
 // ---------------------------------------------------------------------------
 
-// Native bottom buttons (Bot API 7.10+) replace the in-page answer buttons.
-const SUCCESS_HEX = '#4CAF50', DANGER_HEX = '#f44336'; // mirror --success/--danger
-const nativeAnswerButtons = (() => {
-  try { return tg.isVersionAtLeast && tg.isVersionAtLeast('7.10') && !!tg.SecondaryButton; }
-  catch (e) { return false; }
-})();
-
-// Only one swipe session is live at a time; switching tabs/views tears the
-// previous one down so its native buttons can't leak onto other screens.
-let teardownSession = null;
-
+// Note: native MainButton/SecondaryButton were tried as answer buttons
+// (v1.26.0) and reverted — Telegram renders them below the webview, i.e.
+// under the fixed tab bar. The in-page buttons stay above the navigation.
 function createSwipeSession(container, opts) {
   let queue = [];
   let answered = 0, knownCount = 0;
   let finished = false;
-
-  if (teardownSession) teardownSession();
-  const onMain = () => commit(true, area.querySelector('.swipe-card'));
-  const onSecondary = () => commit(false, area.querySelector('.swipe-card'));
-  let buttonsShown = false;
-  function showNativeButtons(on) {
-    // Idempotent: showCard() runs once per card and onClick must not stack.
-    if (!nativeAnswerButtons || on === buttonsShown) return;
-    buttonsShown = on;
-    try {
-      if (on) {
-        tg.MainButton.setParams({ text: '✅ Knew it', color: SUCCESS_HEX, text_color: '#ffffff', is_visible: true, is_active: true });
-        tg.SecondaryButton.setParams({ text: '❌ Forgot', color: DANGER_HEX, text_color: '#ffffff', position: 'left', is_visible: true, is_active: true });
-        tg.MainButton.onClick(onMain);
-        tg.SecondaryButton.onClick(onSecondary);
-      } else {
-        tg.MainButton.offClick(onMain); tg.MainButton.hide();
-        tg.SecondaryButton.offClick(onSecondary); tg.SecondaryButton.hide();
-      }
-    } catch (e) { /* ignore */ }
-  }
-  teardownSession = () => { showNativeButtons(false); teardownSession = null; };
   container.innerHTML =
     '<div class="swipe-area"></div>' +
     '<div class="swipe-actions">' +
@@ -526,7 +529,6 @@ function createSwipeSession(container, opts) {
   function finish(msg) {
     finished = true;
     setCloseGuard(false);
-    showNativeButtons(false);
     let summary = '';
     if (answered > 0) {
       hapticNotify('success');
@@ -542,8 +544,7 @@ function createSwipeSession(container, opts) {
   function showCard() {
     if (!queue.length) { finish(opts.doneText || 'All done for now!'); return; }
     finished = false;
-    showNativeButtons(true);
-    actions.style.display = nativeAnswerButtons ? 'none' : 'flex';
+    actions.style.display = 'flex';
     const card = queue[0];
     progress.textContent = queue.length + ' card' + (queue.length === 1 ? '' : 's') + ' left';
     if (opts.onProgress) opts.onProgress(queue.length);
@@ -707,13 +708,127 @@ function backToDecks() { closeDeck(); loadDecks(); }
 
 function closeDeck(silent) {
   decksStudy.hidden = true;
+  decksPractice.hidden = true;
   decksHome.hidden = false;
-  if (teardownSession) teardownSession();
   setSwipeGuard(false);
   setCloseGuard(false);
   tg.BackButton.hide();
-  if (!silent) tg.BackButton.offClick(backToDecks);
+  if (!silent) {
+    tg.BackButton.offClick(backToDecks);
+    tg.BackButton.offClick(backFromPractice);
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Practice — on-demand quiz / word / idiom / collocation (Decks tab)
+// ---------------------------------------------------------------------------
+const decksPractice = document.getElementById('decks-practice');
+const practiceBody = document.getElementById('practice-body');
+const PRACTICE_TITLES = {
+  quiz: '🧩 Quiz', word: '📘 New word', idiom: '💬 Idiom', collocation: '🔗 Collocation',
+};
+
+function backFromPractice() { closeDeck(); loadDecks(); }
+
+function openPractice(kind) {
+  decksHome.hidden = true;
+  decksStudy.hidden = true;
+  decksPractice.hidden = false;
+  document.getElementById('practice-title').textContent = PRACTICE_TITLES[kind] || 'Practice';
+  haptic('light');
+  tg.BackButton.show();
+  tg.BackButton.onClick(backFromPractice);
+  if (kind === 'quiz') loadQuizQuestion({ asked: 0, right: 0 });
+  else loadPracticeCard(kind);
+}
+
+async function loadPracticeCard(kind) {
+  practiceBody.innerHTML = skeletonCards(1);
+  let data;
+  try { data = await api('/api/practice?kind=' + kind); }
+  catch (e) {
+    practiceBody.innerHTML = '<p class="empty">' +
+      (String(e).includes('429') ? 'Easy there! You\'ve hit the hourly practice limit — come back in a bit.'
+                                 : 'Could not load. Try again later.') + '</p>';
+    return;
+  }
+  if (!data.available) {
+    practiceBody.innerHTML = '<p class="empty">Nothing in the pool for your level yet — try again later.</p>';
+    return;
+  }
+  practiceBody.innerHTML =
+    '<div class="card"><div class="word-term" style="font-size:22px">' + esc(data.term) + '</div>' +
+    '<div class="practice-text" style="margin-top:10px">' + esc(data.text) + '</div></div>' +
+    '<div class="chips"><button class="chip chip-on" id="practice-more">🔄 Another one</button></div>';
+  document.getElementById('practice-more').addEventListener('click', () => {
+    hapticSelect();
+    loadPracticeCard(kind);
+  });
+}
+
+async function loadQuizQuestion(score) {
+  practiceBody.innerHTML = skeletonCards(1);
+  let q;
+  try { q = await api('/api/quiz/next'); }
+  catch (e) {
+    practiceBody.innerHTML = '<p class="empty">' +
+      (String(e).includes('429') ? 'Easy there! You\'ve hit the hourly limit — come back in a bit.'
+                                 : 'Could not load a question. Try again later.') + '</p>';
+    return;
+  }
+  if (!q.available) {
+    practiceBody.innerHTML = '<p class="empty">Not enough learned words for a quiz yet. Send /word in the chat to get started!</p>';
+    return;
+  }
+
+  let html = '<div class="card"><div class="practice-text">' + esc(q.prompt) + '</div>' +
+    '<div class="quiz-opts">';
+  q.options.forEach((opt, i) => {
+    html += '<button class="quiz-opt" data-i="' + i + '">' + esc(opt) + '</button>';
+  });
+  html += '</div></div>';
+  if (score.asked > 0) {
+    html += '<div class="quiz-score">Session: ' + score.right + ' / ' + score.asked + ' correct</div>';
+  }
+  practiceBody.innerHTML = html;
+
+  const buttons = practiceBody.querySelectorAll('.quiz-opt');
+  buttons.forEach(btn => btn.addEventListener('click', async () => {
+    buttons.forEach(b => { b.disabled = true; });
+    const answer = parseInt(btn.dataset.i, 10);
+    let res;
+    try {
+      res = await api('/api/quiz/answer', {
+        method: 'POST',
+        body: JSON.stringify({ word: q.word, correct: q.correct, exp: q.exp, token: q.token, answer }),
+      });
+    } catch (e) {
+      buttons.forEach(b => { b.disabled = false; });
+      hapticNotify('error');
+      return;
+    }
+    hapticNotify(res.correct ? 'success' : 'error');
+    btn.classList.add(res.correct ? 'correct' : 'wrong');
+    if (!res.correct) buttons[q.correct].classList.add('correct');
+    score.asked++;
+    if (res.correct) score.right++;
+
+    const next = document.createElement('div');
+    next.className = 'chips';
+    next.style.marginTop = '14px';
+    next.innerHTML = '<button class="chip chip-on">' +
+      (res.correct ? '🎉 Next question' : '➡️ Next question') + '</button>';
+    next.querySelector('button').addEventListener('click', () => {
+      hapticSelect();
+      loadQuizQuestion(score);
+    });
+    practiceBody.appendChild(next);
+  }));
+}
+
+document.querySelectorAll('[data-practice]').forEach(c => {
+  c.addEventListener('click', () => { hapticSelect(); openPractice(c.dataset.practice); });
+});
 
 // ---------------------------------------------------------------------------
 // Settings (opened via Telegram's native Settings button)
@@ -805,7 +920,6 @@ function toggleHTML(key, on) {
 }
 
 async function openSettings() {
-  if (teardownSession) teardownSession(); // hide native session buttons
   settingsReturnView = currentView;
   document.querySelectorAll('.view').forEach(v => { v.hidden = true; });
   views.settings.hidden = false;

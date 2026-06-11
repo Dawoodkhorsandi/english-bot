@@ -50,13 +50,26 @@
 
   <section class="view" id="view-decks" hidden>
     <div id="decks-home">
-      <h1>📚 Word Decks</h1>
+      <h1>📚 Study</h1>
+      <div class="card">
+        <h2>Practice now</h2>
+        <div class="chips" style="margin:10px 0 0">
+          <button class="chip" data-practice="quiz">🧩 Quiz</button>
+          <button class="chip" data-practice="word">📘 New word</button>
+          <button class="chip" data-practice="idiom">💬 Idiom</button>
+          <button class="chip" data-practice="collocation">🔗 Collocation</button>
+        </div>
+      </div>
       <div id="decks-list" class="list"></div>
       <p id="decks-empty" class="empty" hidden></p>
     </div>
     <div id="decks-study" hidden>
       <h1 id="decks-study-title"></h1>
       <div id="decks-swipe"></div>
+    </div>
+    <div id="decks-practice" hidden>
+      <h1 id="practice-title"></h1>
+      <div id="practice-body"></div>
     </div>
   </section>
 

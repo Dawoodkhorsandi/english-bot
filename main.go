@@ -340,6 +340,19 @@ var Changelogs = []ChangelogEntry{
 			"• 📣 Share-my-streak button (t.me/share deep link) at a 3-day streak\n" +
 			"• Add-to-home-screen offer at a 7-day streak (Bot API 8.0+, asked once via CloudStorage)",
 	},
+	{
+		Version: "1.29.0",
+		Text: "📣 <b>What's New in v1.29.0</b>\n\n" +
+			"🚀 <b>The Mini App got a huge upgrade!</b> Tap the menu button (or send /app) and explore:\n\n" +
+			"🧩 <b>Practice anytime</b> — play quizzes and grab fresh words, idioms and collocations right inside the app, no waiting for scheduled sends\n" +
+			"📖 <b>Your Library</b> — every idiom, collocation, story, tip and quiz you've ever received, searchable and re-readable with one tap\n" +
+			"🟩 <b>Activity heatmap</b> — a GitHub-style calendar of your last 4 months; the more you learn in a day, the deeper the green\n" +
+			"🎯 <b>Smarter reviews</b> — sessions end with a progress ring and your known/forgot score, and a stray swipe can't lose your progress anymore\n" +
+			"🏆 <b>Fresh leaderboard</b> — real profile photos, plus a new 📅 This-week ranking so newcomers can compete too\n" +
+			"📣 <b>Share your streak</b> — show off your learning streak to friends with one tap\n" +
+			"📱 <b>One tap away</b> — keep a 7-day streak and we'll offer to put the app on your home screen\n\n" +
+			"…plus a faster, smoother feel everywhere: native haptics, skeleton loading, and full dark-mode theming. Happy learning! 🎉",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the

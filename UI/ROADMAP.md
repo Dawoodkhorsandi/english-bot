@@ -67,7 +67,7 @@ updated.
 | Share-streak at a 3-day streak — shipped via the universal `t.me/share` deep link instead of `shareToStory` (which needs a hosted media asset; moved to backlog) | `webapp/app.js` | M |
 | `addToHomeScreen()` prompt at a 7-day streak (`checkHomeScreenStatus` first, once per user via `CloudStorage`) | `webapp/app.js` | S |
 
-## Phase 5 — On-demand practice in-app
+## Phase 5 — On-demand practice in-app (✅ shipped v1.29.0; practice is pool-only — `/api/practice` never generates with AI)
 
 Biggest backend lift; brings chat-only features (`/quiz`, `/word`, `/idiom`,
 `/collocation`) into the app.

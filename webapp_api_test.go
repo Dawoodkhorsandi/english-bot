@@ -528,3 +528,122 @@ func TestAPILeaderboardWeeklyAndAvatar(t *testing.T) {
 		t.Errorf("bogus metric = %q, want words (err %v)", resp.Metric, err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// On-demand practice + in-app quiz
+// ---------------------------------------------------------------------------
+
+func TestAPIPracticeServesAndRecords(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const chatID = 555
+
+	if err := store.AddToPool(kindIdiom, defaultLevel, "hit the books",
+		"to study hard", "💬 <b>hit the books</b>\nTo study hard."); err != nil {
+		t.Fatalf("AddToPool: %v", err)
+	}
+
+	w := apiCall(store, handleAPIPractice, http.MethodGet, "/api/practice?kind=idiom", chatID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d (%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Available bool   `json:"available"`
+		Term      string `json:"term"`
+		Text      string `json:"text"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp.Available || resp.Term != "hit the books" {
+		t.Fatalf("resp = %+v, want available hit the books", resp)
+	}
+	if strings.Contains(resp.Text, "<") {
+		t.Errorf("text should be HTML-stripped, got %q", resp.Text)
+	}
+	// The serve was recorded to the per-user history (Library sees it).
+	if n := store.ContentHistoryCount(chatID, kindIdiom); n != 1 {
+		t.Errorf("ContentHistoryCount = %d, want 1", n)
+	}
+
+	// Kinds outside the whitelist are rejected.
+	for _, kind := range []string{"story", "tip", "drill", ""} {
+		if w := apiCall(store, handleAPIPractice, http.MethodGet, "/api/practice?kind="+kind, chatID, ""); w.Code != http.StatusBadRequest {
+			t.Errorf("kind %q code = %d, want 400", kind, w.Code)
+		}
+	}
+
+	// Empty pool for the level → graceful available=false.
+	w = apiCall(store, handleAPIPractice, http.MethodGet, "/api/practice?kind=collocation", chatID, "")
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp.Available {
+		t.Errorf("empty pool resp = %+v (err %v), want available=false", resp, err)
+	}
+}
+
+func TestAPIQuizNextAndAnswer(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const chatID = 556
+
+	// One learned word + enough pooled distractors with meanings.
+	words := map[string]string{
+		"serene": "calm and peaceful", "arduous": "very difficult",
+		"candid": "honest and direct", "frugal": "careful with money",
+		"vivid": "very bright", "tepid": "slightly warm",
+	}
+	for term, meaning := range words {
+		if err := store.AddToPool(kindWord, defaultLevel, term, meaning, "card "+term); err != nil {
+			t.Fatalf("AddToPool: %v", err)
+		}
+	}
+	if err := store.RecordSentVocab(chatID, "serene"); err != nil {
+		t.Fatalf("RecordSentVocab: %v", err)
+	}
+
+	w := apiCall(store, handleAPIQuizNext, http.MethodGet, "/api/quiz/next", chatID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("next code = %d (%s)", w.Code, w.Body.String())
+	}
+	var q struct {
+		Available bool     `json:"available"`
+		Prompt    string   `json:"prompt"`
+		Options   []string `json:"options"`
+		Word      string   `json:"word"`
+		Correct   int      `json:"correct"`
+		Exp       int64    `json:"exp"`
+		Token     string   `json:"token"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &q); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !q.Available || len(q.Options) != quizOptionCount || q.Token == "" {
+		t.Fatalf("question = %+v, want available with %d options and a token", q, quizOptionCount)
+	}
+	if strings.Contains(q.Prompt, "<b>") {
+		t.Errorf("prompt should be HTML-stripped, got %q", q.Prompt)
+	}
+
+	// Correct answer is recorded as correct.
+	body := fmt.Sprintf(`{"word":%q,"correct":%d,"exp":%d,"token":%q,"answer":%d}`,
+		q.Word, q.Correct, q.Exp, q.Token, q.Correct)
+	w = apiCall(store, handleAPIQuizAnswer, http.MethodPost, "/api/quiz/answer", chatID, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("answer code = %d (%s)", w.Code, w.Body.String())
+	}
+	var res struct {
+		Correct bool `json:"correct"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || !res.Correct {
+		t.Errorf("answer result = %+v (err %v), want correct=true", res, err)
+	}
+	if answered, correct, _ := store.QuizStats(chatID); answered != 1 || correct != 1 {
+		t.Errorf("QuizStats = %d/%d, want 1/1", correct, answered)
+	}
+
+	// A tampered token (e.g. claiming a different correct index) is rejected.
+	tampered := fmt.Sprintf(`{"word":%q,"correct":%d,"exp":%d,"token":%q,"answer":0}`,
+		q.Word, (q.Correct+1)%quizOptionCount, q.Exp, q.Token)
+	if w := apiCall(store, handleAPIQuizAnswer, http.MethodPost, "/api/quiz/answer", chatID, tampered); w.Code != http.StatusBadRequest {
+		t.Errorf("tampered token code = %d, want 400", w.Code)
+	}
+}

@@ -154,9 +154,13 @@ func (s *Store) AdminUserDetail(chatID int64) (AdminUserDetail, error) {
 		chatID, time.Now().UTC().Format("2006-01-02 15:04:05")).Scan(&d.DueReviews)
 
 	// Activity / streaks
-	days, err := s.activityDays(chatID)
+	counts, err := s.activityDays(chatID)
 	if err == nil {
-		d.ActiveDays = len(days)
+		d.ActiveDays = len(counts)
+		days := make(map[string]bool, len(counts))
+		for day := range counts {
+			days[day] = true
+		}
 		d.CurrentStreak, d.LongestStreak = computeStreaks(days, time.Now().In(appLocation))
 	}
 

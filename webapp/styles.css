@@ -62,9 +62,19 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
   gap: 3px; margin-top: 10px;
 }
 .heat-cell { aspect-ratio: 1; border-radius: 2.5px; background: var(--border); }
-.heat-cell.on { background: var(--accent); }
+/* GitHub-style intensity: deeper accent = more activity that day. */
+.heat-cell.l1 { background: var(--accent); opacity: .3; }
+.heat-cell.l2 { background: var(--accent); opacity: .55; }
+.heat-cell.l3 { background: var(--accent); opacity: .8; }
+.heat-cell.l4 { background: var(--accent); opacity: 1; }
 .heat-cell.today { outline: 1.5px solid var(--accent); outline-offset: 1px; }
 .heat-cell.future { visibility: hidden; }
+.heat-legend {
+  display: flex; align-items: center; gap: 4px; justify-content: flex-end;
+  margin-top: 8px; font-size: 11px; color: var(--hint);
+}
+.heat-legend .heat-cell { display: inline-block; width: 10px; height: 10px; }
+.heat-legend span { margin: 0 2px; }
 
 /* ---- Session completion ---- */
 .ring-wrap { display: flex; align-items: center; gap: 16px; margin-top: 6px; }
@@ -159,6 +169,18 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 .swipe-btn.forgot { background: var(--danger); }
 .swipe-btn.known { background: var(--success); }
 .swipe-progress { text-align: center; color: var(--hint); font-size: 13px; margin-top: 14px; }
+
+/* ---- Practice (on-demand cards + in-app quiz) ---- */
+.practice-text { font-size: 16px; line-height: 1.6; white-space: pre-line; }
+.quiz-opts { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.quiz-opt {
+  border: none; border-radius: 12px; padding: 13px 14px; font-size: 15px;
+  background: var(--card); color: var(--text); text-align: left; cursor: pointer;
+}
+.quiz-opt.correct { background: var(--success); color: #fff; }
+.quiz-opt.wrong { background: var(--danger); color: #fff; }
+.quiz-opt:disabled { cursor: default; }
+.quiz-score { text-align: center; color: var(--hint); font-size: 13px; margin-top: 12px; }
 
 /* ---- Settings ---- */
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 15px; }
