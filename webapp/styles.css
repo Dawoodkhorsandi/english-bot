@@ -56,6 +56,12 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 .bar-wrap { background: var(--border); border-radius: 6px; height: 8px; margin-top: 10px; overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 6px; transition: width .4s ease; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* ---- Stat tiles (Library breakdown on the dashboard) ---- */
+.stat-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 6px; }
+.stat-tile { text-align: center; }
+.stat-emoji { font-size: 22px; line-height: 1.2; }
+.stat-n { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.stat-tile .sub { margin-top: 2px; }
 /* ---- Activity heatmap (GitHub-style, columns = weeks) ---- */
 .heatmap {
   display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr);

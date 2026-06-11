@@ -143,6 +143,20 @@ function renderDashboard(s) {
     '<div class="card"><h2>Drills</h2><div class="big">' + s.verbs + '</div></div>' +
     '</div>';
 
+  // Library content received, by kind. Only shown once there's anything to show.
+  const lib = [
+    { emoji: '💬', label: 'Idioms', n: s.idioms || 0 },
+    { emoji: '🔗', label: 'Collocations', n: s.collocations || 0 },
+    { emoji: '📖', label: 'Stories', n: s.stories || 0 },
+    { emoji: '💡', label: 'Tips', n: s.tips || 0 },
+  ];
+  if (lib.some(k => k.n > 0)) {
+    html += '<div class="card"><h2>Library</h2><div class="stat-tiles">' +
+      lib.map(k => '<div class="stat-tile"><div class="stat-emoji">' + k.emoji + '</div>' +
+        '<div class="stat-n">' + k.n + '</div><div class="sub">' + k.label + '</div></div>').join('') +
+      '</div></div>';
+  }
+
   if (s.quiz_answered > 0) {
     html += '<div class="card"><h2>Quiz accuracy</h2>' +
       '<div class="big">' + s.quiz_pct + '%</div>' +
@@ -564,9 +578,15 @@ function createSwipeSession(container, opts) {
     const back = el.querySelector('.swipe-back');
     const hint = el.querySelector('.swipe-hint');
     let revealed = false;
-    function reveal() { revealed = true; front.hidden = true; back.hidden = false; hint.textContent = 'Swipe → knew it · ← forgot'; }
-    // A tap reveals the back; a drag must not. `moved` tells them apart.
-    el.addEventListener('click', () => { if (!revealed && !moved) reveal(); });
+    // Tap flips the card: front (word) ⇄ back (meaning). A drag must not flip —
+    // `moved` tells a tap from a swipe.
+    function flip() {
+      revealed = !revealed;
+      front.hidden = revealed;
+      back.hidden = !revealed;
+      hint.textContent = (revealed ? 'Tap to hide' : 'Tap to reveal') + ' · swipe → knew it · ← forgot';
+    }
+    el.addEventListener('click', () => { if (!moved) flip(); });
 
     // Drag to swipe.
     let startX = 0, dx = 0, dragging = false, moved = false;

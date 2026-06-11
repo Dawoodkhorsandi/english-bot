@@ -97,6 +97,7 @@ factory in `app.js` where one exists.
 | Card | `.card`, `.card h2`, `.big`, `.sub` | Section header `h2` is 13px uppercase hint-colored |
 | Progress bar | `.bar-wrap` / `.bar-fill`; `bar(pct, colour)` | Width transition .4s; colour param should be a token |
 | Stat grid | `.grid` | 2-column |
+| Stat tiles | `.stat-tiles` / `.stat-tile` / `.stat-emoji` / `.stat-n` | 4-up emoji+count tiles; Library breakdown on the dashboard, shown only when any kind > 0 (✅ v1.29.2) |
 | Activity heatmap | `.heatmap` / `.heat-cell` (+`.l1`–`.l4`, `.today`, `.future`), `.heat-legend`; `heatmapHTML(counts)`, `heatLevel(n)` | 17×7 CSS grid; GitHub-style intensity from `activity_counts` (1/3/6/10+ thresholds) with Less→More legend (✅ v1.29.0) |
 | Chips | `.chips` / `.chip` / `.chip-on` | Filter + action duty; active = accent |
 | Search | `.search` | Debounce input 250ms |
@@ -123,8 +124,9 @@ Contract (`opts`): `load() → Promise<[{front, back, …}]>` ·
 `onAnswer(card, known) → Promise` · `doneText` · `emptyText` ·
 `onProgress(remaining)`.
 
-Interaction constants: drag >6px distinguishes drag from tap-to-reveal ·
-commit at |dx| > 90px · 180ms advance to next card · stamps fade in over 80px.
+Interaction constants: drag >6px distinguishes drag from a tap · a tap flips the
+card both ways (front⇄back, ✅ v1.29.2) · commit at |dx| > 90px · 180ms advance
+to next card · stamps fade in over 80px.
 
 Answers re-queue once on POST failure (✅ v1.25.0). Sessions end on a
 completion screen with a progress ring and known/forgot counts (✅ v1.26.0).
@@ -141,7 +143,7 @@ deck study is a `BackButton` drill-down inside the Decks tab.
 
 | Screen | Data | Layout | Target additions (`GAP`) |
 |---|---|---|---|
-| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Quiz accuracy (if answered>0) → 30-day activity → Level | ✅ heatmap (v1.26.0), share-streak + home-screen offer (v1.28.0) |
+| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → Streak card+bar → 2-col grid (Words/Drills) → Library tiles (idioms/collocations/stories/tips, if any) → Quiz accuracy (if answered>0) → 30-day activity → Level | ✅ heatmap (v1.26.0), share-streak + home-screen offer (v1.28.0), Library tiles (v1.29.2) |
 | **Library** `#view-vocab` | `GET /api/vocab` (words/bookmarks), `GET /api/content?kind=` (idiom/collocation/story/tip), `GET /api/quizzes` | Search (words only) → kind chips → list → Load more; content rows expand in place (`contentRow`), quiz rows show ✅/❌ + date (`quizRow`) | `GAP`: result count while searching |
 | **Decks** `#view-decks` | `GET /api/decks`(+`/study`,`/swipe`), `GET /api/practice?kind=`, `GET /api/quiz/next` + `POST /api/quiz/answer` | Practice-now card (quiz/word/idiom/collocation chips → BackButton drill-down) → deck cards → swipe session | ✅ practice hub v1.29.0 |
 | **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap | ✅ native buttons + completion screen (v1.26.0) |

@@ -398,6 +398,43 @@ func TestAPISettingsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAPIStatsContentKinds verifies the dashboard payload reports per-kind
+// Library counts (idioms / collocations / stories / tips).
+func TestAPIStatsContentKinds(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+
+	if err := store.RecordSentIdiom(100, "break the ice"); err != nil {
+		t.Fatalf("idiom: %v", err)
+	}
+	if err := store.RecordSentCollocation(100, "make a decision"); err != nil {
+		t.Fatalf("collocation: %v", err)
+	}
+	if err := store.RecordSentStory(100, "The Lost Key"); err != nil {
+		t.Fatalf("story: %v", err)
+	}
+	if err := store.RecordSentTip(100, "present perfect"); err != nil {
+		t.Fatalf("tip: %v", err)
+	}
+
+	w := apiCall(store, handleAPIStats, http.MethodGet, "/api/stats", 100, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("stats code = %d", w.Code)
+	}
+	var resp struct {
+		Idioms       int `json:"idioms"`
+		Collocations int `json:"collocations"`
+		Stories      int `json:"stories"`
+		Tips         int `json:"tips"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Idioms != 1 || resp.Collocations != 1 || resp.Stories != 1 || resp.Tips != 1 {
+		t.Errorf("content counts = %+v, want all 1", resp)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Library (content history + quiz history)
 // ---------------------------------------------------------------------------
