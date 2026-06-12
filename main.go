@@ -19,6 +19,7 @@ import (
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/content"
 	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 	_ "modernc.org/sqlite"
 )
@@ -1033,7 +1034,7 @@ func handleWordLookup(ctx context.Context, chain *ai.ProviderChain, store *Store
 	_ = notifier.Send(chatID, "🔄 <b>Looking that up...</b>")
 
 	level := store.GetLevel(chatID)
-	card, word, meaning, provider, err := generateWordFor(ctx, chain, level, term)
+	card, word, meaning, provider, err := content.GenerateWordFor(ctx, chain, level, term)
 	if err != nil {
 		log.Printf("❌ [LOOKUP_ERR] Generation failed for ChatID %d term %q: %v", chatID, term, err)
 		_ = notifier.Send(chatID, "❌ Sorry, I couldn't look that up right now. Please try again.")
@@ -2853,15 +2854,15 @@ func handleReviewCallback(store *Store, notifier telegram.Notifier, cb *telegram
 // navigation buttons (Change N). When the drill is a single page (e.g. legacy
 // content that can't be parsed into forms) it falls back to a plain send.
 func sendDrill(notifier telegram.Notifier, chatID int64, fullText string) error {
-	verb := parseVerb(fullText)
+	verb := content.ParseVerb(fullText)
 	if verb == "" {
 		// Cannot paginate without a verb — the callback handler needs it to
 		// reload the drill from the pool. Send the full text as a single message.
-		log.Printf("⚠️  [DRILL] parseVerb returned empty for chat %d; sending un-paged.", chatID)
+		log.Printf("⚠️  [DRILL] content.ParseVerb returned empty for chat %d; sending un-paged.", chatID)
 		return notifier.Send(chatID, fullText)
 	}
-	text, total := renderDrillPage(fullText, 1)
-	kb := drillNavKeyboard(verb, 1, total)
+	text, total := content.RenderDrillPage(fullText, 1)
+	kb := content.DrillNavKeyboard(verb, 1, total)
 	if len(kb) == 0 {
 		return notifier.Send(chatID, text)
 	}
@@ -2896,10 +2897,10 @@ func handleDrillCallback(store *Store, notifier telegram.Notifier, cb *telegram.
 		return
 	}
 
-	text, total := renderDrillPage(fullText, page)
+	text, total := content.RenderDrillPage(fullText, page)
 	_ = notifier.AnswerCallback(cb.ID, "")
 	if cb.Message != nil {
-		if err := notifier.EditMessage(chatID, cb.Message.MessageID, text, drillNavKeyboard(term, page, total)); err != nil {
+		if err := notifier.EditMessage(chatID, cb.Message.MessageID, text, content.DrillNavKeyboard(term, page, total)); err != nil {
 			log.Printf("⚠️  [DRILL] EditMessage failed for chat %d msg %d page %d term %q: %v", chatID, cb.Message.MessageID, page, term, err)
 		}
 	}

@@ -1,4 +1,4 @@
-package main
+package content
 
 import (
 	"fmt"
@@ -21,8 +21,22 @@ func sampleDrill(n int) string {
 	return b.String()
 }
 
+func TestStoryLevelInstructionPerLevel(t *testing.T) {
+	seen := map[string]bool{}
+	for _, level := range config.AllLevels {
+		instr := storyLevelInstruction(level)
+		if instr == "" {
+			t.Errorf("empty story instruction for level %q", level)
+		}
+		if seen[instr] {
+			t.Errorf("duplicate story instruction for level %q", level)
+		}
+		seen[instr] = true
+	}
+}
+
 // ---------------------------------------------------------------------------
-// parseVerb
+// ParseVerb
 // ---------------------------------------------------------------------------
 
 func TestParseVerb(t *testing.T) {
@@ -58,15 +72,15 @@ func TestParseVerb(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseVerb(tt.input); got != tt.want {
-				t.Errorf("parseVerb() = %q, want %q", got, tt.want)
+			if got := ParseVerb(tt.input); got != tt.want {
+				t.Errorf("ParseVerb() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
 // ---------------------------------------------------------------------------
-// parseWord
+// ParseWord
 // ---------------------------------------------------------------------------
 
 func TestParseWord(t *testing.T) {
@@ -97,8 +111,8 @@ Too long, slow, or dull; tiresome or monotonous.`,
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseWord(tt.input); got != tt.want {
-				t.Errorf("parseWord() = %q, want %q", got, tt.want)
+			if got := ParseWord(tt.input); got != tt.want {
+				t.Errorf("ParseWord() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -209,7 +223,7 @@ Too long, slow, or dull; tiresome or monotonous.
 }
 
 // ---------------------------------------------------------------------------
-// stripHTMLTags
+// StripHTMLTags
 // ---------------------------------------------------------------------------
 
 func TestStripHTMLTags(t *testing.T) {
@@ -227,8 +241,8 @@ func TestStripHTMLTags(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := stripHTMLTags(tt.input); got != tt.want {
-				t.Errorf("stripHTMLTags() = %q, want %q", got, tt.want)
+			if got := StripHTMLTags(tt.input); got != tt.want {
+				t.Errorf("StripHTMLTags() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -375,7 +389,7 @@ func TestBuildWordPrompt(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// buildIdiomPrompt / parseIdiom
+// buildIdiomPrompt / ParseIdiom
 // ---------------------------------------------------------------------------
 
 func TestBuildIdiomPrompt(t *testing.T) {
@@ -433,8 +447,8 @@ To start a conversation in a relaxed way.`,
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseIdiom(tt.input); got != tt.want {
-				t.Errorf("parseIdiom() = %q, want %q", got, tt.want)
+			if got := ParseIdiom(tt.input); got != tt.want {
+				t.Errorf("ParseIdiom() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -615,7 +629,7 @@ func TestPaginateDrillItemsOverflow(t *testing.T) {
 func TestRenderDrillPage(t *testing.T) {
 	drill := sampleDrill(21)
 
-	page1, total := renderDrillPage(drill, 1)
+	page1, total := RenderDrillPage(drill, 1)
 	if total != 5 {
 		t.Errorf("total pages = %d, want 5", total)
 	}
@@ -632,36 +646,36 @@ func TestRenderDrillPage(t *testing.T) {
 		t.Error("page 1 should repeat the footer tip")
 	}
 
-	page3, _ := renderDrillPage(drill, 3)
+	page3, _ := RenderDrillPage(drill, 3)
 	if !strings.Contains(page3, "More Past and Future") || !strings.Contains(page3, "9. Form 9") {
 		t.Errorf("page 3 wrong, got %q", page3)
 	}
 
 	// Out-of-range page clamps to the last page.
-	clamped, _ := renderDrillPage(drill, 99)
+	clamped, _ := RenderDrillPage(drill, 99)
 	if !strings.Contains(clamped, "Page 5/5") || !strings.Contains(clamped, "21. Form 21") {
 		t.Errorf("out-of-range page should clamp to last, got %q", clamped)
 	}
 }
 
 func TestRenderDrillPageUnparseable(t *testing.T) {
-	text, total := renderDrillPage("no forms here", 2)
+	text, total := RenderDrillPage("no forms here", 2)
 	if total != 1 || text != "no forms here" {
 		t.Errorf("unparseable drill should be a single verbatim page, got total=%d text=%q", total, text)
 	}
 }
 
 func TestDrillNavKeyboard(t *testing.T) {
-	if kb := drillNavKeyboard("walk", 1, 1); kb != nil {
+	if kb := DrillNavKeyboard("walk", 1, 1); kb != nil {
 		t.Error("single page should have no navigation keyboard")
 	}
 
-	first := drillNavKeyboard("walk", 1, 5)
+	first := DrillNavKeyboard("walk", 1, 5)
 	if len(first[0]) != 2 || first[0][1].CallbackData != "drill:2:walk" {
 		t.Errorf("page 1/5 should have indicator + Next(drill:2:walk), got %+v", first[0])
 	}
 
-	mid := drillNavKeyboard("walk", 3, 5)
+	mid := DrillNavKeyboard("walk", 3, 5)
 	if len(mid[0]) != 3 {
 		t.Fatalf("middle page should have Back + indicator + Next, got %d buttons", len(mid[0]))
 	}
@@ -669,7 +683,7 @@ func TestDrillNavKeyboard(t *testing.T) {
 		t.Errorf("middle nav callbacks wrong, got %+v", mid[0])
 	}
 
-	last := drillNavKeyboard("walk", 5, 5)
+	last := DrillNavKeyboard("walk", 5, 5)
 	if len(last[0]) != 2 || last[0][0].CallbackData != "drill:4:walk" {
 		t.Errorf("page 5/5 should have Back(drill:4:walk) + indicator, got %+v", last[0])
 	}

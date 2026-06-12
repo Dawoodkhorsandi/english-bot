@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/content"
 	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
@@ -16,67 +17,53 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBuildCollocationPromptExclusion(t *testing.T) {
-	p := buildCollocationPrompt(config.DefaultLevel, nil)
+	p := content.BuildCollocationPrompt(config.DefaultLevel, nil)
 	if strings.Contains(p, "Do NOT use") {
 		t.Error("prompt without exclusions should not contain an exclusion clause")
 	}
-	p = buildCollocationPrompt(config.DefaultLevel, []string{"make a decision", "heavy rain"})
+	p = content.BuildCollocationPrompt(config.DefaultLevel, []string{"make a decision", "heavy rain"})
 	if !strings.Contains(p, "make a decision, heavy rain") {
 		t.Errorf("prompt should list excluded collocations, got %q", p)
 	}
 }
 
 func TestBuildStoryPromptExclusion(t *testing.T) {
-	p := buildStoryPrompt(config.DefaultLevel, nil)
+	p := content.BuildStoryPrompt(config.DefaultLevel, nil)
 	if strings.Contains(p, "Do NOT reuse") {
 		t.Error("prompt without exclusions should not contain an exclusion clause")
 	}
-	p = buildStoryPrompt(config.DefaultLevel, []string{"the lost ticket"})
+	p = content.BuildStoryPrompt(config.DefaultLevel, []string{"the lost ticket"})
 	if !strings.Contains(p, "the lost ticket") {
 		t.Errorf("prompt should list excluded story titles, got %q", p)
 	}
 }
 
-func TestStoryLevelInstructionPerLevel(t *testing.T) {
-	seen := map[string]bool{}
-	for _, level := range config.AllLevels {
-		instr := storyLevelInstruction(level)
-		if instr == "" {
-			t.Errorf("empty story instruction for level %q", level)
-		}
-		if seen[instr] {
-			t.Errorf("duplicate story instruction for level %q", level)
-		}
-		seen[instr] = true
-	}
-}
-
 func TestParseCollocation(t *testing.T) {
 	card := "🔗 <b>Collocation of the Day: Make a Decision</b>\n————\n\n💬 <b>Meaning</b>\nTo choose something."
-	if got := parseCollocation(card); got != "make a decision" {
-		t.Errorf("parseCollocation = %q, want %q", got, "make a decision")
+	if got := content.ParseCollocation(card); got != "make a decision" {
+		t.Errorf("content.ParseCollocation = %q, want %q", got, "make a decision")
 	}
-	if got := parseCollocation("no labeled line here"); got != "" {
-		t.Errorf("parseCollocation on unlabeled text = %q, want empty", got)
+	if got := content.ParseCollocation("no labeled line here"); got != "" {
+		t.Errorf("content.ParseCollocation on unlabeled text = %q, want empty", got)
 	}
 }
 
 func TestParseStoryTitle(t *testing.T) {
 	card := "📖 <b>Mini Story: The Lost Ticket</b>\n————\n\nSam was late."
-	if got := parseStoryTitle(card); got != "the lost ticket" {
-		t.Errorf("parseStoryTitle = %q, want %q", got, "the lost ticket")
+	if got := content.ParseStoryTitle(card); got != "the lost ticket" {
+		t.Errorf("content.ParseStoryTitle = %q, want %q", got, "the lost ticket")
 	}
-	if got := parseStoryTitle("just a story with no header"); got != "" {
-		t.Errorf("parseStoryTitle on unlabeled text = %q, want empty", got)
+	if got := content.ParseStoryTitle("just a story with no header"); got != "" {
+		t.Errorf("content.ParseStoryTitle on unlabeled text = %q, want empty", got)
 	}
 }
 
-// parseIdiom delegates to the shared phrase parser; make sure the refactor
+// content.ParseIdiom delegates to the shared phrase parser; make sure the refactor
 // keeps the old behaviour.
 func TestParseIdiomStillWorks(t *testing.T) {
 	card := "🗣️ <b>Idiom of the Day: Break the Ice</b>\n————"
-	if got := parseIdiom(card); got != "break the ice" {
-		t.Errorf("parseIdiom = %q, want %q", got, "break the ice")
+	if got := content.ParseIdiom(card); got != "break the ice" {
+		t.Errorf("content.ParseIdiom = %q, want %q", got, "break the ice")
 	}
 }
 

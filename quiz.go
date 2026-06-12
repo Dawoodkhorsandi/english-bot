@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/content"
 	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
@@ -122,7 +123,7 @@ func parseSynonyms(cardText string) []string {
 		}
 		// The synonyms are on the next non-empty line after the header.
 		for j := i + 1; j < len(lines); j++ {
-			trimmed := strings.TrimSpace(stripHTMLTags(lines[j]))
+			trimmed := strings.TrimSpace(content.StripHTMLTags(lines[j]))
 			if trimmed == "" {
 				continue
 			}
@@ -223,7 +224,7 @@ func parseExampleForBlank(cardText string) (blanked string, ok bool) {
 			if replaced == sentence {
 				continue // no bold word found in this example
 			}
-			return stripHTMLTags(replaced), true
+			return content.StripHTMLTags(replaced), true
 		}
 	}
 	return "", false

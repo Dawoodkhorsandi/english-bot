@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/content"
 	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
@@ -473,9 +474,9 @@ func handleAPIReviewNext(w http.ResponseWriter, r *http.Request, chatID int64, s
 		items = append(items, map[string]interface{}{
 			"term":          d.term,
 			"meaning":       d.meaning,
-			"pronunciation": parsePronunciation(d.text),
-			"persian":       parsePersian(d.text),
-			"example":       parseExample(d.text),
+			"pronunciation": content.ParsePronunciation(d.text),
+			"persian":       content.ParsePersian(d.text),
+			"example":       content.ParseExample(d.text),
 		})
 	}
 	writeJSON(w, map[string]interface{}{"items": items})

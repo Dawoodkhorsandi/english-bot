@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/content"
 	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
@@ -36,14 +37,14 @@ var ttsHTTPClient = &http.Client{Timeout: 45 * time.Second}
 // sendWordCardWithTTS sends a word card, attaches a bookmark button, and then
 // (best-effort) a pronunciation voice note as a reply to that card.
 // term is the known vocabulary term; when non-empty it is used for the bookmark
-// button so the button still appears even on legacy cards where parseWord fails.
+// button so the button still appears even on legacy cards where content.ParseWord fails.
 func sendWordCardWithTTS(ctx context.Context, store *Store, notifier telegram.Notifier, chatID int64, card, term string) error {
 	msgID, err := notifier.SendWithMessageID(chatID, card)
 	if err != nil {
 		return err
 	}
 	// Attach a ⭐ Bookmark inline button to the card.
-	word := strings.TrimSpace(parseWord(card))
+	word := strings.TrimSpace(content.ParseWord(card))
 	if word == "" {
 		word = strings.TrimSpace(term) // fallback to caller-supplied term
 	}
@@ -69,13 +70,13 @@ func sendCardWithTTS(ctx context.Context, store *Store, notifier telegram.Notifi
 // extractTTSTerm tries to extract a speakable term from a card. It checks for
 // a vocabulary word first, then falls back to an idiom or collocation phrase.
 func extractTTSTerm(card string) string {
-	if w := strings.TrimSpace(parseWord(card)); w != "" {
+	if w := strings.TrimSpace(content.ParseWord(card)); w != "" {
 		return w
 	}
-	if p := strings.TrimSpace(parseIdiom(card)); p != "" {
+	if p := strings.TrimSpace(content.ParseIdiom(card)); p != "" {
 		return p
 	}
-	return strings.TrimSpace(parseCollocation(card))
+	return strings.TrimSpace(content.ParseCollocation(card))
 }
 
 // maybeSendTTS tries Gemini TTS first, then falls back to espeak-ng.
@@ -134,7 +135,7 @@ func generateGeminiTTS(ctx context.Context, text string) ([]byte, string, error)
 	}
 
 	endpoint := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:content.GenerateContent?key=%s",
 		geminiTTSModel, url.QueryEscape(config.GeminiAPIKey),
 	)
 	payload := map[string]any{

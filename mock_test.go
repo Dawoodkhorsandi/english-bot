@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -206,6 +207,19 @@ func mockProviderChain(text string) *ai.ProviderChain {
 // emptyProviderChain creates a ProviderChain with no providers.
 func emptyProviderChain() *ai.ProviderChain {
 	return ai.NewChain()
+}
+
+// sampleDrill builds a drill fixture with n numbered forms in the canonical
+// format (header + numbered forms + 💡 footer) for handler/pool tests.
+func sampleDrill(n int) string {
+	var b strings.Builder
+	b.WriteString("🎯 <b>Verb of the Session: walk</b>\n")
+	b.WriteString("————————————————————\n\n")
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, "<b>%d. Form %d</b> · desc\n→ She <b>walks</b> sentence %d.\n\n", i, i, i)
+	}
+	b.WriteString("💡 <i>Say each sentence out loud — build the muscle memory!</i>")
+	return b.String()
 }
 
 // testStoreHelper creates a fresh store for testing. Uses t.Cleanup for teardown.

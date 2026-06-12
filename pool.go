@@ -12,6 +12,7 @@ import (
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/content"
 	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
@@ -526,7 +527,7 @@ func serveContent(ctx context.Context, chain *ai.ProviderChain, store *Store, no
 	if allowGenerate {
 		log.Printf("📦 [POOL] Miss for kind=%s level=%s chat=%d; generating inline.", kind, level, chatID)
 		exclude, _ := store.PoolTerms(kind, level)
-		genText, genTerm, meaning, provider, gErr := generateContent(ctx, chain, kind, level, exclude)
+		genText, genTerm, meaning, provider, gErr := content.GenerateContent(ctx, chain, kind, level, exclude)
 		if gErr != nil {
 			return "", "", gErr
 		}
@@ -630,7 +631,7 @@ func maybeRefreshCard(chain *ai.ProviderChain, store *Store, kind, level, term, 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		newText, _, meaning, provider, err := generateWordFor(ctx, chain, level, term)
+		newText, _, meaning, provider, err := content.GenerateWordFor(ctx, chain, level, term)
 		if err != nil {
 			log.Printf("⚠️  [POOL] Background refresh failed for %q: %v", term, err)
 			return
@@ -726,7 +727,7 @@ func refillKind(ctx context.Context, chain *ai.ProviderChain, store *Store, kind
 	}
 
 	exclude, _ := store.PoolTerms(kind, level)
-	text, term, meaning, provider, err := generateContent(ctx, chain, kind, level, exclude)
+	text, term, meaning, provider, err := content.GenerateContent(ctx, chain, kind, level, exclude)
 	if err != nil {
 		log.Printf("⚠️  [POOL_FILLER] Generation failed for kind=%s level=%s: %v", kind, level, err)
 		return true

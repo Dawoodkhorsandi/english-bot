@@ -1,4 +1,4 @@
-package main
+package content
 
 import (
 	"context"
@@ -339,9 +339,9 @@ func tipLevelInstruction(level string) string {
 	}
 }
 
-// buildCollocationPrompt builds the collocation-card prompt for the given level,
+// BuildCollocationPrompt builds the collocation-card prompt for the given level,
 // appending the per-user exclusion clause when the learner has already seen some.
-func buildCollocationPrompt(level string, exclude []string) string {
+func BuildCollocationPrompt(level string, exclude []string) string {
 	prompt := collocationPromptBase + "\n\n" + levelInstruction(level)
 	if len(exclude) == 0 {
 		return prompt
@@ -352,9 +352,9 @@ func buildCollocationPrompt(level string, exclude []string) string {
 	)
 }
 
-// buildStoryPrompt builds the mini-story prompt for the given level, appending
+// BuildStoryPrompt builds the mini-story prompt for the given level, appending
 // the per-user exclusion clause (story titles) when the learner has seen some.
-func buildStoryPrompt(level string, exclude []string) string {
+func BuildStoryPrompt(level string, exclude []string) string {
 	prompt := storyPromptBase + "\n\n" + storyLevelInstruction(level)
 	if len(exclude) == 0 {
 		return prompt
@@ -415,9 +415,9 @@ func levelInstruction(level string) string {
 	}
 }
 
-// generateContent builds the prompt for kind+level, runs the provider chain, and
+// GenerateContent builds the prompt for kind+level, runs the provider chain, and
 // parses the term (and meaning, for words). Returns (text, term, meaning, provider, err).
-func generateContent(ctx context.Context, chain *ai.ProviderChain, kind, level string, exclude []string) (text, term, meaning, provider string, err error) {
+func GenerateContent(ctx context.Context, chain *ai.ProviderChain, kind, level string, exclude []string) (text, term, meaning, provider string, err error) {
 	var prompt string
 	switch kind {
 	case config.KindWord:
@@ -427,9 +427,9 @@ func generateContent(ctx context.Context, chain *ai.ProviderChain, kind, level s
 	case config.KindTip:
 		prompt = buildTipPrompt(level, exclude)
 	case config.KindCollocation:
-		prompt = buildCollocationPrompt(level, exclude)
+		prompt = BuildCollocationPrompt(level, exclude)
 	case config.KindStory:
-		prompt = buildStoryPrompt(level, exclude)
+		prompt = BuildStoryPrompt(level, exclude)
 	default:
 		prompt = buildDrillPrompt(level, exclude)
 	}
@@ -441,63 +441,63 @@ func generateContent(ctx context.Context, chain *ai.ProviderChain, kind, level s
 
 	switch kind {
 	case config.KindWord:
-		term = parseWord(text)
+		term = ParseWord(text)
 		meaning = parseMeaning(text)
 	case config.KindIdiom:
-		term = parseIdiom(text)
+		term = ParseIdiom(text)
 		meaning = parseMeaning(text)
 	case config.KindTip:
 		term = parseTipTopic(text)
 	case config.KindCollocation:
-		term = parseCollocation(text)
+		term = ParseCollocation(text)
 		meaning = parseMeaning(text)
 	case config.KindStory:
-		term = parseStoryTitle(text)
+		term = ParseStoryTitle(text)
 	default:
-		term = parseVerb(text)
+		term = ParseVerb(text)
 	}
 	return text, term, meaning, provider, nil
 }
 
-// generateWordFor generates a vocabulary card for a specific user-supplied term
+// GenerateWordFor generates a vocabulary card for a specific user-supplied term
 // (Change M), resolving/translating it to an English headword. Returns the card
 // text, the resolved English word, its meaning, and the provider used.
-func generateWordFor(ctx context.Context, chain *ai.ProviderChain, level, term string) (text, word, meaning, provider string, err error) {
+func GenerateWordFor(ctx context.Context, chain *ai.ProviderChain, level, term string) (text, word, meaning, provider string, err error) {
 	text, provider, err = chain.Generate(ctx, buildWordLookupPrompt(level, term))
 	if err != nil {
 		return "", "", "", "", err
 	}
-	return text, parseWord(text), parseMeaning(text), provider, nil
+	return text, ParseWord(text), parseMeaning(text), provider, nil
 }
 
-// parseVerb extracts the verb from the "Verb of the Session:" line of a drill.
+// ParseVerb extracts the verb from the "Verb of the Session:" line of a drill.
 // Falls back to matching just "Verb:" if the full label isn't found, since some
 // AI outputs use shorter headings like "Verb: walk" or "Today's Verb: run".
-func parseVerb(drill string) string {
+func ParseVerb(drill string) string {
 	if v := parseLabeledTerm(drill, "verb of the session"); v != "" {
 		return v
 	}
 	return parseLabeledTerm(drill, "verb")
 }
 
-// parseWord extracts the word from the "Word of the Session:" line of a vocab card.
-func parseWord(card string) string {
+// ParseWord extracts the word from the "Word of the Session:" line of a vocab card.
+func ParseWord(card string) string {
 	return parseLabeledTerm(card, "word of the session")
 }
 
-// parseIdiom extracts the full idiom phrase from the "Idiom of the Day:" line.
-func parseIdiom(card string) string {
+// ParseIdiom extracts the full idiom phrase from the "Idiom of the Day:" line.
+func ParseIdiom(card string) string {
 	return parseLabeledPhrase(card, "idiom of the day")
 }
 
-// parseCollocation extracts the full collocation phrase from the
+// ParseCollocation extracts the full collocation phrase from the
 // "Collocation of the Day:" line of a collocation card.
-func parseCollocation(card string) string {
+func ParseCollocation(card string) string {
 	return parseLabeledPhrase(card, "collocation of the day")
 }
 
-// parseStoryTitle extracts the story title from the "Mini Story:" line.
-func parseStoryTitle(card string) string {
+// ParseStoryTitle extracts the story title from the "Mini Story:" line.
+func ParseStoryTitle(card string) string {
 	return parseLabeledPhrase(card, "mini story")
 }
 
@@ -534,7 +534,7 @@ func parseTipTopic(tip string) string {
 		if !strings.Contains(lower, "topic") || !strings.Contains(line, ":") {
 			continue
 		}
-		plain := stripHTMLTags(line)
+		plain := StripHTMLTags(line)
 		idx := strings.Index(plain, ":")
 		if idx == -1 {
 			continue
@@ -590,7 +590,7 @@ func cardSection(card, keyword string) string {
 			continue
 		}
 		for j := i + 1; j < len(lines); j++ {
-			m := strings.TrimSpace(stripHTMLTags(lines[j]))
+			m := strings.TrimSpace(StripHTMLTags(lines[j]))
 			if m != "" {
 				return m
 			}
@@ -603,16 +603,16 @@ func cardSection(card, keyword string) string {
 // a vocabulary card, stripping any HTML tags. Empty if not found.
 func parseMeaning(card string) string { return cardSection(card, "Meaning") }
 
-// parsePronunciation extracts the pronunciation line (syllable spelling · IPA).
-func parsePronunciation(card string) string { return cardSection(card, "Pronunciation") }
+// ParsePronunciation extracts the pronunciation line (syllable spelling · IPA).
+func ParsePronunciation(card string) string { return cardSection(card, "Pronunciation") }
 
-// parsePersian extracts the Persian/Farsi translation (the <tg-spoiler> content,
+// ParsePersian extracts the Persian/Farsi translation (the <tg-spoiler> content,
 // with tags stripped).
-func parsePersian(card string) string { return cardSection(card, "Persian") }
+func ParsePersian(card string) string { return cardSection(card, "Persian") }
 
-// parseExample returns the first example sentence from a card's Examples section,
+// ParseExample returns the first example sentence from a card's Examples section,
 // with any leading bullet removed.
-func parseExample(card string) string {
+func ParseExample(card string) string {
 	ex := strings.TrimSpace(cardSection(card, "Examples"))
 	ex = strings.TrimSpace(strings.TrimPrefix(ex, "•"))
 	return strings.TrimSpace(ex)
@@ -690,11 +690,11 @@ func paginateDrillItems(items []string) []drillPage {
 	return pages
 }
 
-// renderDrillPage builds the message text for the given 1-based page of a drill
+// RenderDrillPage builds the message text for the given 1-based page of a drill
 // and returns it along with the total page count. If the drill can't be parsed
 // into forms, it returns the full text as a single page so delivery degrades
 // gracefully. Out-of-range pages are clamped.
-func renderDrillPage(fullText string, page int) (text string, total int) {
+func RenderDrillPage(fullText string, page int) (text string, total int) {
 	header, items, footer := parseDrillBody(fullText)
 	if len(items) == 0 {
 		return fullText, 1
@@ -723,10 +723,10 @@ func renderDrillPage(fullText string, page int) (text string, total int) {
 	return b.String(), total
 }
 
-// drillNavKeyboard builds the prev/next navigation row for a paged drill. The
+// DrillNavKeyboard builds the prev/next navigation row for a paged drill. The
 // verb is embedded in the callback data so a tap can reload the full drill from
 // the pool. Returns nil when there is only one page (no navigation needed).
-func drillNavKeyboard(term string, page, total int) [][]telegram.InlineButton {
+func DrillNavKeyboard(term string, page, total int) [][]telegram.InlineButton {
 	if total <= 1 {
 		return nil
 	}
@@ -741,8 +741,8 @@ func drillNavKeyboard(term string, page, total int) [][]telegram.InlineButton {
 	return [][]telegram.InlineButton{row}
 }
 
-// stripHTMLTags removes everything between '<' and '>' and trims the result.
-func stripHTMLTags(s string) string {
+// StripHTMLTags removes everything between '<' and '>' and trims the result.
+func StripHTMLTags(s string) string {
 	var b strings.Builder
 	inTag := false
 	for _, r := range s {
