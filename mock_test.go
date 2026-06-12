@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 )
 
 // mockNotifier implements the Notifier interface for tests, capturing all calls
@@ -192,19 +194,17 @@ func (p *mockProvider) Generate(ctx context.Context, prompt string) (string, err
 }
 
 // mockProviderChain creates a ProviderChain with one mock provider.
-func mockProviderChain(text string) *ProviderChain {
-	return &ProviderChain{
-		providers: []Provider{&mockProvider{
-			name:    "mock",
-			enabled: true,
-			text:    text,
-		}},
-	}
+func mockProviderChain(text string) *ai.ProviderChain {
+	return ai.NewChain(&mockProvider{
+		name:    "mock",
+		enabled: true,
+		text:    text,
+	})
 }
 
 // emptyProviderChain creates a ProviderChain with no providers.
-func emptyProviderChain() *ProviderChain {
-	return &ProviderChain{}
+func emptyProviderChain() *ai.ProviderChain {
+	return ai.NewChain()
 }
 
 // testStoreHelper creates a fresh store for testing. Uses t.Cleanup for teardown.

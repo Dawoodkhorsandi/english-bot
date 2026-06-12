@@ -19,6 +19,7 @@ import (
 	"time"
 	_ "time/tzdata" // embed the IANA tz database so Asia/Tehran resolves without OS tzdata
 
+	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 	_ "modernc.org/sqlite"
 )
@@ -475,7 +476,7 @@ func main() {
 	config.LoadLocation()
 
 	log.Println("⚙️  [INIT] Building AI provider chain...")
-	chain := newProviderChain(ctx)
+	chain := ai.NewProviderChain(ctx)
 	if !chain.HasAny() {
 		log.Println("⚠️  [INIT] No AI providers enabled. Set at least one provider API key (e.g. GEMINI_API_KEY).")
 	}
@@ -553,7 +554,7 @@ func main() {
 	log.Printf("🛑 [SYSTEM] Shutdown intercept caught OS Signal: %v. Cleaning tasks...", sig)
 }
 
-func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
+func pollTelegramUpdates(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier) {
 	var offset int64 = 0
 	client := &http.Client{Timeout: 35 * time.Second}
 
@@ -627,7 +628,7 @@ func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store
 	}
 }
 
-func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, msg *TelegramMessage) {
+func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, msg *TelegramMessage) {
 	if msg.Text == "" {
 		log.Printf("ℹ️  [ROUTER] Ignoring empty message ID %d.", msg.MessageID)
 		return
@@ -1070,7 +1071,7 @@ func handleLevel(store *Store, notifier Notifier, chatID int64, args []string) {
 // handleWordLookup treats a plain (non-command) message as a vocabulary lookup
 // (Change M): it generates a /word-style card for the user-supplied term at their
 // level, translating from another language when needed, then pools and records it.
-func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, chatID int64, text string) {
+func handleWordLookup(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, chatID int64, text string) {
 	term := strings.TrimSpace(text)
 	fields := strings.Fields(term)
 	if len(fields) == 0 {
@@ -1131,7 +1132,7 @@ func maintainerID() (int64, bool) {
 }
 
 // handleMetrics sends an operational summary to the maintainer (/metrics).
-func handleMetrics(store *Store, chain *ProviderChain, notifier Notifier, chatID int64) {
+func handleMetrics(store *Store, chain *ai.ProviderChain, notifier Notifier, chatID int64) {
 	log.Printf("📊 [ADMIN] /metrics requested by ChatID %d.", chatID)
 
 	var b strings.Builder
@@ -1165,9 +1166,10 @@ func handleMetrics(store *Store, chain *ProviderChain, notifier Notifier, chatID
 	totalMastered, _ := store.TotalMasteredCount()
 	b.WriteString(fmt.Sprintf("🧠 Words mastered (all users): <b>%d</b>\n", totalMastered))
 
-	b.WriteString(fmt.Sprintf("\n⚡ Providers enabled: <b>%d</b>\n", len(chain.providers)))
-	for _, p := range chain.providers {
-		b.WriteString(fmt.Sprintf("  • %s\n", p.Name()))
+	providerNames := chain.ProviderNames()
+	b.WriteString(fmt.Sprintf("\n⚡ Providers enabled: <b>%d</b>\n", len(providerNames)))
+	for _, name := range providerNames {
+		b.WriteString(fmt.Sprintf("  • %s\n", name))
 	}
 
 	_ = notifier.Send(chatID, b.String())
@@ -1277,7 +1279,7 @@ func handleAnnounce(store *Store, notifier Notifier, chatID int64, text string) 
 }
 
 // handleHealth sends a quick system health check to the maintainer (/health).
-func handleHealth(store *Store, chain *ProviderChain, notifier Notifier, chatID int64) {
+func handleHealth(store *Store, chain *ai.ProviderChain, notifier Notifier, chatID int64) {
 	log.Printf("🏥 [ADMIN] /health requested by ChatID %d.", chatID)
 
 	var b strings.Builder
@@ -1289,9 +1291,10 @@ func handleHealth(store *Store, chain *ProviderChain, notifier Notifier, chatID 
 		b.WriteString("💾 Database: ✅ OK\n")
 	}
 
-	b.WriteString(fmt.Sprintf("⚡ Providers: <b>%d</b> enabled\n", len(chain.providers)))
-	for _, p := range chain.providers {
-		b.WriteString(fmt.Sprintf("  • %s: ✅\n", p.Name()))
+	providerNames := chain.ProviderNames()
+	b.WriteString(fmt.Sprintf("⚡ Providers: <b>%d</b> enabled\n", len(providerNames)))
+	for _, name := range providerNames {
+		b.WriteString(fmt.Sprintf("  • %s: ✅\n", name))
 	}
 
 	now := time.Now().In(config.AppLocation)
@@ -2120,7 +2123,7 @@ func handleTTS(store *Store, notifier Notifier, chatID int64, args []string) {
 //	/tip       => on-demand tip
 //	/tip on    => enable scheduled daily tips
 //	/tip off   => disable scheduled daily tips
-func handleTip(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, chatID int64, args []string) {
+func handleTip(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, chatID int64, args []string) {
 	if len(args) > 0 {
 		switch strings.ToLower(strings.TrimSpace(args[0])) {
 		case "on":

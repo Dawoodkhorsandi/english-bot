@@ -18,6 +18,15 @@ import (
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
+// truncate shortens s to at most n bytes, appending an ellipsis when cut. Used
+// for trimming provider/API error bodies in log and error messages.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
 const geminiTTSModel = "gemini-2.5-flash"
 const maxTTSTextLength = 40
 

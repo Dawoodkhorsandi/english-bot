@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
@@ -436,7 +437,7 @@ var deckBackfillFields = []struct {
 // Persian, then pronunciation) on deck cards that lack one — e.g. Barron's ships
 // definitions only, and the new decks ship without Persian/pronunciation. The
 // result is cached back into deck_cards. No-op when no AI provider is configured.
-func runDeckBackfill(ctx context.Context, chain *ProviderChain, store *Store) {
+func runDeckBackfill(ctx context.Context, chain *ai.ProviderChain, store *Store) {
 	if chain == nil || !chain.HasAny() {
 		return
 	}
@@ -455,7 +456,7 @@ func runDeckBackfill(ctx context.Context, chain *ProviderChain, store *Store) {
 
 // backfillOneDeckField fills one missing field on one card per call, keeping AI
 // usage low. Fields are tried in deckBackfillFields order.
-func (s *Store) backfillOneDeckField(ctx context.Context, chain *ProviderChain) {
+func (s *Store) backfillOneDeckField(ctx context.Context, chain *ai.ProviderChain) {
 	for _, f := range deckBackfillFields {
 		var deckID, term, definition string
 		err := s.db.QueryRow(

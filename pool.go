@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
@@ -507,7 +508,7 @@ func (s *Store) MarkPoolExhaustionNotice(chatID int64, kind, level string, poolC
 //     adds the result to the pool, and serves it.
 //   - On a miss with allowGenerate=false (broadcasts) it falls back to the oldest
 //     pooled item so broadcasts never call the AI directly.
-func serveContent(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, chatID int64, kind, level string, allowGenerate bool) (string, string, error) {
+func serveContent(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, chatID int64, kind, level string, allowGenerate bool) (string, string, error) {
 	term, _, text, ok, err := store.PooledUnseen(kind, level, chatID)
 	if err != nil {
 		log.Printf("⚠️  [POOL] Unseen lookup failed for kind=%s level=%s chat=%d: %v", kind, level, chatID, err)
@@ -620,7 +621,7 @@ func maybeNotifyPoolExhausted(store *Store, notifier Notifier, chatID int64, kin
 // background goroutine to regenerate the card and update the pool entry.
 // The caller serves the old card immediately — the refreshed version will be
 // used on the next request.
-func maybeRefreshCard(chain *ProviderChain, store *Store, kind, level, term, text string) {
+func maybeRefreshCard(chain *ai.ProviderChain, store *Store, kind, level, term, text string) {
 	if kind != config.KindWord || !cardNeedsRefresh(text) {
 		return
 	}
@@ -656,7 +657,7 @@ func poolTargetFor(kind, level string) int {
 // poolFiller periodically tops up the content pool for each (kind, active level)
 // until it reaches the level's target, generating one item per step (spaced by
 // config.GenSpacing).
-func poolFiller(ctx context.Context, chain *ProviderChain, store *Store) {
+func poolFiller(ctx context.Context, chain *ai.ProviderChain, store *Store) {
 	if !chain.HasAny() {
 		log.Println("📦 [POOL_FILLER] No providers enabled; pool filler disabled.")
 		return
@@ -682,7 +683,7 @@ func poolFiller(ctx context.Context, chain *ProviderChain, store *Store) {
 
 // runRefillCycle attempts one refill step for every (kind, active level) pair,
 // spacing generations by config.GenSpacing and honouring context cancellation.
-func runRefillCycle(ctx context.Context, chain *ProviderChain, store *Store) {
+func runRefillCycle(ctx context.Context, chain *ai.ProviderChain, store *Store) {
 	levels, err := store.ActiveLevels()
 	if err != nil {
 		log.Printf("⚠️  [POOL_FILLER] Could not load active levels: %v (using default only)", err)
@@ -712,7 +713,7 @@ func runRefillCycle(ctx context.Context, chain *ProviderChain, store *Store) {
 // refillKind generates and pools a single new item for kind+level if that level's
 // pool is below target. It de-duplicates against all terms already in the pool.
 // Returns true if a generation was attempted (so the caller can space them out).
-func refillKind(ctx context.Context, chain *ProviderChain, store *Store, kind, level string) bool {
+func refillKind(ctx context.Context, chain *ai.ProviderChain, store *Store, kind, level string) bool {
 	target := poolTargetFor(kind, level)
 	count, err := store.PoolCount(kind, level)
 	if err != nil {

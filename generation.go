@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
@@ -415,7 +416,7 @@ func levelInstruction(level string) string {
 
 // generateContent builds the prompt for kind+level, runs the provider chain, and
 // parses the term (and meaning, for words). Returns (text, term, meaning, provider, err).
-func generateContent(ctx context.Context, chain *ProviderChain, kind, level string, exclude []string) (text, term, meaning, provider string, err error) {
+func generateContent(ctx context.Context, chain *ai.ProviderChain, kind, level string, exclude []string) (text, term, meaning, provider string, err error) {
 	var prompt string
 	switch kind {
 	case config.KindWord:
@@ -460,7 +461,7 @@ func generateContent(ctx context.Context, chain *ProviderChain, kind, level stri
 // generateWordFor generates a vocabulary card for a specific user-supplied term
 // (Change M), resolving/translating it to an English headword. Returns the card
 // text, the resolved English word, its meaning, and the provider used.
-func generateWordFor(ctx context.Context, chain *ProviderChain, level, term string) (text, word, meaning, provider string, err error) {
+func generateWordFor(ctx context.Context, chain *ai.ProviderChain, level, term string) (text, word, meaning, provider string, err error) {
 	text, provider, err = chain.Generate(ctx, buildWordLookupPrompt(level, term))
 	if err != nil {
 		return "", "", "", "", err

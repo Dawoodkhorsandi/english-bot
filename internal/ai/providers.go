@@ -1,4 +1,7 @@
-package main
+// Package ai abstracts the LLM backends behind a single ProviderChain that
+// tries each configured provider in order with failover. It depends only on
+// the config package for credentials and ordering.
+package ai
 
 import (
 	"bytes"
@@ -219,7 +222,16 @@ type ProviderChain struct {
 	providers []Provider
 }
 
-func newProviderChain(ctx context.Context) *ProviderChain {
+// NewChain builds a ProviderChain from an explicit list of providers. It is the
+// constructor used by tests and by callers that assemble providers themselves;
+// NewProviderChain is the env-driven production path.
+func NewChain(providers ...Provider) *ProviderChain {
+	return &ProviderChain{providers: providers}
+}
+
+// NewProviderChain builds the chain from the configured provider order, skipping
+// any provider whose API key/config is unset.
+func NewProviderChain(ctx context.Context) *ProviderChain {
 	all := buildProviders(ctx)
 	var enabled []Provider
 	for _, name := range strings.Split(config.ProviderOrder, ",") {
@@ -242,6 +254,15 @@ func newProviderChain(ctx context.Context) *ProviderChain {
 }
 
 func (c *ProviderChain) HasAny() bool { return len(c.providers) > 0 }
+
+// ProviderNames returns the names of the enabled providers, in chain order.
+func (c *ProviderChain) ProviderNames() []string {
+	names := make([]string, len(c.providers))
+	for i, p := range c.providers {
+		names[i] = p.Name()
+	}
+	return names
+}
 
 const providerAttempts = 2
 
