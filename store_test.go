@@ -360,6 +360,22 @@ func TestStoreWordsSentBetween(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
+
+	// content_pool is UNIQUE(kind, level, term): the same word can have a pool
+	// row at multiple levels. The review must still list each word once.
+	s.AddToPool(kindWord, "advanced", "apple", "a different-level meaning", "card3")
+	items, err = s.WordsSentBetween(chatID, "2025-06-01 00:00:00", "2025-06-03 00:00:00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 distinct words despite multi-level pool rows, got %d: %v", len(items), items)
+	}
+	for _, it := range items {
+		if it.meaning == "" {
+			t.Fatalf("expected a non-empty meaning for %q, got blank", it.term)
+		}
+	}
 }
 
 func TestStoreReviewDelivered(t *testing.T) {

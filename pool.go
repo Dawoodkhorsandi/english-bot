@@ -261,12 +261,16 @@ func sentTableFor(kind string) string {
 // WordsSentBetween returns the distinct vocabulary words sent to a chat within
 // the [startUTC, endUTC) window, joined with their meaning from the pool.
 func (s *Store) WordsSentBetween(chatID int64, startUTC, endUTC string) ([]reviewItem, error) {
+	// content_pool is UNIQUE(kind, level, term), so a word can have a pool row
+	// per level; the join below would otherwise emit one duplicate per level.
+	// Group by word and pick a (non-empty) meaning, keeping first-sent order.
 	rows, err := s.db.Query(`
-		SELECT sv.word, COALESCE(cp.meaning, '')
+		SELECT sv.word, COALESCE(MAX(cp.meaning), '')
 		FROM sent_vocab sv
 		LEFT JOIN content_pool cp ON cp.kind = 'word' AND cp.term = sv.word
 		WHERE sv.chat_id = ? AND sv.sent_at >= ? AND sv.sent_at < ?
-		ORDER BY sv.sent_at ASC`,
+		GROUP BY sv.word
+		ORDER BY MIN(sv.sent_at) ASC`,
 		chatID, startUTC, endUTC,
 	)
 	if err != nil {
