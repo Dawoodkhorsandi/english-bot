@@ -26,6 +26,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11.4
+
       - name: Test
         run: |
           go test ./... -count=1 -race -coverprofile=coverage.out | tee test-output.txt
@@ -35,7 +40,7 @@ jobs:
           echo "Coverage: ${COVERAGE}%"
 
       - name: Build
-        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o english-bot .
+        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o english-bot ./cmd/english-bot
 
       - name: Upload coverage artifact
         if: github.event_name == 'push'

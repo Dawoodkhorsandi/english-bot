@@ -24,7 +24,7 @@ func TestSrsKnownProgression(t *testing.T) {
 	}
 	// Third: interval should grow by ~ease (round(3*ease)).
 	prev := interval
-	interval, ease, reps = srsKnown(interval, ease, reps)
+	interval, ease, _ = srsKnown(interval, ease, reps)
 	if interval <= prev {
 		t.Fatalf("after 3rd known: interval=%d, want > %d", interval, prev)
 	}

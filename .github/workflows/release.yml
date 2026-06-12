@@ -117,7 +117,7 @@ jobs:
           python3 <<'PYEOF' > release-notes.md
           import re, os
           version = os.environ["RELEASE_VERSION"]
-          with open("main.go") as f:
+          with open("internal/app/changelog.go") as f:
               content = f.read()
           pattern = r'Version:\s*"' + re.escape(version) + r'".*?Text:\s*((?:"(?:[^"\\]|\\.)*"\s*\+?\s*)*)'
           m = re.search(pattern, content, re.DOTALL)

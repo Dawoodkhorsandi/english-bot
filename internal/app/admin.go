@@ -196,7 +196,7 @@ func sendAdminUserListPage(store *Store, notifier telegram.Notifier, chatID int6
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("👥 <b>Users</b> — Page %d/%d (total: %d)\n\n", page+1, totalPages, total))
+	fmt.Fprintf(&b, "👥 <b>Users</b> — Page %d/%d (total: %d)\n\n", page+1, totalPages, total)
 
 	for i, u := range users {
 		idx := page*adminUsersPerPage + i + 1
@@ -208,8 +208,8 @@ func sendAdminUserListPage(store *Store, notifier telegram.Notifier, chatID int6
 		if u.Paused {
 			status = "⏸️"
 		}
-		b.WriteString(fmt.Sprintf("%d. %s <b>%s</b>  %s  <code>%d</code>\n",
-			idx, status, name, levelLabel(u.Level), u.ChatID))
+		fmt.Fprintf(&b, "%d. %s <b>%s</b>  %s  <code>%d</code>\n",
+			idx, status, name, levelLabel(u.Level), u.ChatID)
 	}
 
 	if len(users) == 0 {
@@ -283,7 +283,7 @@ func sendAdminUserDetail(store *Store, notifier telegram.Notifier, chatID int64,
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("👤 <b>User Detail: %s</b>\n", name))
+	fmt.Fprintf(&b, "👤 <b>User Detail: %s</b>\n", name)
 	b.WriteString(fmt.Sprintf("ID: <code>%d</code>\n", d.ChatID))
 	if !d.CreatedAt.IsZero() {
 		b.WriteString(fmt.Sprintf("📅 Joined: <b>%s</b>\n", d.CreatedAt.Format("2 Jan 2006 15:04")))

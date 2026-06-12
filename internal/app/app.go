@@ -17,11 +17,12 @@ import (
 	"time"
 	_ "time/tzdata" // embed the IANA tz database so Asia/Tehran resolves without OS tzdata
 
+	_ "modernc.org/sqlite"
+
 	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 	"github.com/Dawoodkhorsandi/english-bot/internal/content"
 	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
-	_ "modernc.org/sqlite"
 )
 
 const (
@@ -56,7 +57,7 @@ func Run() {
 	if err != nil {
 		log.Fatalf("❌ [CRITICAL] Failed to initialize SQLite store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Load persisted admin config overrides before any scheduling decisions.
 	store.LoadBotConfig()

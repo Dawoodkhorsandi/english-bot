@@ -15,8 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 	"google.golang.org/genai"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // Provider is a single AI backend that can turn a prompt into drill/word text.

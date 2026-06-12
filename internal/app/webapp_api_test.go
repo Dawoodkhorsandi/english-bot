@@ -204,7 +204,7 @@ func TestLeaderboardRankingAndNames(t *testing.T) {
 }
 
 func TestFunnyNameStable(t *testing.T) {
-	if funnyName(12345) != funnyName(12345) {
+	if a, b := funnyName(12345), funnyName(12345); a != b {
 		t.Error("funnyName must be deterministic")
 	}
 	if funnyName(12345) == "" {
