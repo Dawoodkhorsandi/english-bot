@@ -157,25 +157,48 @@ All configuration is via environment variables. See [`.env.example`](.env.exampl
 
 ## Architecture
 
+Go application laid out with a `cmd/` entrypoint and `internal/` packages
+(`config` ← `ai`, `telegram`, `content`, `app`; nothing imports `app`).
+
 ```
-Go application (single package main, 14 source files)
-+-- main.go           -- startup, schema, Telegram types, command router, Store
-+-- config.go         -- timezone, pool & scheduler tuning knobs, WEB_APP_URL/PORT
-+-- providers.go      -- Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
-+-- generation.go     -- prompt builders, AI generation, term/meaning parsers
-+-- pool.go           -- content_pool Store methods, serveContent, poolFiller
-+-- schedule.go       -- quiet hours, broadcast/daily-review/weekly-digest schedulers
-+-- prefs.go          -- user_prefs Store methods, level/interval/pause/toggle helpers, first_name/streak_celebrated
-+-- tts.go            -- pronunciation TTS (Gemini + espeak-ng fallback), audio cache
-+-- srs.go            -- spaced-repetition SM-2-lite logic, review scheduler
-+-- quiz.go           -- quiz building (4 types + native polls), poll registry, quiz scheduler
-+-- stats.go          -- /stats computation (progress bars), admin metrics
-+-- admin.go          -- admin panel: paginated /users, user detail, direct messaging
-+-- webapp.go         -- Mini App hub: HTTP server, embedded SPA, HMAC initData auth, JSON API
-+-- leaderboard.go    -- cross-user ranking, display names, funny-name fallback
-+-- leitner.go        -- curated Leitner decks (deck_cards/leitner_progress), box scheduler, field backfill
-+-- grammar.go        -- static grammar lessons curriculum (/grammar + Mini App)
-+-- vocab.go          -- /mywords (browse learned words) and /bookmark (favourites) features
+cmd/english-bot/
+  main.go           -- entrypoint; calls app.Run()
+
+internal/config/    -- leaf: env helpers + tuning knobs, no deps beyond stdlib
+  config.go         -- env helpers, timezone/AppLocation, pool & scheduler knobs, pool-size overrides
+  kinds.go          -- content kind + difficulty level constants
+  secrets.go        -- TelegramBotToken / GeminiAPIKey / MaintainerChatID from env
+
+internal/ai/        -- AI provider abstraction (imports config)
+  providers.go      -- Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
+
+internal/telegram/  -- Telegram transport (imports config)
+  types.go          -- Bot API DTOs (Update, Message, CallbackQuery, Chat, User, …) + InlineButton
+  transport.go      -- Post(method, payload) + shared HTTP client
+  notifier.go       -- Notifier interface + the real implementation (NewNotifier)
+
+internal/content/   -- content generation & parsing (imports config/ai/telegram)
+  generation.go     -- prompt builders, AI generation, card parsers, drill pagination
+
+internal/app/       -- the coupled core (package app; imports config/ai/telegram/content)
+  app.go            -- Run(), schema, command router (handleMessage/handleCallback), Store
+  changelog.go      -- ChangelogEntry + the append-only Changelogs release history
+  pool.go           -- content_pool Store methods, serveContent, poolFiller
+  schedule.go       -- quiet hours, broadcast/daily-review/weekly-digest schedulers
+  prefs.go          -- user_prefs Store methods, level/interval/pause/toggle helpers
+  tts.go            -- pronunciation TTS (Gemini + espeak-ng fallback), audio cache
+  srs.go            -- spaced-repetition SM-2-lite logic, review scheduler
+  quiz.go           -- quiz building (4 types + native polls), poll registry, quiz scheduler
+  stats.go          -- /stats computation (progress bars), admin metrics
+  admin.go          -- admin panel: paginated /users, user detail, direct messaging
+  webapp.go         -- Mini App hub: HTTP server, embedded SPA, HMAC initData auth, JSON API
+  leaderboard.go    -- cross-user ranking, display names, funny-name fallback
+  leitner.go        -- curated Leitner decks (deck_cards/leitner_progress), box scheduler, field backfill
+  grammar.go        -- static grammar lessons curriculum (/grammar + Mini App)
+  vocab.go          -- /mywords (browse learned words) and /bookmark (favourites) features
+  webapp/           -- embedded Mini App SPA (index.html, app.js, styles.css, decks/, grammar/)
+
+internal/docsync/   -- CI tests that keep README.md & DOCS.md in sync with the code
 ```
 
 The Mini App frontend lives in `webapp/` (`index.html`, `app.js`, `styles.css`)

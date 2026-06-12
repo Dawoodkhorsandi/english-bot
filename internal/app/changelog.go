@@ -375,4 +375,9 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Fix: the nightly \"🌙 Today's Words\" review could list the same word more than once when that word existed in the content pool at multiple levels (the lookup joined the pool without deduplicating). Words are now grouped so each appears once, preferring a non-empty meaning.",
 	},
+	{
+		Version: "1.32.4",
+		Silent:  true,
+		Text:    "Internal: restructured the codebase from one flat package into a cmd/english-bot entrypoint plus internal/{config,ai,telegram,content,app} packages, renamed the module to its canonical path, added a golangci-lint config + Makefile, and broadened test coverage. No user-facing changes.",
+	},
 }
