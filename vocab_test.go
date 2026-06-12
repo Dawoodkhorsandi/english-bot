@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -16,7 +18,7 @@ func TestBookmarkCRUD(t *testing.T) {
 
 	// Seed a vocabulary word so the bookmark has something to reference.
 	_ = store.RecordSentVocab(chatID, "resilient")
-	_ = store.AddToPool(kindWord, levelIntermediate, "resilient", "able to recover", "card text")
+	_ = store.AddToPool(config.KindWord, config.LevelIntermediate, "resilient", "able to recover", "card text")
 
 	// Initially not bookmarked.
 	if store.IsBookmarked(chatID, "resilient") {
@@ -80,7 +82,7 @@ func TestLearnedWords(t *testing.T) {
 	}
 	for _, w := range words {
 		_ = store.RecordSentVocab(chatID, w.term)
-		_ = store.AddToPool(kindWord, levelIntermediate, w.term, w.meaning, "card:"+w.term)
+		_ = store.AddToPool(config.KindWord, config.LevelIntermediate, w.term, w.meaning, "card:"+w.term)
 	}
 	// Seed SRS for one word so it shows as "learning".
 	_ = store.SeedReview(chatID, "apple", time.Now())

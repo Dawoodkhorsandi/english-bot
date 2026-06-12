@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 func testStore(t *testing.T) *Store {
@@ -24,7 +26,7 @@ func testStore(t *testing.T) *Store {
 func TestStorePoolCount(t *testing.T) {
 	s := testStore(t)
 
-	n, err := s.PoolCount(kindDrill, defaultLevel)
+	n, err := s.PoolCount(config.KindDrill, config.DefaultLevel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,10 +34,10 @@ func TestStorePoolCount(t *testing.T) {
 		t.Fatalf("expected 0, got %d", n)
 	}
 
-	s.AddToPool(kindDrill, defaultLevel, "run", "to move quickly", "drill text")
-	s.AddToPool(kindDrill, defaultLevel, "jump", "to leap", "drill text 2")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "run", "to move quickly", "drill text")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "jump", "to leap", "drill text 2")
 
-	n, err = s.PoolCount(kindDrill, defaultLevel)
+	n, err = s.PoolCount(config.KindDrill, config.DefaultLevel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,8 +54,8 @@ func TestStoreDrillText(t *testing.T) {
 		t.Fatalf("expected miss, got ok=%v err=%v", ok, err)
 	}
 
-	s.AddToPool(kindDrill, defaultLevel, "Walk", "", "full drill for walk")
-	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "word card")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "Walk", "", "full drill for walk")
+	s.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "word card")
 
 	// Hit is case-insensitive (terms are normalized to lowercase).
 	text, ok, err := s.DrillText("WALK")
@@ -78,11 +80,11 @@ func TestStoreSentIdioms(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.AddToPool(kindIdiom, defaultLevel, "break the ice", "m1", "card1")
-	s.AddToPool(kindIdiom, defaultLevel, "piece of cake", "m2", "card2")
+	s.AddToPool(config.KindIdiom, config.DefaultLevel, "break the ice", "m1", "card1")
+	s.AddToPool(config.KindIdiom, config.DefaultLevel, "piece of cake", "m2", "card2")
 
 	// PooledUnseen must skip the already-sent idiom via the sent_idioms table.
-	term, _, _, ok, err := s.PooledUnseen(kindIdiom, defaultLevel, 100)
+	term, _, _, ok, err := s.PooledUnseen(config.KindIdiom, config.DefaultLevel, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,12 +104,12 @@ func TestStoreSentIdioms(t *testing.T) {
 func TestStorePoolTerms(t *testing.T) {
 	s := testStore(t)
 
-	s.AddToPool(kindDrill, defaultLevel, "run", "m1", "t1")
-	s.AddToPool(kindDrill, "beginner", "walk", "m2", "t2")
-	s.AddToPool(kindWord, defaultLevel, "apple", "m3", "t3")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "run", "m1", "t1")
+	s.AddToPool(config.KindDrill, "beginner", "walk", "m2", "t2")
+	s.AddToPool(config.KindWord, config.DefaultLevel, "apple", "m3", "t3")
 
 	// PoolTerms is scoped per (kind, level).
-	terms, err := s.PoolTerms(kindDrill, defaultLevel)
+	terms, err := s.PoolTerms(config.KindDrill, config.DefaultLevel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +117,7 @@ func TestStorePoolTerms(t *testing.T) {
 		t.Fatalf("expected [run] at default level, got %v", terms)
 	}
 
-	terms, err = s.PoolTerms(kindDrill, "beginner")
+	terms, err = s.PoolTerms(config.KindDrill, "beginner")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +125,7 @@ func TestStorePoolTerms(t *testing.T) {
 		t.Fatalf("expected [walk] at beginner level, got %v", terms)
 	}
 
-	terms, err = s.PoolTerms(kindWord, defaultLevel)
+	terms, err = s.PoolTerms(config.KindWord, config.DefaultLevel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,23 +137,23 @@ func TestStorePoolTerms(t *testing.T) {
 func TestStoreAddToPoolIdempotent(t *testing.T) {
 	s := testStore(t)
 
-	if err := s.AddToPool(kindDrill, defaultLevel, "run", "m1", "t1"); err != nil {
+	if err := s.AddToPool(config.KindDrill, config.DefaultLevel, "run", "m1", "t1"); err != nil {
 		t.Fatal(err)
 	}
 	// A duplicate (kind, level, term) is ignored.
-	if err := s.AddToPool(kindDrill, defaultLevel, "run", "m1b", "t1b"); err != nil {
+	if err := s.AddToPool(config.KindDrill, config.DefaultLevel, "run", "m1b", "t1b"); err != nil {
 		t.Fatal(err)
 	}
-	terms, _ := s.PoolTerms(kindDrill, defaultLevel)
+	terms, _ := s.PoolTerms(config.KindDrill, config.DefaultLevel)
 	if len(terms) != 1 {
 		t.Fatalf("expected 1 (idempotent within level), got %d", len(terms))
 	}
 
 	// The same term at a different level is now allowed (per-level dedup).
-	if err := s.AddToPool(kindDrill, "beginner", "run", "m2", "t2"); err != nil {
+	if err := s.AddToPool(config.KindDrill, "beginner", "run", "m2", "t2"); err != nil {
 		t.Fatal(err)
 	}
-	terms, _ = s.PoolTerms(kindDrill, "beginner")
+	terms, _ = s.PoolTerms(config.KindDrill, "beginner")
 	if len(terms) != 1 {
 		t.Fatalf("expected run also pooled at beginner level, got %d", len(terms))
 	}
@@ -161,11 +163,11 @@ func TestStorePooledUnseen(t *testing.T) {
 	s := testStore(t)
 	var chatID int64 = 111
 
-	s.AddToPool(kindDrill, defaultLevel, "run", "m1", "text-run")
-	s.AddToPool(kindDrill, defaultLevel, "jump", "m2", "text-jump")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "run", "m1", "text-run")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "jump", "m2", "text-jump")
 
 	// Selection is randomized, so the first unseen item is either run or jump.
-	term, _, _, ok, err := s.PooledUnseen(kindDrill, defaultLevel, chatID)
+	term, _, _, ok, err := s.PooledUnseen(config.KindDrill, config.DefaultLevel, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +179,7 @@ func TestStorePooledUnseen(t *testing.T) {
 	first := term
 	s.RecordSentWord(chatID, first)
 
-	term, _, _, ok, err = s.PooledUnseen(kindDrill, defaultLevel, chatID)
+	term, _, _, ok, err = s.PooledUnseen(config.KindDrill, config.DefaultLevel, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +190,7 @@ func TestStorePooledUnseen(t *testing.T) {
 	// Mark it seen too — now nothing is unseen.
 	s.RecordSentWord(chatID, term)
 
-	_, _, _, ok, err = s.PooledUnseen(kindDrill, defaultLevel, chatID)
+	_, _, _, ok, err = s.PooledUnseen(config.KindDrill, config.DefaultLevel, chatID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,15 +202,15 @@ func TestStorePooledUnseen(t *testing.T) {
 func TestStorePooledOldest(t *testing.T) {
 	s := testStore(t)
 
-	_, _, _, ok, _ := s.PooledOldest(kindDrill, defaultLevel)
+	_, _, _, ok, _ := s.PooledOldest(config.KindDrill, config.DefaultLevel)
 	if ok {
 		t.Fatal("expected ok=false on empty pool")
 	}
 
-	s.AddToPool(kindDrill, defaultLevel, "run", "m1", "text-run")
-	s.AddToPool(kindDrill, defaultLevel, "jump", "m2", "text-jump")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "run", "m1", "text-run")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "jump", "m2", "text-jump")
 
-	term, _, _, ok, err := s.PooledOldest(kindDrill, defaultLevel)
+	term, _, _, ok, err := s.PooledOldest(config.KindDrill, config.DefaultLevel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,14 +267,14 @@ func TestMigrateUpgradesPreV13Schema(t *testing.T) {
 	if !store.poolDedupIsLevelAware() {
 		t.Fatal("expected content_pool to be level-aware after migration")
 	}
-	if err := store.AddToPool(kindDrill, "beginner", "run", "", "text-run-beginner"); err != nil {
+	if err := store.AddToPool(config.KindDrill, "beginner", "run", "", "text-run-beginner"); err != nil {
 		t.Fatalf("AddToPool same term, other level: %v", err)
 	}
-	if terms, _ := store.PoolTerms(kindDrill, "beginner"); len(terms) != 1 {
+	if terms, _ := store.PoolTerms(config.KindDrill, "beginner"); len(terms) != 1 {
 		t.Fatalf("expected run pooled at beginner level post-migration, got %v", terms)
 	}
 	// The pre-existing row survived.
-	if terms, _ := store.PoolTerms(kindDrill, defaultLevel); len(terms) != 1 || terms[0] != "run" {
+	if terms, _ := store.PoolTerms(config.KindDrill, config.DefaultLevel); len(terms) != 1 || terms[0] != "run" {
 		t.Fatalf("expected original run preserved at default level, got %v", terms)
 	}
 
@@ -304,9 +306,9 @@ func TestServeContentRotatesWhenExhausted(t *testing.T) {
 	s.AddSubscriber(chatID)
 
 	// Distinct texts so we can detect repeats by content.
-	s.AddToPool(kindDrill, defaultLevel, "run", "", "text-run")
-	s.AddToPool(kindDrill, defaultLevel, "jump", "", "text-jump")
-	s.AddToPool(kindDrill, defaultLevel, "swim", "", "text-swim")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "run", "", "text-run")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "jump", "", "text-jump")
+	s.AddToPool(config.KindDrill, config.DefaultLevel, "swim", "", "text-swim")
 
 	ctx := context.Background()
 	chain := emptyProviderChain() // never used: allowGenerate=false stays pool-only
@@ -314,7 +316,7 @@ func TestServeContentRotatesWhenExhausted(t *testing.T) {
 	seen := map[string]bool{}
 	prev := ""
 	for i := 0; i < 30; i++ {
-		text, _, err := serveContent(ctx, chain, s, nil, chatID, kindDrill, defaultLevel, false)
+		text, _, err := serveContent(ctx, chain, s, nil, chatID, config.KindDrill, config.DefaultLevel, false)
 		if err != nil {
 			t.Fatalf("serveContent iteration %d: %v", i, err)
 		}
@@ -338,8 +340,8 @@ func TestStoreWordsSentBetween(t *testing.T) {
 	s := testStore(t)
 	var chatID int64 = 222
 
-	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card")
-	s.AddToPool(kindWord, defaultLevel, "banana", "yellow fruit", "card2")
+	s.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "card")
+	s.AddToPool(config.KindWord, config.DefaultLevel, "banana", "yellow fruit", "card2")
 
 	// Insert with controlled timestamps via raw SQL
 	s.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", chatID, "apple", "2025-06-01 10:00:00")
@@ -363,7 +365,7 @@ func TestStoreWordsSentBetween(t *testing.T) {
 
 	// content_pool is UNIQUE(kind, level, term): the same word can have a pool
 	// row at multiple levels. The review must still list each word once.
-	s.AddToPool(kindWord, "advanced", "apple", "a different-level meaning", "card3")
+	s.AddToPool(config.KindWord, "advanced", "apple", "a different-level meaning", "card3")
 	items, err = s.WordsSentBetween(chatID, "2025-06-01 00:00:00", "2025-06-03 00:00:00")
 	if err != nil {
 		t.Fatal(err)
@@ -635,7 +637,7 @@ func TestStoreChangelogs(t *testing.T) {
 
 func TestStoreMeaningForWord(t *testing.T) {
 	s := testStore(t)
-	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card text")
+	s.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "card text")
 
 	if got := s.MeaningForWord("apple"); got != "a fruit" {
 		t.Errorf("MeaningForWord(apple) = %q, want %q", got, "a fruit")
@@ -647,7 +649,7 @@ func TestStoreMeaningForWord(t *testing.T) {
 
 func TestStorePooledCardText(t *testing.T) {
 	s := testStore(t)
-	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "full card text")
+	s.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "full card text")
 
 	if got := s.PooledCardText("apple"); got != "full card text" {
 		t.Errorf("PooledCardText(apple) = %q, want %q", got, "full card text")
@@ -667,8 +669,8 @@ func TestStoreSnoozeReview(t *testing.T) {
 	now := time.Now().UTC()
 
 	s.AddSubscriber(chatID)
-	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card")
-	if err := s.recordSentFor(kindWord, chatID, "apple"); err != nil {
+	s.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "card")
+	if err := s.recordSentFor(config.KindWord, chatID, "apple"); err != nil {
 		t.Fatalf("recordSentFor: %v", err)
 	}
 
@@ -734,10 +736,10 @@ func TestStoreTotalMasteredCount(t *testing.T) {
 	// Seed reviews for 2 users
 	for _, chatID := range []int64{1, 2} {
 		s.AddSubscriber(chatID)
-		s.AddToPool(kindWord, defaultLevel, "word1", "m1", "t1")
-		s.AddToPool(kindWord, defaultLevel, "word2", "m2", "t2")
-		s.recordSentFor(kindWord, chatID, "word1")
-		s.recordSentFor(kindWord, chatID, "word2")
+		s.AddToPool(config.KindWord, config.DefaultLevel, "word1", "m1", "t1")
+		s.AddToPool(config.KindWord, config.DefaultLevel, "word2", "m2", "t2")
+		s.recordSentFor(config.KindWord, chatID, "word1")
+		s.recordSentFor(config.KindWord, chatID, "word2")
 	}
 
 	// Promote word1 for user 1 past mastery threshold (interval >= 21)
@@ -778,9 +780,9 @@ func TestCardNeedsRefresh(t *testing.T) {
 func TestUpdatePoolText(t *testing.T) {
 	s := testStoreHelper(t)
 
-	s.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "old card text")
+	s.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "old card text")
 
-	err := s.UpdatePoolText(kindWord, defaultLevel, "apple", "a delicious fruit", "new card text with 🇮🇷")
+	err := s.UpdatePoolText(config.KindWord, config.DefaultLevel, "apple", "a delicious fruit", "new card text with 🇮🇷")
 	if err != nil {
 		t.Fatalf("UpdatePoolText: %v", err)
 	}

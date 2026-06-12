@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // sampleDrill builds a drill fixture with n numbered forms in the canonical
@@ -238,10 +240,10 @@ func TestStripHTMLTags(t *testing.T) {
 
 func TestLevelInstruction(t *testing.T) {
 	results := map[string]string{
-		levelBeginner:     levelInstruction(levelBeginner),
-		levelIntermediate: levelInstruction(levelIntermediate),
-		levelUpperInt:     levelInstruction(levelUpperInt),
-		levelAdvanced:     levelInstruction(levelAdvanced),
+		config.LevelBeginner:     levelInstruction(config.LevelBeginner),
+		config.LevelIntermediate: levelInstruction(config.LevelIntermediate),
+		config.LevelUpperInt:     levelInstruction(config.LevelUpperInt),
+		config.LevelAdvanced:     levelInstruction(config.LevelAdvanced),
 	}
 
 	// All should be non-empty and distinct.
@@ -265,10 +267,10 @@ func TestLevelInstruction(t *testing.T) {
 
 func TestDrillLengthDirective(t *testing.T) {
 	results := map[string]string{
-		levelBeginner:     drillLengthDirective(levelBeginner),
-		levelIntermediate: drillLengthDirective(levelIntermediate),
-		levelUpperInt:     drillLengthDirective(levelUpperInt),
-		levelAdvanced:     drillLengthDirective(levelAdvanced),
+		config.LevelBeginner:     drillLengthDirective(config.LevelBeginner),
+		config.LevelIntermediate: drillLengthDirective(config.LevelIntermediate),
+		config.LevelUpperInt:     drillLengthDirective(config.LevelUpperInt),
+		config.LevelAdvanced:     drillLengthDirective(config.LevelAdvanced),
 	}
 	for level, result := range results {
 		if result == "" {
@@ -283,10 +285,10 @@ func TestDrillLengthDirective(t *testing.T) {
 		seen[result] = level
 	}
 	// Beginner should mention 8 words, upper-int 14.
-	if !strings.Contains(results[levelBeginner], "8") {
+	if !strings.Contains(results[config.LevelBeginner], "8") {
 		t.Error("beginner drill length should mention 8 words")
 	}
-	if !strings.Contains(results[levelUpperInt], "14") {
+	if !strings.Contains(results[config.LevelUpperInt], "14") {
 		t.Error("upper-intermediate drill length should mention 14 words")
 	}
 }
@@ -297,10 +299,10 @@ func TestDrillLengthDirective(t *testing.T) {
 
 func TestTipLevelInstruction(t *testing.T) {
 	results := map[string]string{
-		levelBeginner:     tipLevelInstruction(levelBeginner),
-		levelIntermediate: tipLevelInstruction(levelIntermediate),
-		levelUpperInt:     tipLevelInstruction(levelUpperInt),
-		levelAdvanced:     tipLevelInstruction(levelAdvanced),
+		config.LevelBeginner:     tipLevelInstruction(config.LevelBeginner),
+		config.LevelIntermediate: tipLevelInstruction(config.LevelIntermediate),
+		config.LevelUpperInt:     tipLevelInstruction(config.LevelUpperInt),
+		config.LevelAdvanced:     tipLevelInstruction(config.LevelAdvanced),
 	}
 	for level, result := range results {
 		if result == "" {
@@ -322,7 +324,7 @@ func TestTipLevelInstruction(t *testing.T) {
 
 func TestBuildDrillPrompt(t *testing.T) {
 	t.Run("no exclusions", func(t *testing.T) {
-		prompt := buildDrillPrompt(levelIntermediate, nil)
+		prompt := buildDrillPrompt(config.LevelIntermediate, nil)
 		if strings.Contains(prompt, "Do NOT use any of these verbs") {
 			t.Error("should not contain exclusion clause when exclude list is empty")
 		}
@@ -332,14 +334,14 @@ func TestBuildDrillPrompt(t *testing.T) {
 	})
 
 	t.Run("beginner includes length override", func(t *testing.T) {
-		prompt := buildDrillPrompt(levelBeginner, nil)
+		prompt := buildDrillPrompt(config.LevelBeginner, nil)
 		if !strings.Contains(prompt, "max 8 words") {
 			t.Error("beginner drill should include length directive for 8 words")
 		}
 	})
 
 	t.Run("with exclusions", func(t *testing.T) {
-		prompt := buildDrillPrompt(levelIntermediate, []string{"walk", "run"})
+		prompt := buildDrillPrompt(config.LevelIntermediate, []string{"walk", "run"})
 		if !strings.Contains(prompt, "walk, run") {
 			t.Error("should contain the excluded verbs")
 		}
@@ -355,14 +357,14 @@ func TestBuildDrillPrompt(t *testing.T) {
 
 func TestBuildWordPrompt(t *testing.T) {
 	t.Run("no exclusions", func(t *testing.T) {
-		prompt := buildWordPrompt(levelBeginner, nil)
+		prompt := buildWordPrompt(config.LevelBeginner, nil)
 		if strings.Contains(prompt, "Do NOT use any of these words") {
 			t.Error("should not contain exclusion clause when exclude list is empty")
 		}
 	})
 
 	t.Run("with exclusions", func(t *testing.T) {
-		prompt := buildWordPrompt(levelBeginner, []string{"tedious", "bright"})
+		prompt := buildWordPrompt(config.LevelBeginner, []string{"tedious", "bright"})
 		if !strings.Contains(prompt, "tedious, bright") {
 			t.Error("should contain the excluded words")
 		}
@@ -378,7 +380,7 @@ func TestBuildWordPrompt(t *testing.T) {
 
 func TestBuildIdiomPrompt(t *testing.T) {
 	t.Run("no exclusions", func(t *testing.T) {
-		prompt := buildIdiomPrompt(levelIntermediate, nil)
+		prompt := buildIdiomPrompt(config.LevelIntermediate, nil)
 		if strings.Contains(prompt, "Do NOT use any of these idioms") {
 			t.Error("should not contain exclusion clause when exclude list is empty")
 		}
@@ -388,7 +390,7 @@ func TestBuildIdiomPrompt(t *testing.T) {
 	})
 
 	t.Run("with exclusions", func(t *testing.T) {
-		prompt := buildIdiomPrompt(levelIntermediate, []string{"break the ice", "piece of cake"})
+		prompt := buildIdiomPrompt(config.LevelIntermediate, []string{"break the ice", "piece of cake"})
 		if !strings.Contains(prompt, "break the ice, piece of cake") {
 			t.Error("should contain the excluded idioms")
 		}
@@ -463,7 +465,7 @@ func TestParseTipTopic(t *testing.T) {
 
 func TestBuildTipPrompt(t *testing.T) {
 	t.Run("no exclusions", func(t *testing.T) {
-		prompt := buildTipPrompt(levelIntermediate, nil)
+		prompt := buildTipPrompt(config.LevelIntermediate, nil)
 		if strings.Contains(prompt, "Avoid these already-pooled grammar topics") {
 			t.Error("should not contain exclusion clause when list is empty")
 		}
@@ -473,7 +475,7 @@ func TestBuildTipPrompt(t *testing.T) {
 	})
 
 	t.Run("with exclusions", func(t *testing.T) {
-		prompt := buildTipPrompt(levelIntermediate, []string{"used to vs would", "since vs for"})
+		prompt := buildTipPrompt(config.LevelIntermediate, []string{"used to vs would", "since vs for"})
 		if !strings.Contains(prompt, "used to vs would, since vs for") {
 			t.Error("should contain excluded topics")
 		}
@@ -481,10 +483,10 @@ func TestBuildTipPrompt(t *testing.T) {
 
 	t.Run("level directives are distinct", func(t *testing.T) {
 		results := map[string]string{
-			levelBeginner:     buildTipPrompt(levelBeginner, nil),
-			levelIntermediate: buildTipPrompt(levelIntermediate, nil),
-			levelUpperInt:     buildTipPrompt(levelUpperInt, nil),
-			levelAdvanced:     buildTipPrompt(levelAdvanced, nil),
+			config.LevelBeginner:     buildTipPrompt(config.LevelBeginner, nil),
+			config.LevelIntermediate: buildTipPrompt(config.LevelIntermediate, nil),
+			config.LevelUpperInt:     buildTipPrompt(config.LevelUpperInt, nil),
+			config.LevelAdvanced:     buildTipPrompt(config.LevelAdvanced, nil),
 		}
 		seen := map[string]string{}
 		for level, result := range results {
@@ -501,7 +503,7 @@ func TestBuildTipPrompt(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildWordLookupPrompt(t *testing.T) {
-	prompt := buildWordLookupPrompt(levelIntermediate, "apple")
+	prompt := buildWordLookupPrompt(config.LevelIntermediate, "apple")
 
 	if !strings.Contains(prompt, "apple") {
 		t.Error("prompt should contain the lookup term 'apple'")
@@ -509,7 +511,7 @@ func TestBuildWordLookupPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "LOOKUP MODE") {
 		t.Error("prompt should contain 'LOOKUP MODE'")
 	}
-	if !strings.Contains(prompt, levelInstruction(levelIntermediate)) {
+	if !strings.Contains(prompt, levelInstruction(config.LevelIntermediate)) {
 		t.Error("prompt should contain the level instruction text")
 	}
 	if !strings.Contains(prompt, wordPromptBase) {

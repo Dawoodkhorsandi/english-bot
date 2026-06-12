@@ -5,15 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-)
 
-const (
-	kindDrill       = "drill"
-	kindWord        = "word"
-	kindIdiom       = "idiom"
-	kindTip         = "tip"
-	kindCollocation = "collocation"
-	kindStory       = "story"
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // drillPageGroups defines how a drill's numbered forms are split across paged
@@ -283,11 +276,11 @@ func buildDrillPrompt(level string, exclude []string) string {
 // drillLengthDirective overrides the base prompt's sentence-length rule per level.
 func drillLengthDirective(level string) string {
 	switch level {
-	case levelBeginner:
+	case config.LevelBeginner:
 		return "Override the max-words rule above: keep every drill sentence to max 8 words."
-	case levelUpperInt:
+	case config.LevelUpperInt:
 		return "Override the max-words rule above: sentences may be up to 14 words, with natural complexity."
-	case levelAdvanced:
+	case config.LevelAdvanced:
 		return "Override the max-words rule above: sentences may be up to 16 words, with rich structure."
 	default:
 		return "Keep every drill sentence to max 10 words with clear, simple grammar."
@@ -333,11 +326,11 @@ func buildTipPrompt(level string, exclude []string) string {
 // chosen topic and examples match the user's selected level.
 func tipLevelInstruction(level string) string {
 	switch level {
-	case levelBeginner:
+	case config.LevelBeginner:
 		return "DIFFICULTY: Target CEFR A1–A2 (beginner) learners. Pick a basic grammar rule (articles, simple tenses, subject-verb agreement). Keep examples very short and simple."
-	case levelUpperInt:
+	case config.LevelUpperInt:
 		return "DIFFICULTY: Target CEFR B2 (upper-intermediate) learners. Pick a grammar nuance that trips up confident speakers — e.g. subtle tense distinctions, advanced conditionals, cleft sentences, inversion. Keep examples natural and conversational."
-	case levelAdvanced:
+	case config.LevelAdvanced:
 		return "DIFFICULTY: Target CEFR C1–C2 (advanced) learners. Pick a sophisticated grammar point — e.g. subjunctive mood, discourse markers, ellipsis, fronting. Use examples with literary or academic register."
 	default:
 		return "DIFFICULTY: Target CEFR B1 (intermediate) learners. Pick a common grammar topic (present perfect vs past simple, prepositions, modal verbs). Use clear, everyday examples."
@@ -374,11 +367,11 @@ func buildStoryPrompt(level string, exclude []string) string {
 // story's length, vocabulary and sentence structure match the user's level.
 func storyLevelInstruction(level string) string {
 	switch level {
-	case levelBeginner:
+	case config.LevelBeginner:
 		return "DIFFICULTY: Target CEFR A1–A2 (beginner) learners. Keep the story to about 60–80 words in 2 short paragraphs. Use only simple present and simple past, short sentences (max 8 words), and very common vocabulary."
-	case levelUpperInt:
+	case config.LevelUpperInt:
 		return "DIFFICULTY: Target CEFR B2 (upper-intermediate) learners. Keep the story to about 140–180 words in 3 paragraphs. Use varied tenses, natural conversational phrasing and some idiomatic expressions."
-	case levelAdvanced:
+	case config.LevelAdvanced:
 		return "DIFFICULTY: Target CEFR C1–C2 (advanced) learners. Keep the story to about 180–220 words in 3–4 paragraphs. Use rich, nuanced vocabulary, subordinate clauses and varied registers."
 	default:
 		return "DIFFICULTY: Target CEFR B1 (intermediate) learners. Keep the story to about 100–130 words in 2–3 paragraphs. Use clear everyday vocabulary and straightforward grammar with simple and continuous tenses."
@@ -409,11 +402,11 @@ LOOKUP MODE — the learner asked about: "%s"
 //	advanced           → C1-C2  (sophisticated, less common)
 func levelInstruction(level string) string {
 	switch level {
-	case levelBeginner:
+	case config.LevelBeginner:
 		return "DIFFICULTY: Target CEFR A1–A2 (beginner) learners. Pick a very common, simple, high-frequency word and keep all example sentences short and easy (max 8 words)."
-	case levelUpperInt:
+	case config.LevelUpperInt:
 		return "DIFFICULTY: Target CEFR B2 (upper-intermediate) learners. Pick a word that is useful in both everyday and slightly formal contexts — the kind of word a confident speaker uses naturally but a learner might still be acquiring. Use example sentences with moderate complexity: compound sentences, occasional idiomatic expressions, and natural conversational flow. Stay conversational — avoid academic or obscure vocabulary."
-	case levelAdvanced:
+	case config.LevelAdvanced:
 		return "DIFFICULTY: Target CEFR C1–C2 (advanced) learners. Pick a sophisticated, less common word found in academic, professional, or literary contexts. Use richer, more nuanced example sentences with subordinate clauses, idiomatic phrasing, and varied registers."
 	default:
 		return "DIFFICULTY: Target CEFR B1 (intermediate) learners. Pick a common, practical, everyday word. Use clear, simple example sentences (max 10 words) with straightforward grammar — no complex clauses or idioms."
@@ -425,15 +418,15 @@ func levelInstruction(level string) string {
 func generateContent(ctx context.Context, chain *ProviderChain, kind, level string, exclude []string) (text, term, meaning, provider string, err error) {
 	var prompt string
 	switch kind {
-	case kindWord:
+	case config.KindWord:
 		prompt = buildWordPrompt(level, exclude)
-	case kindIdiom:
+	case config.KindIdiom:
 		prompt = buildIdiomPrompt(level, exclude)
-	case kindTip:
+	case config.KindTip:
 		prompt = buildTipPrompt(level, exclude)
-	case kindCollocation:
+	case config.KindCollocation:
 		prompt = buildCollocationPrompt(level, exclude)
-	case kindStory:
+	case config.KindStory:
 		prompt = buildStoryPrompt(level, exclude)
 	default:
 		prompt = buildDrillPrompt(level, exclude)
@@ -445,18 +438,18 @@ func generateContent(ctx context.Context, chain *ProviderChain, kind, level stri
 	}
 
 	switch kind {
-	case kindWord:
+	case config.KindWord:
 		term = parseWord(text)
 		meaning = parseMeaning(text)
-	case kindIdiom:
+	case config.KindIdiom:
 		term = parseIdiom(text)
 		meaning = parseMeaning(text)
-	case kindTip:
+	case config.KindTip:
 		term = parseTipTopic(text)
-	case kindCollocation:
+	case config.KindCollocation:
 		term = parseCollocation(text)
 		meaning = parseMeaning(text)
-	case kindStory:
+	case config.KindStory:
 		term = parseStoryTitle(text)
 	default:
 		term = parseVerb(text)

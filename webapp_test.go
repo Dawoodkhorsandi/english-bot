@@ -4,14 +4,16 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // saveWebAppURL snapshots the WEB_APP_URL global and restores it after the test
 // so toggling it never leaks into other tests.
 func saveWebAppURL(t *testing.T) {
 	t.Helper()
-	orig := webAppURL
-	t.Cleanup(func() { webAppURL = orig })
+	orig := config.WebAppURL
+	t.Cleanup(func() { config.WebAppURL = orig })
 }
 
 // TestStatsButtonRequiresWebAppURL is the regression guard for the "no Dashboard
@@ -33,7 +35,7 @@ func TestStatsButtonRequiresWebAppURL(t *testing.T) {
 	t.Run("unset sends plain text", func(t *testing.T) {
 		store := testStoreHelper(t)
 		mock := &mockNotifier{}
-		webAppURL = ""
+		config.WebAppURL = ""
 
 		handleMessage(context.Background(), emptyProviderChain(), store, mock, newStatsMsg())
 
@@ -49,7 +51,7 @@ func TestStatsButtonRequiresWebAppURL(t *testing.T) {
 	t.Run("set sends web_app button", func(t *testing.T) {
 		store := testStoreHelper(t)
 		mock := &mockNotifier{}
-		webAppURL = "https://bot.example.com"
+		config.WebAppURL = "https://bot.example.com"
 
 		handleMessage(context.Background(), emptyProviderChain(), store, mock, newStatsMsg())
 

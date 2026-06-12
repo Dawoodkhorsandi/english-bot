@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -27,9 +29,9 @@ func TestNormalizeLevel(t *testing.T) {
 		{" Beginner ", "beginner", true},
 		{"UPPER-INTERMEDIATE", "upper-intermediate", true},
 		{" Upper-Intermediate ", "upper-intermediate", true},
-		{"", defaultLevel, false},
-		{"unknown", defaultLevel, false},
-		{"pro", defaultLevel, false},
+		{"", config.DefaultLevel, false},
+		{"unknown", config.DefaultLevel, false},
+		{"pro", config.DefaultLevel, false},
 	}
 	for _, tt := range tests {
 		got, ok := normalizeLevel(tt.input)
@@ -140,8 +142,8 @@ func TestStoreGetPrefsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPrefs: %v", err)
 	}
-	if prefs.Level != defaultLevel {
-		t.Errorf("default level = %q, want %q", prefs.Level, defaultLevel)
+	if prefs.Level != config.DefaultLevel {
+		t.Errorf("default level = %q, want %q", prefs.Level, config.DefaultLevel)
 	}
 	if prefs.Paused {
 		t.Error("default paused should be false")
@@ -173,8 +175,8 @@ func TestStoreSetAndGetLevel(t *testing.T) {
 	if err := store.SetLevel(chatID, "garbage"); err != nil {
 		t.Fatalf("SetLevel: %v", err)
 	}
-	if got := store.GetLevel(chatID); got != defaultLevel {
-		t.Errorf("GetLevel after invalid = %q, want %q", got, defaultLevel)
+	if got := store.GetLevel(chatID); got != config.DefaultLevel {
+		t.Errorf("GetLevel after invalid = %q, want %q", got, config.DefaultLevel)
 	}
 }
 
@@ -385,7 +387,7 @@ func TestQuizDueForUser(t *testing.T) {
 		{12, 24, false},
 	} {
 		t.Run(fmt.Sprintf("h%d_int%d", tc.hour, tc.interval), func(t *testing.T) {
-			appLocation = time.UTC
+			config.AppLocation = time.UTC
 			now := base.Add(time.Duration(tc.hour) * time.Hour)
 			if got := quizDueForUser(now, tc.interval); got != tc.want {
 				t.Errorf("quizDueForUser(hour=%d, interval=%d) = %v, want %v", tc.hour, tc.interval, got, tc.want)
@@ -402,8 +404,8 @@ func TestStoreActiveLevels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActiveLevels: %v", err)
 	}
-	if len(levels) != 1 || levels[0] != defaultLevel {
-		t.Errorf("ActiveLevels (empty) = %v, want [%s]", levels, defaultLevel)
+	if len(levels) != 1 || levels[0] != config.DefaultLevel {
+		t.Errorf("ActiveLevels (empty) = %v, want [%s]", levels, config.DefaultLevel)
 	}
 
 	// Add a user with a different level.
@@ -420,7 +422,7 @@ func TestStoreActiveLevels(t *testing.T) {
 	for _, l := range levels {
 		has[l] = true
 	}
-	for _, want := range []string{defaultLevel, "beginner", "advanced"} {
+	for _, want := range []string{config.DefaultLevel, "beginner", "advanced"} {
 		if !has[want] {
 			t.Errorf("ActiveLevels missing %q, got %v", want, levels)
 		}
@@ -428,7 +430,7 @@ func TestStoreActiveLevels(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// getEnvWeekday (config.go)
+// config.GetEnvWeekday (config.go)
 // ---------------------------------------------------------------------------
 
 func TestGetEnvWeekday(t *testing.T) {
@@ -456,8 +458,8 @@ func TestGetEnvWeekday(t *testing.T) {
 			if tt.set {
 				t.Setenv(key, tt.value)
 			}
-			if got := getEnvWeekday(key, tt.fallback); got != tt.want {
-				t.Errorf("getEnvWeekday(%q, %d) [env=%q set=%v] = %d, want %d",
+			if got := config.GetEnvWeekday(key, tt.fallback); got != tt.want {
+				t.Errorf("config.GetEnvWeekday(%q, %d) [env=%q set=%v] = %d, want %d",
 					key, tt.fallback, tt.value, tt.set, got, tt.want)
 			}
 		})
@@ -506,17 +508,17 @@ func TestSentTableFor(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPoolTargetFor(t *testing.T) {
-	if got := poolTargetFor(kindWord, defaultLevel); got != poolTarget {
-		t.Errorf("poolTargetFor(%q,%q) = %d, want %d", kindWord, defaultLevel, got, poolTarget)
+	if got := poolTargetFor(config.KindWord, config.DefaultLevel); got != config.PoolTarget {
+		t.Errorf("poolTargetFor(%q,%q) = %d, want %d", config.KindWord, config.DefaultLevel, got, config.PoolTarget)
 	}
-	if got := poolTargetFor(kindWord, "beginner"); got != poolMin {
-		t.Errorf("poolTargetFor(word,beginner) = %d, want %d", got, poolMin)
+	if got := poolTargetFor(config.KindWord, "beginner"); got != config.PoolMin {
+		t.Errorf("poolTargetFor(word,beginner) = %d, want %d", got, config.PoolMin)
 	}
-	if got := poolTargetFor(kindWord, "upper-intermediate"); got != poolMin {
-		t.Errorf("poolTargetFor(word,upper-intermediate) = %d, want %d", got, poolMin)
+	if got := poolTargetFor(config.KindWord, "upper-intermediate"); got != config.PoolMin {
+		t.Errorf("poolTargetFor(word,upper-intermediate) = %d, want %d", got, config.PoolMin)
 	}
-	if got := poolTargetFor(kindWord, "advanced"); got != poolMin {
-		t.Errorf("poolTargetFor(word,advanced) = %d, want %d", got, poolMin)
+	if got := poolTargetFor(config.KindWord, "advanced"); got != config.PoolMin {
+		t.Errorf("poolTargetFor(word,advanced) = %d, want %d", got, config.PoolMin)
 	}
 }
 
@@ -544,7 +546,7 @@ func TestPlural(t *testing.T) {
 
 func TestFormatStatsVariants(t *testing.T) {
 	t.Run("base case", func(t *testing.T) {
-		msg := formatStats(UserStats{Level: defaultLevel}, "")
+		msg := formatStats(UserStats{Level: config.DefaultLevel}, "")
 		if !strings.Contains(msg, "Your Progress") {
 			t.Error("missing 'Your Progress'")
 		}
@@ -557,7 +559,7 @@ func TestFormatStatsVariants(t *testing.T) {
 	})
 
 	t.Run("with quiz stats", func(t *testing.T) {
-		msg := formatStats(UserStats{Level: defaultLevel, QuizAnswered: 10, QuizCorrect: 7}, "")
+		msg := formatStats(UserStats{Level: config.DefaultLevel, QuizAnswered: 10, QuizCorrect: 7}, "")
 		if !strings.Contains(msg, "Quiz accuracy") {
 			t.Error("missing 'Quiz accuracy'")
 		}
@@ -567,14 +569,14 @@ func TestFormatStatsVariants(t *testing.T) {
 	})
 
 	t.Run("paused", func(t *testing.T) {
-		msg := formatStats(UserStats{Level: defaultLevel, Paused: true}, "")
+		msg := formatStats(UserStats{Level: config.DefaultLevel, Paused: true}, "")
 		if !strings.Contains(msg, "paused") {
 			t.Error("missing 'paused'")
 		}
 	})
 
 	t.Run("streak with flame", func(t *testing.T) {
-		msg := formatStats(UserStats{Level: defaultLevel, CurrentStreak: 5}, "")
+		msg := formatStats(UserStats{Level: config.DefaultLevel, CurrentStreak: 5}, "")
 		if !strings.Contains(msg, "🔥") {
 			t.Error("missing flame emoji for streak >= 3")
 		}

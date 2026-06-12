@@ -19,14 +19,8 @@ import (
 	"time"
 	_ "time/tzdata" // embed the IANA tz database so Asia/Tehran resolves without OS tzdata
 
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 	_ "modernc.org/sqlite"
-)
-
-// Configuration - Read from Environment Variables
-var (
-	TelegramBotToken = getEnv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
-	GeminiAPIKey     = getEnv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY")
-	MaintainerChatID = getEnv("MAINTAINER_CHAT_ID", "YOUR_PERSONAL_CHAT_ID")
 )
 
 var telegramHTTPClient = &http.Client{Timeout: 30 * time.Second}
@@ -472,13 +466,13 @@ type webAppInfo struct {
 func main() {
 	log.Println("⚙️  [INIT] Initializing Telegram English Muscle Memory Bot...")
 
-	log.Printf("⚙️  [CONFIG] Telegram Token Loaded: %t (Length: %d)", TelegramBotToken != "YOUR_TELEGRAM_BOT_TOKEN" && TelegramBotToken != "", len(TelegramBotToken))
-	log.Printf("⚙️  [CONFIG] Maintainer Chat ID Target: %s", MaintainerChatID)
+	log.Printf("⚙️  [CONFIG] Telegram Token Loaded: %t (Length: %d)", config.TelegramBotToken != "YOUR_TELEGRAM_BOT_TOKEN" && config.TelegramBotToken != "", len(config.TelegramBotToken))
+	log.Printf("⚙️  [CONFIG] Maintainer Chat ID Target: %s", config.MaintainerChatID)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	loadLocation()
+	config.LoadLocation()
 
 	log.Println("⚙️  [INIT] Building AI provider chain...")
 	chain := newProviderChain(ctx)
@@ -506,16 +500,16 @@ func main() {
 	// When WEB_APP_URL is empty the server never starts, so nothing listens on
 	// WEB_APP_PORT — a reverse proxy in front of it will return 502, and /stats
 	// shows no Dashboard button. Log both states explicitly so that is obvious.
-	if webAppURL != "" {
-		if !strings.HasPrefix(webAppURL, "https://") {
-			log.Printf("⚠️  [WEBAPP] WEB_APP_URL=%q is not https:// — Telegram rejects non-HTTPS Mini App buttons, so /stats will fail to send.", webAppURL)
+	if config.WebAppURL != "" {
+		if !strings.HasPrefix(config.WebAppURL, "https://") {
+			log.Printf("⚠️  [WEBAPP] WEB_APP_URL=%q is not https:// — Telegram rejects non-HTTPS Mini App buttons, so /stats will fail to send.", config.WebAppURL)
 		}
 		startWebServer(store, notifier)
 		// Make the Mini App the chat's persistent menu button (the "sticky"
 		// button next to the message input), so it's always one tap away.
 		setChatMenuButton()
 	} else {
-		log.Printf("ℹ️  [WEBAPP] WEB_APP_URL not set — Mini App dashboard disabled; /stats shows text only and port %s is not served.", webAppPort)
+		log.Printf("ℹ️  [WEBAPP] WEB_APP_URL not set — Mini App dashboard disabled; /stats shows text only and port %s is not served.", config.WebAppPort)
 	}
 
 	// Register bot commands with Telegram so users see a command menu.
@@ -571,7 +565,7 @@ func pollTelegramUpdates(ctx context.Context, chain *ProviderChain, store *Store
 			return
 		default:
 			url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30&allowed_updates=%s",
-				TelegramBotToken, offset,
+				config.TelegramBotToken, offset,
 				"%5B%22message%22%2C%22callback_query%22%2C%22poll_answer%22%5D")
 
 			log.Printf("📡 [POLLER_REQ] Requesting updates from endpoint gateway. Current Offset pointer: %d", offset)
@@ -697,9 +691,9 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			}
 			maintainerMsg := fmt.Sprintf("<b>🎉 New User Joined!</b>\n<b>ID:</b> %d\n<b>Username:</b> @%s", fromID, username)
 
-			mID, parseErr := strconv.ParseInt(MaintainerChatID, 10, 64)
+			mID, parseErr := strconv.ParseInt(config.MaintainerChatID, 10, 64)
 			if parseErr != nil {
-				log.Printf("❌ [PARSE_ERR] Invalid MaintainerChatID %q: %v", MaintainerChatID, parseErr)
+				log.Printf("❌ [PARSE_ERR] Invalid config.MaintainerChatID %q: %v", config.MaintainerChatID, parseErr)
 			} else {
 				_ = notifier.Send(mID, maintainerMsg)
 			}
@@ -779,7 +773,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Generating your drill...</b>")
 
-		drill, _, err := serveContent(ctx, chain, store, notifier, chatID, kindDrill, store.GetLevel(chatID), true)
+		drill, _, err := serveContent(ctx, chain, store, notifier, chatID, config.KindDrill, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -795,7 +789,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding a fresh word for you...</b>")
 
-		card, term, err := serveContent(ctx, chain, store, notifier, chatID, kindWord, store.GetLevel(chatID), true)
+		card, term, err := serveContent(ctx, chain, store, notifier, chatID, config.KindWord, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Word generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -813,7 +807,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding an idiom for you...</b>")
 
-		card, _, err := serveContent(ctx, chain, store, notifier, chatID, kindIdiom, store.GetLevel(chatID), true)
+		card, _, err := serveContent(ctx, chain, store, notifier, chatID, config.KindIdiom, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Idiom generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -830,7 +824,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Finding a collocation for you...</b>")
 
-		card, _, err := serveContent(ctx, chain, store, notifier, chatID, kindCollocation, store.GetLevel(chatID), true)
+		card, _, err := serveContent(ctx, chain, store, notifier, chatID, config.KindCollocation, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Collocation generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -847,7 +841,7 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		notifier.SendTyping(chatID)
 		_ = notifier.Send(chatID, "🔄 <b>Writing a mini story for you...</b>")
 
-		card, _, err := serveContent(ctx, chain, store, notifier, chatID, kindStory, store.GetLevel(chatID), true)
+		card, _, err := serveContent(ctx, chain, store, notifier, chatID, config.KindStory, store.GetLevel(chatID), true)
 		if err != nil {
 			log.Printf("❌ [AI_ERR] Story generation failed for ChatID %d: %v", chatID, err)
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't reach the AI right now. Please try again.")
@@ -889,10 +883,10 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 			_ = notifier.Send(chatID, "❌ Sorry, I couldn't pull your stats right now. Please try again.")
 			return
 		}
-		if webAppURL != "" {
+		if config.WebAppURL != "" {
 			kb := [][]inlineButton{{{
 				Text:   "📊 Full Dashboard",
-				WebApp: &webAppInfo{URL: webAppURL + "/stats"},
+				WebApp: &webAppInfo{URL: config.WebAppURL + "/stats"},
 			}}}
 			_ = notifier.SendKeyboard(chatID, formatStats(stats, firstName), kb)
 		} else {
@@ -900,13 +894,13 @@ func handleMessage(ctx context.Context, chain *ProviderChain, store *Store, noti
 		}
 
 	case "/app":
-		if webAppURL == "" {
+		if config.WebAppURL == "" {
 			_ = notifier.Send(chatID, "📱 The in-app experience isn't available right now. You can still use all features here in the chat.")
 			return
 		}
 		kb := [][]inlineButton{{{
 			Text:   "📱 Open the app",
-			WebApp: &webAppInfo{URL: webAppURL},
+			WebApp: &webAppInfo{URL: config.WebAppURL},
 		}}}
 		_ = notifier.SendKeyboard(chatID,
 			"📱 <b>Your English hub</b>\n\nProgress, your word list and more — all in one place. Tap below to open it.",
@@ -1101,10 +1095,10 @@ func handleWordLookup(ctx context.Context, chain *ProviderChain, store *Store, n
 	// Treat a successful lookup like an on-demand /word: pool it and record it so
 	// it counts toward /stats, feeds the daily review, and isn't repeated.
 	if word != "" {
-		if err := store.AddToPool(kindWord, level, word, meaning, card); err != nil {
+		if err := store.AddToPool(config.KindWord, level, word, meaning, card); err != nil {
 			log.Printf("⚠️  [LOOKUP] Could not pool %q: %v", word, err)
 		}
-		if err := store.recordSentFor(kindWord, chatID, word); err != nil {
+		if err := store.recordSentFor(config.KindWord, chatID, word); err != nil {
 			log.Printf("⚠️  [LOOKUP] Could not record %q for chat %d: %v", word, chatID, err)
 		}
 	}
@@ -1129,7 +1123,7 @@ func isMaintainer(chatID int64) bool {
 
 // maintainerID parses MAINTAINER_CHAT_ID and reports whether it's usable.
 func maintainerID() (int64, bool) {
-	mID, err := strconv.ParseInt(MaintainerChatID, 10, 64)
+	mID, err := strconv.ParseInt(config.MaintainerChatID, 10, 64)
 	if err != nil || mID == 0 {
 		return 0, false
 	}
@@ -1148,7 +1142,7 @@ func handleMetrics(store *Store, chain *ProviderChain, notifier Notifier, chatID
 
 	b.WriteString("📦 <b>Pool depth:</b>\n")
 	levels, _ := store.ActiveLevels()
-	for _, kind := range []string{kindDrill, kindWord, kindIdiom, kindCollocation, kindStory} {
+	for _, kind := range []string{config.KindDrill, config.KindWord, config.KindIdiom, config.KindCollocation, config.KindStory} {
 		for _, level := range levels {
 			count, _ := store.PoolCount(kind, level)
 			target := poolTargetFor(kind, level)
@@ -1156,8 +1150,8 @@ func handleMetrics(store *Store, chain *ProviderChain, notifier Notifier, chatID
 		}
 	}
 	// Tips are level-independent — stocked only at the default level.
-	tipCount, _ := store.PoolCount(kindTip, defaultLevel)
-	b.WriteString(fmt.Sprintf("  %s: <b>%d</b>/%d\n", kindTip, tipCount, poolTargetFor(kindTip, defaultLevel)))
+	tipCount, _ := store.PoolCount(config.KindTip, config.DefaultLevel)
+	b.WriteString(fmt.Sprintf("  %s: <b>%d</b>/%d\n", config.KindTip, tipCount, poolTargetFor(config.KindTip, config.DefaultLevel)))
 	b.WriteString("\n")
 
 	totalAnswered, totalCorrect, _ := store.TotalQuizStats()
@@ -1201,19 +1195,19 @@ func handlePoolUsage(store *Store, notifier Notifier, chatID int64) {
 	// level, plus level-independent tips at the default level.
 	type poolKey struct{ kind, level string }
 	var keys []poolKey
-	for _, kind := range []string{kindDrill, kindWord, kindIdiom, kindCollocation, kindStory} {
+	for _, kind := range []string{config.KindDrill, config.KindWord, config.KindIdiom, config.KindCollocation, config.KindStory} {
 		for _, level := range levels {
 			keys = append(keys, poolKey{kind, level})
 		}
 	}
-	keys = append(keys, poolKey{kindTip, defaultLevel})
+	keys = append(keys, poolKey{config.KindTip, config.DefaultLevel})
 
 	for _, k := range keys {
 		count, _ := store.PoolCount(k.kind, k.level)
 		target := poolTargetFor(k.kind, k.level)
 		label := k.kind + "/" + k.level
-		if k.kind == kindTip {
-			label = kindTip
+		if k.kind == config.KindTip {
+			label = config.KindTip
 		}
 		if count == 0 {
 			b.WriteString(fmt.Sprintf("  %s: <i>empty</i> · pool 0/%d\n", label, target))
@@ -1300,9 +1294,9 @@ func handleHealth(store *Store, chain *ProviderChain, notifier Notifier, chatID 
 		b.WriteString(fmt.Sprintf("  • %s: ✅\n", p.Name()))
 	}
 
-	now := time.Now().In(appLocation)
+	now := time.Now().In(config.AppLocation)
 	b.WriteString(fmt.Sprintf("\n🕐 Server time: <b>%s</b>\n", now.Format("2006-01-02 15:04:05 MST")))
-	b.WriteString(fmt.Sprintf("🌙 Quiet hours: %s–%s", quietStart, quietEnd))
+	b.WriteString(fmt.Sprintf("🌙 Quiet hours: %s–%s", config.QuietStart, config.QuietEnd))
 	if isQuietHours(time.Now()) {
 		b.WriteString(" (currently quiet)")
 	}
@@ -1334,12 +1328,10 @@ func handleAdminConfig(store *Store, notifier Notifier, chatID int64) {
 // configText formats the admin config panel body.
 func configText() string {
 	onOff := "ON"
-	if !ttsEnabled {
+	if !config.TTSEnabled {
 		onOff = "OFF"
 	}
-	poolOverrideMu.RLock()
-	kindOverrides, levelOverrides, klOverrides := len(poolKindTargets), len(poolLevelTargets), len(poolKindLevelTargets)
-	poolOverrideMu.RUnlock()
+	klOverrides, kindOverrides, levelOverrides := config.OverrideCounts()
 	return fmt.Sprintf(
 		"⚙️ <b>Bot Config</b> (Admin)\n\n"+
 			"📦 <b>Pool target:</b> %d  •  <b>Pool min:</b> %d\n"+
@@ -1349,36 +1341,36 @@ func configText() string {
 			"⏱ <b>Gen spacing:</b> %s\n"+
 			"🧠 <b>Review batch max:</b> %d\n\n"+
 			"Tap a setting to change it.",
-		poolTarget, poolMin,
+		config.PoolTarget, config.PoolMin,
 		klOverrides, kindOverrides, levelOverrides,
-		quietStart, quietEnd,
+		config.QuietStart, config.QuietEnd,
 		onOff,
-		genSpacing,
-		reviewBatchMax,
+		config.GenSpacing,
+		config.ReviewBatchMax,
 	)
 }
 
 // configKeyboard builds the admin config panel inline keyboard.
 func configKeyboard() [][]inlineButton {
 	ttsLabel := "🔊 Global TTS: ON"
-	if !ttsEnabled {
+	if !config.TTSEnabled {
 		ttsLabel = "🔊 Global TTS: OFF"
 	}
 	return [][]inlineButton{
 		{
-			{Text: fmt.Sprintf("📦 Pool target: %d", poolTarget), CallbackData: "cfg:goto:pool_target"},
-			{Text: fmt.Sprintf("📦 Pool min: %d", poolMin), CallbackData: "cfg:goto:pool_min"},
+			{Text: fmt.Sprintf("📦 Pool target: %d", config.PoolTarget), CallbackData: "cfg:goto:pool_target"},
+			{Text: fmt.Sprintf("📦 Pool min: %d", config.PoolMin), CallbackData: "cfg:goto:pool_min"},
 		},
 		{
-			{Text: fmt.Sprintf("🌙 Quiet start: %s", quietStart), CallbackData: "cfg:goto:quiet_start"},
-			{Text: fmt.Sprintf("🌙 Quiet end: %s", quietEnd), CallbackData: "cfg:goto:quiet_end"},
+			{Text: fmt.Sprintf("🌙 Quiet start: %s", config.QuietStart), CallbackData: "cfg:goto:quiet_start"},
+			{Text: fmt.Sprintf("🌙 Quiet end: %s", config.QuietEnd), CallbackData: "cfg:goto:quiet_end"},
 		},
 		{
 			{Text: ttsLabel, CallbackData: "cfg:toggle:tts"},
-			{Text: fmt.Sprintf("⏱ Gen spacing: %s", genSpacing), CallbackData: "cfg:goto:gen_spacing"},
+			{Text: fmt.Sprintf("⏱ Gen spacing: %s", config.GenSpacing), CallbackData: "cfg:goto:gen_spacing"},
 		},
 		{
-			{Text: fmt.Sprintf("🧠 Review batch: %d", reviewBatchMax), CallbackData: "cfg:goto:review_batch"},
+			{Text: fmt.Sprintf("🧠 Review batch: %d", config.ReviewBatchMax), CallbackData: "cfg:goto:review_batch"},
 		},
 		{
 			{Text: "📦 Per kind + level", CallbackData: "cfg:goto:pool_kl"},
@@ -1397,7 +1389,7 @@ func configPoolTargetKeyboard() [][]inlineButton {
 	var row []inlineButton
 	for _, v := range presets {
 		label := fmt.Sprintf("%d", v)
-		if v == poolTarget {
+		if v == config.PoolTarget {
 			label = "✅ " + label
 		}
 		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:pool_target:%d", v)})
@@ -1420,7 +1412,7 @@ func configPoolMinKeyboard() [][]inlineButton {
 	var row []inlineButton
 	for _, v := range presets {
 		label := fmt.Sprintf("%d", v)
-		if v == poolMin {
+		if v == config.PoolMin {
 			label = "✅ " + label
 		}
 		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:pool_min:%d", v)})
@@ -1443,7 +1435,7 @@ func configQuietStartKeyboard() [][]inlineButton {
 	var row []inlineButton
 	for _, v := range presets {
 		label := v
-		if v == quietStart {
+		if v == config.QuietStart {
 			label = "✅ " + label
 		}
 		row = append(row, inlineButton{Text: label, CallbackData: "cfg:quiet_start:" + v})
@@ -1466,7 +1458,7 @@ func configQuietEndKeyboard() [][]inlineButton {
 	var row []inlineButton
 	for _, v := range presets {
 		label := v
-		if v == quietEnd {
+		if v == config.QuietEnd {
 			label = "✅ " + label
 		}
 		row = append(row, inlineButton{Text: label, CallbackData: "cfg:quiet_end:" + v})
@@ -1492,7 +1484,7 @@ func configGenSpacingKeyboard() [][]inlineButton {
 	var row []inlineButton
 	for _, v := range presets {
 		label := v.String()
-		if v == genSpacing {
+		if v == config.GenSpacing {
 			label = "✅ " + label
 		}
 		row = append(row, inlineButton{Text: label, CallbackData: "cfg:gen_spacing:" + v.String()})
@@ -1514,7 +1506,7 @@ func configReviewBatchKeyboard() [][]inlineButton {
 	var row []inlineButton
 	for _, v := range presets {
 		label := fmt.Sprintf("%d", v)
-		if v == reviewBatchMax {
+		if v == config.ReviewBatchMax {
 			label = "✅ " + label
 		}
 		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:review_batch:%d", v)})
@@ -1539,8 +1531,8 @@ func poolOverrideLabel(v int, ok bool) string {
 func configPoolKindsKeyboard() [][]inlineButton {
 	var rows [][]inlineButton
 	var row []inlineButton
-	for _, k := range configurableKinds {
-		v, ok := poolKindOverride(k)
+	for _, k := range config.ConfigurableKinds {
+		v, ok := config.PoolKindOverride(k)
 		row = append(row, inlineButton{
 			Text:         fmt.Sprintf("%s: %s", k, poolOverrideLabel(v, ok)),
 			CallbackData: "cfg:goto:pk:" + k,
@@ -1562,8 +1554,8 @@ func configPoolKindsKeyboard() [][]inlineButton {
 func configPoolLevelsKeyboard() [][]inlineButton {
 	var rows [][]inlineButton
 	var row []inlineButton
-	for _, l := range allLevels {
-		v, ok := poolLevelOverride(l)
+	for _, l := range config.AllLevels {
+		v, ok := config.PoolLevelOverride(l)
 		row = append(row, inlineButton{
 			Text:         fmt.Sprintf("%s: %s", levelLabel(l), poolOverrideLabel(v, ok)),
 			CallbackData: "cfg:goto:pl:" + l,
@@ -1586,8 +1578,8 @@ func configPoolLevelsKeyboard() [][]inlineButton {
 func configPoolKLKindsKeyboard() [][]inlineButton {
 	var rows [][]inlineButton
 	var row []inlineButton
-	for _, k := range configurableKinds {
-		if k == kindTip {
+	for _, k := range config.ConfigurableKinds {
+		if k == config.KindTip {
 			continue // tips have a single, level-independent pool
 		}
 		row = append(row, inlineButton{
@@ -1612,8 +1604,8 @@ func configPoolKLKindsKeyboard() [][]inlineButton {
 func configPoolKLLevelsKeyboard(kind string) [][]inlineButton {
 	var rows [][]inlineButton
 	var row []inlineButton
-	for _, l := range allLevels {
-		v, ok := poolKindLevelOverride(kind, l)
+	for _, l := range config.AllLevels {
+		v, ok := config.PoolKindLevelOverride(kind, l)
 		row = append(row, inlineButton{
 			Text:         fmt.Sprintf("%s: %s", levelLabel(l), poolOverrideLabel(v, ok)),
 			CallbackData: "cfg:goto:klv:" + kind + ":" + l,
@@ -1721,14 +1713,14 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 
 	// cfg:toggle:tts — flip global TTS.
 	if rest == "toggle:tts" {
-		ttsEnabled = !ttsEnabled
+		config.TTSEnabled = !config.TTSEnabled
 		val := "false"
-		if ttsEnabled {
+		if config.TTSEnabled {
 			val = "true"
 		}
 		_ = store.SetBotConfig("tts_enabled", val)
 		label := "OFF"
-		if ttsEnabled {
+		if config.TTSEnabled {
 			label = "ON"
 		}
 		log.Printf("⚙️  [ADMIN] /config toggled tts_enabled -> %s by ChatID %d.", label, chatID)
@@ -1745,10 +1737,10 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 		key := strings.TrimPrefix(rest, "goto:")
 		// Dynamic per-kind / per-level value pickers: "goto:pk:<kind>" / "goto:pl:<level>".
 		if kind, ok := strings.CutPrefix(key, "pk:"); ok {
-			if !isConfigurableKind(kind) {
+			if !config.IsConfigurableKind(kind) {
 				return
 			}
-			cur, has := poolKindOverride(kind)
+			cur, has := config.PoolKindOverride(kind)
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
 				fmt.Sprintf("📦 <b>Pool size — %s</b>\n\nCurrent: <b>%s</b>\n♻️ Default uses the global target/min rule.\nTap to change:", kind, poolOverrideLabel(cur, has)),
 				configPoolValueKeyboard("pk", kind, cur, has),
@@ -1760,7 +1752,7 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 			if !valid {
 				return
 			}
-			cur, has := poolLevelOverride(lv)
+			cur, has := config.PoolLevelOverride(lv)
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
 				fmt.Sprintf("📦 <b>Pool size — %s</b>\n\nCurrent: <b>%s</b>\n♻️ Default uses the global target/min rule.\nTap to change:", levelLabel(lv), poolOverrideLabel(cur, has)),
 				configPoolValueKeyboard("pl", lv, cur, has),
@@ -1771,10 +1763,10 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 		if after, ok := strings.CutPrefix(key, "klv:"); ok {
 			kind, level, found := strings.Cut(after, ":")
 			lv, valid := normalizeLevel(level)
-			if !found || !isConfigurableKind(kind) || kind == kindTip || !valid {
+			if !found || !config.IsConfigurableKind(kind) || kind == config.KindTip || !valid {
 				return
 			}
-			cur, has := poolKindLevelOverride(kind, lv)
+			cur, has := config.PoolKindLevelOverride(kind, lv)
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
 				fmt.Sprintf("📦 <b>Pool size — %s %s</b>\n\nCurrent: <b>%s</b>\n♻️ Default falls back to per-kind, then per-level, then the global rule.\nTap to change:", levelLabel(lv), kind, poolOverrideLabel(cur, has)),
 				configPoolKLValueKeyboard(kind, lv, cur, has),
@@ -1783,7 +1775,7 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 		}
 		// "goto:klk:<kind>" — per-level picker for a chosen kind.
 		if kind, ok := strings.CutPrefix(key, "klk:"); ok {
-			if !isConfigurableKind(kind) || kind == kindTip {
+			if !config.IsConfigurableKind(kind) || kind == config.KindTip {
 				return
 			}
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
@@ -1810,32 +1802,32 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 			)
 		case "pool_target":
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
-				fmt.Sprintf("📦 <b>Pool Target</b>\n\nCurrent: <b>%d</b>\nTap to change:", poolTarget),
+				fmt.Sprintf("📦 <b>Pool Target</b>\n\nCurrent: <b>%d</b>\nTap to change:", config.PoolTarget),
 				configPoolTargetKeyboard(),
 			)
 		case "pool_min":
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
-				fmt.Sprintf("📦 <b>Pool Min</b>\n\nCurrent: <b>%d</b>\nTap to change:", poolMin),
+				fmt.Sprintf("📦 <b>Pool Min</b>\n\nCurrent: <b>%d</b>\nTap to change:", config.PoolMin),
 				configPoolMinKeyboard(),
 			)
 		case "quiet_start":
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
-				fmt.Sprintf("🌙 <b>Quiet Hours Start</b>\n\nCurrent: <b>%s</b>\nTap to change:", quietStart),
+				fmt.Sprintf("🌙 <b>Quiet Hours Start</b>\n\nCurrent: <b>%s</b>\nTap to change:", config.QuietStart),
 				configQuietStartKeyboard(),
 			)
 		case "quiet_end":
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
-				fmt.Sprintf("🌙 <b>Quiet Hours End</b>\n\nCurrent: <b>%s</b>\nTap to change:", quietEnd),
+				fmt.Sprintf("🌙 <b>Quiet Hours End</b>\n\nCurrent: <b>%s</b>\nTap to change:", config.QuietEnd),
 				configQuietEndKeyboard(),
 			)
 		case "gen_spacing":
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
-				fmt.Sprintf("⏱ <b>AI Generation Spacing</b>\n\nCurrent: <b>%s</b>\nTap to change:", genSpacing),
+				fmt.Sprintf("⏱ <b>AI Generation Spacing</b>\n\nCurrent: <b>%s</b>\nTap to change:", config.GenSpacing),
 				configGenSpacingKeyboard(),
 			)
 		case "review_batch":
 			_ = notifier.EditMessage(chatID, cb.Message.MessageID,
-				fmt.Sprintf("🧠 <b>Review Batch Max</b>\n\nCurrent: <b>%d</b>\nTap to change:", reviewBatchMax),
+				fmt.Sprintf("🧠 <b>Review Batch Max</b>\n\nCurrent: <b>%d</b>\nTap to change:", config.ReviewBatchMax),
 				configReviewBatchKeyboard(),
 			)
 		}
@@ -1849,8 +1841,8 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
 			return
 		}
-		old := poolTarget
-		poolTarget = n
+		old := config.PoolTarget
+		config.PoolTarget = n
 		_ = store.SetBotConfig("pool_target", strconv.Itoa(n))
 		log.Printf("⚙️  [ADMIN] /config pool_target %d -> %d by ChatID %d.", old, n, chatID)
 		refresh(fmt.Sprintf("Pool target: %d", n))
@@ -1864,8 +1856,8 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
 			return
 		}
-		old := poolMin
-		poolMin = n
+		old := config.PoolMin
+		config.PoolMin = n
 		_ = store.SetBotConfig("pool_min", strconv.Itoa(n))
 		log.Printf("⚙️  [ADMIN] /config pool_min %d -> %d by ChatID %d.", old, n, chatID)
 		refresh(fmt.Sprintf("Pool min: %d", n))
@@ -1875,8 +1867,8 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 	// cfg:quiet_start:<v> — set quiet hours start.
 	if strings.HasPrefix(rest, "quiet_start:") {
 		v := strings.TrimPrefix(rest, "quiet_start:")
-		old := quietStart
-		quietStart = v
+		old := config.QuietStart
+		config.QuietStart = v
 		_ = store.SetBotConfig("quiet_start", v)
 		log.Printf("⚙️  [ADMIN] /config quiet_start %s -> %s by ChatID %d.", old, v, chatID)
 		refresh("Quiet start: " + v)
@@ -1886,8 +1878,8 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 	// cfg:quiet_end:<v> — set quiet hours end.
 	if strings.HasPrefix(rest, "quiet_end:") {
 		v := strings.TrimPrefix(rest, "quiet_end:")
-		old := quietEnd
-		quietEnd = v
+		old := config.QuietEnd
+		config.QuietEnd = v
 		_ = store.SetBotConfig("quiet_end", v)
 		log.Printf("⚙️  [ADMIN] /config quiet_end %s -> %s by ChatID %d.", old, v, chatID)
 		refresh("Quiet end: " + v)
@@ -1902,8 +1894,8 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 			_ = notifier.AnswerCallback(cb.ID, "Invalid duration")
 			return
 		}
-		old := genSpacing
-		genSpacing = d
+		old := config.GenSpacing
+		config.GenSpacing = d
 		_ = store.SetBotConfig("gen_spacing", v)
 		log.Printf("⚙️  [ADMIN] /config gen_spacing %s -> %s by ChatID %d.", old, d, chatID)
 		refresh("Gen spacing: " + d.String())
@@ -1917,8 +1909,8 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
 			return
 		}
-		old := reviewBatchMax
-		reviewBatchMax = n
+		old := config.ReviewBatchMax
+		config.ReviewBatchMax = n
 		_ = store.SetBotConfig("review_batch_max", strconv.Itoa(n))
 		log.Printf("⚙️  [ADMIN] /config review_batch_max %d -> %d by ChatID %d.", old, n, chatID)
 		refresh(fmt.Sprintf("Review batch: %d", n))
@@ -1935,11 +1927,11 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 		kind, level, nStr := parts[0], parts[1], parts[2]
 		n, err := strconv.Atoi(nStr)
 		lv, valid := normalizeLevel(level)
-		if err != nil || n < 0 || !isConfigurableKind(kind) || kind == kindTip || !valid {
+		if err != nil || n < 0 || !config.IsConfigurableKind(kind) || kind == config.KindTip || !valid {
 			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
 			return
 		}
-		setPoolKindLevelOverride(kind, lv, n)
+		config.SetPoolKindLevelOverride(kind, lv, n)
 		key := "pool_kl_" + kind + "_" + lv
 		var toast string
 		if n == 0 {
@@ -1964,11 +1956,11 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 	if after, ok := strings.CutPrefix(rest, "pk:"); ok {
 		kind, nStr, found := strings.Cut(after, ":")
 		n, err := strconv.Atoi(nStr)
-		if !found || err != nil || n < 0 || !isConfigurableKind(kind) {
+		if !found || err != nil || n < 0 || !config.IsConfigurableKind(kind) {
 			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
 			return
 		}
-		setPoolKindOverride(kind, n)
+		config.SetPoolKindOverride(kind, n)
 		key := "pool_kind_" + kind
 		var toast string
 		if n == 0 {
@@ -1998,7 +1990,7 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 			_ = notifier.AnswerCallback(cb.ID, "Invalid value")
 			return
 		}
-		setPoolLevelOverride(lv, n)
+		config.SetPoolLevelOverride(lv, n)
 		key := "pool_level_" + lv
 		var toast string
 		if n == 0 {
@@ -2026,7 +2018,7 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 // current one with a check.
 func levelKeyboard(current string) [][]inlineButton {
 	var row1, row2 []inlineButton
-	for i, l := range allLevels {
+	for i, l := range config.AllLevels {
 		label := levelLabel(l)
 		if l == current {
 			label = "✅ " + label
@@ -2102,7 +2094,7 @@ func handleTTS(store *Store, notifier Notifier, chatID int64, args []string) {
 
 		if enabled {
 			msg := "🔊 Pronunciation audio is now <b>ON</b>."
-			if !ttsEnabled {
+			if !config.TTSEnabled {
 				msg += "\n\nℹ️ It is currently disabled globally by the bot administrator."
 			}
 			_ = notifier.Send(chatID, msg)
@@ -2117,7 +2109,7 @@ func handleTTS(store *Store, notifier Notifier, chatID int64, args []string) {
 		status = "OFF"
 	}
 	msg := fmt.Sprintf("🔊 <b>Pronunciation audio</b>\n\nCurrent setting: <b>%s</b>\nUse <code>/tts on</code> or <code>/tts off</code>.", status)
-	if !ttsEnabled {
+	if !config.TTSEnabled {
 		msg += "\n\nℹ️ It is currently disabled globally by the bot administrator."
 	}
 	_ = notifier.Send(chatID, msg)
@@ -2155,7 +2147,7 @@ func handleTip(ctx context.Context, chain *ProviderChain, store *Store, notifier
 
 	log.Printf("💡 [TIP] /tip requested by ChatID %d.", chatID)
 	_ = notifier.Send(chatID, "🔄 <b>Fetching your grammar tip...</b>")
-	tip, _, err := serveContent(ctx, chain, store, notifier, chatID, kindTip, defaultLevel, true)
+	tip, _, err := serveContent(ctx, chain, store, notifier, chatID, config.KindTip, config.DefaultLevel, true)
 	if err != nil {
 		log.Printf("❌ [TIP] On-demand tip failed for chat %d: %v", chatID, err)
 		_ = notifier.Send(chatID, "❌ Sorry, I couldn't fetch a tip right now. Please try again.")
@@ -2453,7 +2445,7 @@ func settingsKeyboard(prefs UserPrefs) [][]inlineButton {
 // settings hub, using settings-namespaced callback data and a Back button.
 func settingsLevelKeyboard(current string) [][]inlineButton {
 	var row1, row2 []inlineButton
-	for i, l := range allLevels {
+	for i, l := range config.AllLevels {
 		label := levelLabel(l)
 		if l == current {
 			label = "✅ " + label
@@ -3053,7 +3045,7 @@ func (n *telegramNotifier) Send(chatID int64, text string) error {
 }
 
 func (n *telegramNotifier) SendWithMessageID(chatID int64, text string) (int64, error) {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", TelegramBotToken)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", config.TelegramBotToken)
 	payload := map[string]interface{}{
 		"chat_id":    chatID,
 		"text":       text,
@@ -3089,7 +3081,7 @@ func (n *telegramNotifier) SendWithMessageID(chatID int64, text string) (int64, 
 }
 
 func (n *telegramNotifier) SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (string, error) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendVoice", TelegramBotToken)
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendVoice", config.TelegramBotToken)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -3155,7 +3147,7 @@ func (n *telegramNotifier) SendVoiceByFileID(chatID int64, fileID string, replyT
 }
 
 func (n *telegramNotifier) SendDocument(chatID int64, doc []byte, filename, caption string) error {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendDocument", TelegramBotToken)
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendDocument", config.TelegramBotToken)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
@@ -3202,7 +3194,7 @@ func (n *telegramNotifier) SendDocument(chatID int64, doc []byte, filename, capt
 
 // telegramPost marshals payload and POSTs it to the given Bot API method.
 func telegramPost(method string, payload map[string]interface{}) error {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", TelegramBotToken, method)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", config.TelegramBotToken, method)
 	jsonPayload, _ := json.Marshal(payload)
 
 	resp, err := telegramHTTPClient.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
@@ -3238,7 +3230,7 @@ func sendMaintainerDBBackup(store *Store, notifier Notifier, trigger string) err
 		return fmt.Errorf("invalid MAINTAINER_CHAT_ID")
 	}
 
-	now := time.Now().In(appLocation)
+	now := time.Now().In(config.AppLocation)
 	filename := fmt.Sprintf("english-bot-backup-%s.sqlite", now.Format("20060102-150405"))
 	destPath := filepath.Join(os.TempDir(), filename)
 
@@ -3310,7 +3302,7 @@ func setChatMenuButton() {
 		"menu_button": map[string]interface{}{
 			"type":    "web_app",
 			"text":    "📱 App",
-			"web_app": map[string]interface{}{"url": webAppURL},
+			"web_app": map[string]interface{}{"url": config.WebAppURL},
 		},
 	}
 	if err := telegramPost("setChatMenuButton", payload); err != nil {
@@ -3360,7 +3352,7 @@ func (n *telegramNotifier) SendPoll(chatID int64, question string, options []str
 	for i, o := range options {
 		opts[i] = map[string]string{"text": o}
 	}
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendPoll", TelegramBotToken)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendPoll", config.TelegramBotToken)
 	payload := map[string]interface{}{
 		"chat_id":           chatID,
 		"question":          question,
@@ -3743,30 +3735,30 @@ func (s *Store) LoadBotConfig() {
 		switch k {
 		case "pool_target":
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				poolTarget = n
+				config.PoolTarget = n
 			}
 		case "pool_min":
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				poolMin = n
+				config.PoolMin = n
 			}
 		case "quiet_start":
-			quietStart = v
+			config.QuietStart = v
 		case "quiet_end":
-			quietEnd = v
+			config.QuietEnd = v
 		case "tts_enabled":
 			switch strings.ToLower(v) {
 			case "true", "1", "on":
-				ttsEnabled = true
+				config.TTSEnabled = true
 			case "false", "0", "off":
-				ttsEnabled = false
+				config.TTSEnabled = false
 			}
 		case "gen_spacing":
 			if d, err := time.ParseDuration(v); err == nil {
-				genSpacing = d
+				config.GenSpacing = d
 			}
 		case "review_batch_max":
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				reviewBatchMax = n
+				config.ReviewBatchMax = n
 			}
 		default:
 			// Per-(kind,level) ("pool_kl_<kind>_<level>"), per-kind ("pool_kind_<kind>")
@@ -3775,19 +3767,19 @@ func (s *Store) LoadBotConfig() {
 			// other two prefixes.
 			if rest, ok := strings.CutPrefix(k, "pool_kl_"); ok {
 				kind, level, found := strings.Cut(rest, "_")
-				if n, err := strconv.Atoi(v); found && err == nil && n > 0 && isConfigurableKind(kind) {
+				if n, err := strconv.Atoi(v); found && err == nil && n > 0 && config.IsConfigurableKind(kind) {
 					if lv, valid := normalizeLevel(level); valid {
-						setPoolKindLevelOverride(kind, lv, n)
+						config.SetPoolKindLevelOverride(kind, lv, n)
 					}
 				}
 			} else if kind, ok := strings.CutPrefix(k, "pool_kind_"); ok {
-				if n, err := strconv.Atoi(v); err == nil && n > 0 && isConfigurableKind(kind) {
-					setPoolKindOverride(kind, n)
+				if n, err := strconv.Atoi(v); err == nil && n > 0 && config.IsConfigurableKind(kind) {
+					config.SetPoolKindOverride(kind, n)
 				}
 			} else if level, ok := strings.CutPrefix(k, "pool_level_"); ok {
 				if n, err := strconv.Atoi(v); err == nil && n > 0 {
 					if lv, valid := normalizeLevel(level); valid {
-						setPoolLevelOverride(lv, n)
+						config.SetPoolLevelOverride(lv, n)
 					}
 				}
 			}
@@ -4321,16 +4313,4 @@ func (s *Store) UnseenChangelogs(chatID int64) ([]ChangelogEntry, error) {
 		}
 	}
 	return unseen, nil
-}
-
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return fallback
-}
-
-// lookupEnv reports whether an environment variable is set and returns its value.
-func lookupEnv(key string) (string, bool) {
-	return os.LookupEnv(key)
 }

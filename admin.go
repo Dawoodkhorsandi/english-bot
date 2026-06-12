@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // adminMsgTarget holds the chat ID of the user the admin wants to message.
@@ -101,7 +103,7 @@ func (s *Store) AdminListUsers(page, perPage int) ([]AdminUserRow, int, error) {
 		}
 		u.Paused = paused == 1
 		if ts, ok := parseStoredUTC(rawCreated); ok {
-			u.CreatedAt = ts.In(appLocation)
+			u.CreatedAt = ts.In(config.AppLocation)
 		}
 		users = append(users, u)
 	}
@@ -135,7 +137,7 @@ func (s *Store) AdminUserDetail(chatID int64) (AdminUserDetail, error) {
 	var rawCreated any
 	if err := s.db.QueryRow("SELECT created_at FROM subscribers WHERE chat_id = ?", chatID).Scan(&rawCreated); err == nil {
 		if ts, ok := parseStoredUTC(rawCreated); ok {
-			d.CreatedAt = ts.In(appLocation)
+			d.CreatedAt = ts.In(config.AppLocation)
 		}
 	}
 
@@ -161,7 +163,7 @@ func (s *Store) AdminUserDetail(chatID int64) (AdminUserDetail, error) {
 		for day := range counts {
 			days[day] = true
 		}
-		d.CurrentStreak, d.LongestStreak = computeStreaks(days, time.Now().In(appLocation))
+		d.CurrentStreak, d.LongestStreak = computeStreaks(days, time.Now().In(config.AppLocation))
 	}
 
 	return d, nil

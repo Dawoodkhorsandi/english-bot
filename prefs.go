@@ -6,21 +6,9 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
-
-// Difficulty levels (Change F). The level is injected into generation prompts
-// and used to partition the content pool.
-const (
-	levelBeginner         = "beginner"
-	levelIntermediate     = "intermediate"
-	levelUpperInt         = "upper-intermediate"
-	levelAdvanced         = "advanced"
-
-	defaultLevel = levelIntermediate
-)
-
-// allLevels is the ordered set of selectable levels.
-var allLevels = []string{levelBeginner, levelIntermediate, levelUpperInt, levelAdvanced}
 
 // Send interval (Change L). Users choose how often scheduled drills/words arrive.
 // Values are kept as multiples of the 30-minute base scheduler tick so the
@@ -61,22 +49,22 @@ type UserPrefs struct {
 // to the default when the input is empty or unrecognized.
 func normalizeLevel(level string) (string, bool) {
 	level = strings.ToLower(strings.TrimSpace(level))
-	for _, l := range allLevels {
+	for _, l := range config.AllLevels {
 		if l == level {
 			return level, true
 		}
 	}
-	return defaultLevel, false
+	return config.DefaultLevel, false
 }
 
 // levelLabel returns a human-friendly, capitalized label for a level.
 func levelLabel(level string) string {
 	switch level {
-	case levelBeginner:
+	case config.LevelBeginner:
 		return "Beginner"
-	case levelUpperInt:
+	case config.LevelUpperInt:
 		return "Upper-Intermediate"
-	case levelAdvanced:
+	case config.LevelAdvanced:
 		return "Advanced"
 	default:
 		return "Intermediate"
@@ -133,7 +121,7 @@ func intervalLabel(minutes int) string {
 // GetPrefs returns the user's preferences, applying defaults when no row exists.
 func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 	prefs := UserPrefs{
-		Level: defaultLevel, Paused: false, Interval: defaultInterval,
+		Level: config.DefaultLevel, Paused: false, Interval: defaultInterval,
 		TTSEnabled: true, TipsEnabled: true,
 		QuizEnabled: true, IdiomEnabled: true, ReviewEnabled: true,
 		CollocationEnabled: true, StoryEnabled: true,
@@ -224,7 +212,7 @@ func (s *Store) GetLevel(chatID int64) string {
 	prefs, err := s.GetPrefs(chatID)
 	if err != nil {
 		log.Printf("⚠️  [PREFS] Could not load level for chat %d: %v (using default)", chatID, err)
-		return defaultLevel
+		return config.DefaultLevel
 	}
 	return prefs.Level
 }
@@ -526,8 +514,8 @@ func (s *Store) SetQuizIntervalHours(chatID int64, hours int) error {
 // ActiveLevels returns the distinct set of levels the pool should keep stocked:
 // always the default level, plus any level a user has explicitly selected.
 func (s *Store) ActiveLevels() ([]string, error) {
-	seen := map[string]bool{defaultLevel: true}
-	levels := []string{defaultLevel}
+	seen := map[string]bool{config.DefaultLevel: true}
+	levels := []string{config.DefaultLevel}
 
 	rows, err := s.db.Query("SELECT DISTINCT level FROM user_prefs")
 	if err != nil {

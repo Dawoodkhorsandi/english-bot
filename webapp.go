@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // webappFiles holds the embedded Mini App frontend (HTML/CSS/JS and, in later
@@ -87,9 +89,9 @@ func startWebServer(store *Store, notifier Notifier) {
 		}
 	})
 
-	log.Printf("🌐 [WEBAPP] Starting web server on :%s", webAppPort)
+	log.Printf("🌐 [WEBAPP] Starting web server on :%s", config.WebAppPort)
 	go func() {
-		if err := http.ListenAndServe(":"+webAppPort, mux); err != nil {
+		if err := http.ListenAndServe(":"+config.WebAppPort, mux); err != nil {
 			log.Printf("⚠️  [WEBAPP] Web server error: %v", err)
 		}
 	}()
@@ -163,7 +165,7 @@ func validateInitData(initData string) (userID int64, photoURL string, ok bool) 
 
 	// secret_key = HMAC-SHA256("WebAppData", bot_token)
 	h1 := hmac.New(sha256.New, []byte("WebAppData"))
-	h1.Write([]byte(TelegramBotToken))
+	h1.Write([]byte(config.TelegramBotToken))
 	secretKey := h1.Sum(nil)
 
 	// expected = HMAC-SHA256(secret_key, check_string)
@@ -663,13 +665,13 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request, chatID int64, sto
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	levelLabels := make(map[string]string, len(allLevels))
-	for _, l := range allLevels {
+	levelLabels := make(map[string]string, len(config.AllLevels))
+	for _, l := range config.AllLevels {
 		levelLabels[l] = levelLabel(l)
 	}
 	writeJSON(w, map[string]interface{}{
 		"level":       p.Level,
-		"levels":      allLevels,
+		"levels":      config.AllLevels,
 		"levelLabels": levelLabels,
 		"name":        store.GetDisplayName(chatID),
 		"paused":      p.Paused,
@@ -761,10 +763,10 @@ func updateAPISetting(w http.ResponseWriter, r *http.Request, chatID int64, stor
 // kind also picks the per-user history table via sentTableFor, so the
 // whitelist doubles as SQL-injection protection for the table name.
 var libraryKinds = map[string]bool{
-	kindIdiom:       true,
-	kindCollocation: true,
-	kindStory:       true,
-	kindTip:         true,
+	config.KindIdiom:       true,
+	config.KindCollocation: true,
+	config.KindStory:       true,
+	config.KindTip:         true,
 }
 
 // libraryItem is one row of the Library listing.
@@ -772,7 +774,7 @@ type libraryItem struct {
 	Term    string `json:"term"`
 	Meaning string `json:"meaning"`
 	Text    string `json:"text"`
-	SentAt  string `json:"sent_at"` // "2 Jan 2006", appLocation
+	SentAt  string `json:"sent_at"` // "2 Jan 2006", config.AppLocation
 }
 
 // stripTelegramHTML removes the simple HTML markup (<b>, <i>, …) that pool
@@ -825,7 +827,7 @@ func (s *Store) ContentHistory(chatID int64, kind string, offset, limit int) ([]
 		}
 		it.Text = stripTelegramHTML(it.Text)
 		if ts, ok := parseStoredUTC(rawAt); ok {
-			it.SentAt = ts.In(appLocation).Format("2 Jan 2006")
+			it.SentAt = ts.In(config.AppLocation).Format("2 Jan 2006")
 		}
 		items = append(items, it)
 	}
@@ -846,7 +848,7 @@ func (s *Store) ContentHistoryCount(chatID int64, kind string) int {
 type quizHistoryItem struct {
 	Word       string `json:"word"`
 	Correct    bool   `json:"correct"`
-	AnsweredAt string `json:"answered_at"` // "2 Jan 2006", appLocation
+	AnsweredAt string `json:"answered_at"` // "2 Jan 2006", config.AppLocation
 }
 
 // QuizHistory returns one page of the user's quiz attempts, most recent first.
@@ -873,7 +875,7 @@ func (s *Store) QuizHistory(chatID int64, offset, limit int) ([]quizHistoryItem,
 		}
 		it.Correct = correct == 1
 		if ts, ok := parseStoredUTC(rawAt); ok {
-			it.AnsweredAt = ts.In(appLocation).Format("2 Jan 2006")
+			it.AnsweredAt = ts.In(config.AppLocation).Format("2 Jan 2006")
 		}
 		items = append(items, it)
 	}
@@ -944,8 +946,8 @@ func handleAPIQuizzes(w http.ResponseWriter, r *http.Request, chatID int64, stor
 func handleAPIConfig(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 	writeJSON(w, map[string]interface{}{
-		"botUsername": botUsername,
-		"webAppURL":   webAppURL,
+		"config.BotUsername": config.BotUsername,
+		"config.WebAppURL":   config.WebAppURL,
 	})
 }
 
@@ -971,9 +973,9 @@ func handleAPIVocabCard(w http.ResponseWriter, r *http.Request, chatID int64, st
 // practiceKinds whitelists what /api/practice may serve. Pool-only (never
 // generates inline with AI), so a tap can't trigger provider spend.
 var practiceKinds = map[string]bool{
-	kindWord:        true,
-	kindIdiom:       true,
-	kindCollocation: true,
+	config.KindWord:        true,
+	config.KindIdiom:       true,
+	config.KindCollocation: true,
 }
 
 // practiceHourlyLimit bounds /api/practice and /api/quiz/next taps per user per
@@ -1074,7 +1076,7 @@ const quizTokenTTL = 10 * time.Minute
 // the server stays stateless between /api/quiz/next and /api/quiz/answer.
 func quizTokenMAC(chatID int64, word string, correctIdx int, exp int64) string {
 	h1 := hmac.New(sha256.New, []byte("QuizToken"))
-	h1.Write([]byte(TelegramBotToken))
+	h1.Write([]byte(config.TelegramBotToken))
 	key := h1.Sum(nil)
 	h2 := hmac.New(sha256.New, key)
 	fmt.Fprintf(h2, "%d|%s|%d|%d", chatID, word, correctIdx, exp)

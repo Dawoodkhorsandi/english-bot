@@ -9,6 +9,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -213,8 +215,8 @@ func (s *Store) MasteredCount(chatID int64) (int, error) {
 // and the per-user paused flag, and snoozes each reminded word so it isn't
 // re-sent before the user responds.
 func runReviewScheduler(ctx context.Context, store *Store, notifier Notifier) {
-	log.Printf("🧠 [SRS] Spaced-repetition scheduler started (every %s, up to %d/user).", reviewCheckInterval, reviewBatchMax)
-	ticker := time.NewTicker(reviewCheckInterval)
+	log.Printf("🧠 [SRS] Spaced-repetition scheduler started (every %s, up to %d/user).", config.ReviewCheckInterval, config.ReviewBatchMax)
+	ticker := time.NewTicker(config.ReviewCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -251,8 +253,8 @@ func runReviewSweep(store *Store, notifier Notifier, now time.Time) {
 		}
 		// SRS reviews are supplementary — they send independently of the global
 		// rate limiter so they never block or get blocked by broadcasts/quiz/idiom.
-		// reviewBatchMax (default 1) caps how many cards fire per sweep.
-		due, err := store.DueReviews(chatID, now, reviewBatchMax)
+		// config.ReviewBatchMax (default 1) caps how many cards fire per sweep.
+		due, err := store.DueReviews(chatID, now, config.ReviewBatchMax)
 		if err != nil {
 			log.Printf("⚠️  [SRS] Due lookup failed for chat %d: %v", chatID, err)
 			continue
@@ -326,7 +328,7 @@ func suggestLevelChange(currentLevel string, correct, total int) (target, direct
 		return "", "", false
 	}
 	idx := -1
-	for i, l := range allLevels {
+	for i, l := range config.AllLevels {
 		if l == currentLevel {
 			idx = i
 			break
@@ -337,10 +339,10 @@ func suggestLevelChange(currentLevel string, correct, total int) (target, direct
 	}
 	accuracy := float64(correct) / float64(total)
 	switch {
-	case accuracy >= levelUpAccuracy && idx < len(allLevels)-1:
-		return allLevels[idx+1], "harder", true
+	case accuracy >= levelUpAccuracy && idx < len(config.AllLevels)-1:
+		return config.AllLevels[idx+1], "harder", true
 	case accuracy <= levelDownAccuracy && idx > 0:
-		return allLevels[idx-1], "easier", true
+		return config.AllLevels[idx-1], "easier", true
 	default:
 		return "", "", false
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 	"google.golang.org/genai"
 )
 
@@ -51,15 +52,15 @@ type GeminiProvider struct {
 }
 
 func newGeminiProvider(ctx context.Context) *GeminiProvider {
-	if GeminiAPIKey == "" || GeminiAPIKey == "YOUR_GEMINI_API_KEY" {
+	if config.GeminiAPIKey == "" || config.GeminiAPIKey == "YOUR_GEMINI_API_KEY" {
 		return &GeminiProvider{}
 	}
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: GeminiAPIKey})
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: config.GeminiAPIKey})
 	if err != nil {
 		log.Printf("⚠️  [PROVIDER] Gemini client init failed: %v", err)
 		return &GeminiProvider{}
 	}
-	return &GeminiProvider{client: client, model: getEnv("GEMINI_MODEL", "gemini-2.5-flash")}
+	return &GeminiProvider{client: client, model: config.GetEnv("GEMINI_MODEL", "gemini-2.5-flash")}
 }
 
 func (p *GeminiProvider) Name() string  { return "gemini" }
@@ -148,7 +149,7 @@ func (p *OpenAICompatProvider) Generate(ctx context.Context, prompt string) (str
 func buildProviders(ctx context.Context) map[string]Provider {
 	httpClient := &http.Client{Timeout: 60 * time.Second}
 
-	cfAccount := getEnv("CLOUDFLARE_ACCOUNT_ID", "")
+	cfAccount := config.GetEnv("CLOUDFLARE_ACCOUNT_ID", "")
 	cfBase := ""
 	if cfAccount != "" {
 		cfBase = fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/v1", cfAccount)
@@ -157,57 +158,57 @@ func buildProviders(ctx context.Context) map[string]Provider {
 	return map[string]Provider{
 		"gemini": newGeminiProvider(ctx),
 		"groq": &OpenAICompatProvider{
-			name: "groq", apiKey: getEnv("GROQ_API_KEY", ""),
-			baseURL: getEnv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
-			model:   getEnv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+			name: "groq", apiKey: config.GetEnv("GROQ_API_KEY", ""),
+			baseURL: config.GetEnv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+			model:   config.GetEnv("GROQ_MODEL", "llama-3.3-70b-versatile"),
 			client:  httpClient,
 		},
 		"cerebras": &OpenAICompatProvider{
-			name: "cerebras", apiKey: getEnv("CEREBRAS_API_KEY", ""),
-			baseURL: getEnv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"),
-			model:   getEnv("CEREBRAS_MODEL", "llama-3.3-70b"),
+			name: "cerebras", apiKey: config.GetEnv("CEREBRAS_API_KEY", ""),
+			baseURL: config.GetEnv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"),
+			model:   config.GetEnv("CEREBRAS_MODEL", "llama-3.3-70b"),
 			client:  httpClient,
 		},
 		"openrouter": &OpenAICompatProvider{
-			name: "openrouter", apiKey: getEnv("OPENROUTER_API_KEY", ""),
-			baseURL: getEnv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-			model:   getEnv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"),
+			name: "openrouter", apiKey: config.GetEnv("OPENROUTER_API_KEY", ""),
+			baseURL: config.GetEnv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+			model:   config.GetEnv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"),
 			client:  httpClient,
 		},
 		"github": &OpenAICompatProvider{
-			name: "github", apiKey: getEnv("GITHUB_MODELS_TOKEN", ""),
-			baseURL: getEnv("GITHUB_MODELS_BASE_URL", "https://models.github.ai/inference"),
-			model:   getEnv("GITHUB_MODELS_MODEL", "openai/gpt-4o-mini"),
+			name: "github", apiKey: config.GetEnv("GITHUB_MODELS_TOKEN", ""),
+			baseURL: config.GetEnv("GITHUB_MODELS_BASE_URL", "https://models.github.ai/inference"),
+			model:   config.GetEnv("GITHUB_MODELS_MODEL", "openai/gpt-4o-mini"),
 			client:  httpClient,
 		},
 		"cloudflare": &OpenAICompatProvider{
-			name: "cloudflare", apiKey: getEnv("CLOUDFLARE_API_TOKEN", ""),
+			name: "cloudflare", apiKey: config.GetEnv("CLOUDFLARE_API_TOKEN", ""),
 			baseURL: cfBase,
-			model:   getEnv("CLOUDFLARE_MODEL", "@cf/meta/llama-3.1-8b-instruct"),
+			model:   config.GetEnv("CLOUDFLARE_MODEL", "@cf/meta/llama-3.1-8b-instruct"),
 			client:  httpClient,
 		},
 		"mistral": &OpenAICompatProvider{
-			name: "mistral", apiKey: getEnv("MISTRAL_API_KEY", ""),
-			baseURL: getEnv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
-			model:   getEnv("MISTRAL_MODEL", "mistral-small-latest"),
+			name: "mistral", apiKey: config.GetEnv("MISTRAL_API_KEY", ""),
+			baseURL: config.GetEnv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
+			model:   config.GetEnv("MISTRAL_MODEL", "mistral-small-latest"),
 			client:  httpClient,
 		},
 		"gemini2": &OpenAICompatProvider{
-			name: "gemini2", apiKey: getEnv("GEMINI_API_KEY", ""),
+			name: "gemini2", apiKey: config.GetEnv("GEMINI_API_KEY", ""),
 			baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
-			model:   getEnv("GEMINI2_MODEL", "gemini-2.0-flash"),
+			model:   config.GetEnv("GEMINI2_MODEL", "gemini-2.0-flash"),
 			client:  httpClient,
 		},
 		"sambanova": &OpenAICompatProvider{
-			name: "sambanova", apiKey: getEnv("SAMBANOVA_API_KEY", ""),
-			baseURL: getEnv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1"),
-			model:   getEnv("SAMBANOVA_MODEL", "Meta-Llama-3.3-70B-Instruct"),
+			name: "sambanova", apiKey: config.GetEnv("SAMBANOVA_API_KEY", ""),
+			baseURL: config.GetEnv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1"),
+			model:   config.GetEnv("SAMBANOVA_MODEL", "Meta-Llama-3.3-70B-Instruct"),
 			client:  httpClient,
 		},
 		"cohere": &OpenAICompatProvider{
-			name: "cohere", apiKey: getEnv("COHERE_API_KEY", ""),
-			baseURL: getEnv("COHERE_BASE_URL", "https://api.cohere.ai/compatibility/v1"),
-			model:   getEnv("COHERE_MODEL", "command-r"),
+			name: "cohere", apiKey: config.GetEnv("COHERE_API_KEY", ""),
+			baseURL: config.GetEnv("COHERE_BASE_URL", "https://api.cohere.ai/compatibility/v1"),
+			model:   config.GetEnv("COHERE_MODEL", "command-r"),
 			client:  httpClient,
 		},
 	}
@@ -221,7 +222,7 @@ type ProviderChain struct {
 func newProviderChain(ctx context.Context) *ProviderChain {
 	all := buildProviders(ctx)
 	var enabled []Provider
-	for _, name := range strings.Split(providerOrder, ",") {
+	for _, name := range strings.Split(config.ProviderOrder, ",") {
 		name = strings.TrimSpace(strings.ToLower(name))
 		p, ok := all[name]
 		if !ok || p == nil {

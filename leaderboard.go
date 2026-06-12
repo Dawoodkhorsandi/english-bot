@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -92,20 +94,20 @@ func (s *Store) SetDisplayName(chatID int64, name string) error {
 }
 
 // weekStartUTC returns the start of the current ISO week (Monday 00:00 in
-// appLocation) formatted like the stored sent_at values (UTC DATETIME).
+// config.AppLocation) formatted like the stored sent_at values (UTC DATETIME).
 func weekStartUTC(now time.Time) string {
-	local := now.In(appLocation)
+	local := now.In(config.AppLocation)
 	daysBack := (int(local.Weekday()) + 6) % 7 // Monday = 0
-	monday := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, appLocation).
+	monday := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, config.AppLocation).
 		AddDate(0, 0, -daysBack)
 	return monday.UTC().Format("2006-01-02 15:04:05")
 }
 
-// dayStartUTC returns the start of today (00:00 in appLocation) formatted like
+// dayStartUTC returns the start of today (00:00 in config.AppLocation) formatted like
 // the stored sent_at values (UTC DATETIME).
 func dayStartUTC(now time.Time) string {
-	local := now.In(appLocation)
-	midnight := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, appLocation)
+	local := now.In(config.AppLocation)
+	midnight := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, config.AppLocation)
 	return midnight.UTC().Format("2006-01-02 15:04:05")
 }
 
@@ -202,7 +204,7 @@ func (s *Store) Leaderboard(metric string, me int64) (rows []LeaderRow, myRank, 
 // avoid collisions, and never reversible to the chat_id.
 func publicIDFor(chatID int64) string {
 	h1 := hmac.New(sha256.New, []byte("UserPublicId"))
-	h1.Write([]byte(TelegramBotToken))
+	h1.Write([]byte(config.TelegramBotToken))
 	key := h1.Sum(nil)
 	h2 := hmac.New(sha256.New, key)
 	fmt.Fprintf(h2, "%d", chatID)

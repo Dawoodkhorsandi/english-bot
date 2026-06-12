@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 func TestComputeStreaks(t *testing.T) {
@@ -80,8 +82,8 @@ func TestUserStatsDB(t *testing.T) {
 	if st.LongestStreak != 2 {
 		t.Errorf("LongestStreak = %d, want 2", st.LongestStreak)
 	}
-	if st.Level != defaultLevel {
-		t.Errorf("Level = %q, want %q", st.Level, defaultLevel)
+	if st.Level != config.DefaultLevel {
+		t.Errorf("Level = %q, want %q", st.Level, config.DefaultLevel)
 	}
 	if !st.HasMemberSince {
 		t.Errorf("HasMemberSince = false, want true")

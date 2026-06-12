@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // TestPoolUsageLeaderPicksBusiestUser verifies that PoolUsageLeader returns the
@@ -11,10 +13,10 @@ import (
 func TestPoolUsageLeaderPicksBusiestUser(t *testing.T) {
 	store := testStoreHelper(t)
 
-	store.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card: apple")
-	store.AddToPool(kindWord, defaultLevel, "banana", "a fruit", "card: banana")
-	store.AddToPool(kindWord, defaultLevel, "cherry", "a fruit", "card: cherry")
-	store.AddToPool(kindWord, defaultLevel, "date", "a fruit", "card: date")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "card: apple")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "banana", "a fruit", "card: banana")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "cherry", "a fruit", "card: cherry")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "date", "a fruit", "card: date")
 
 	// Chat 100 has seen 3 of 4 pooled words; chat 101 only 1.
 	for _, w := range []string{"apple", "banana", "cherry"} {
@@ -30,7 +32,7 @@ func TestPoolUsageLeaderPicksBusiestUser(t *testing.T) {
 		t.Fatalf("record obsolete: %v", err)
 	}
 
-	leader, seen, ok, err := store.PoolUsageLeader(kindWord, defaultLevel)
+	leader, seen, ok, err := store.PoolUsageLeader(config.KindWord, config.DefaultLevel)
 	if err != nil {
 		t.Fatalf("PoolUsageLeader: %v", err)
 	}
@@ -49,13 +51,13 @@ func TestPoolUsageLeaderPicksBusiestUser(t *testing.T) {
 func TestPoolUsageLeaderEmptyPool(t *testing.T) {
 	store := testStoreHelper(t)
 
-	if _, _, ok, err := store.PoolUsageLeader(kindWord, defaultLevel); err != nil || ok {
+	if _, _, ok, err := store.PoolUsageLeader(config.KindWord, config.DefaultLevel); err != nil || ok {
 		t.Fatalf("expected ok=false on empty pool, got ok=%v err=%v", ok, err)
 	}
 
 	// Pool has items but no user has seen any of them.
-	store.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card: apple")
-	if _, _, ok, err := store.PoolUsageLeader(kindWord, defaultLevel); err != nil || ok {
+	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "card: apple")
+	if _, _, ok, err := store.PoolUsageLeader(config.KindWord, config.DefaultLevel); err != nil || ok {
 		t.Fatalf("expected ok=false when nobody has seen the pool, got ok=%v err=%v", ok, err)
 	}
 }
@@ -66,13 +68,13 @@ func TestHandlePoolUsageReport(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveBotConfig(t)
-	poolTarget, poolMin = 300, 100 // pin the target so "pool 4/300" is deterministic
+	config.PoolTarget, config.PoolMin = 300, 100 // pin the target so "pool 4/300" is deterministic
 
 	// A 4-item word pool at the default level; chat 100 has consumed 2 → 50%.
-	store.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card: apple")
-	store.AddToPool(kindWord, defaultLevel, "banana", "a fruit", "card: banana")
-	store.AddToPool(kindWord, defaultLevel, "cherry", "a fruit", "card: cherry")
-	store.AddToPool(kindWord, defaultLevel, "date", "a fruit", "card: date")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "card: apple")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "banana", "a fruit", "card: banana")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "cherry", "a fruit", "card: cherry")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "date", "a fruit", "card: date")
 	for _, w := range []string{"apple", "banana"} {
 		if err := store.RecordSentVocab(100, w); err != nil {
 			t.Fatalf("record vocab: %v", err)
@@ -91,9 +93,9 @@ func TestHandlePoolUsageReport(t *testing.T) {
 		t.Errorf("report missing title: %q", report)
 	}
 	// word/<level>: 50% (chat 100 saw 2/4) · pool 4/300
-	// poolTarget defaults to 300 and the word pool here is at the default level,
+	// config.PoolTarget defaults to 300 and the word pool here is at the default level,
 	// so the configured target is 300 while only 4 items exist (pool 4/300).
-	wantLine := kindWord + "/" + defaultLevel + ": <b>50%</b> (chat 100 saw 2/4) · pool 4/300"
+	wantLine := config.KindWord + "/" + config.DefaultLevel + ": <b>50%</b> (chat 100 saw 2/4) · pool 4/300"
 	if !strings.Contains(report, wantLine) {
 		t.Errorf("report missing expected usage line %q in:\n%s", wantLine, report)
 	}

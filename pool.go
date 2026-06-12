@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // reviewItem is a single word + meaning pair used by the daily review.
@@ -158,7 +160,7 @@ func (s *Store) DrillText(term string) (string, bool, error) {
 	var text string
 	err := s.db.QueryRow(
 		"SELECT text FROM content_pool WHERE kind = ? AND term = ? LIMIT 1",
-		kindDrill, strings.ToLower(strings.TrimSpace(term)),
+		config.KindDrill, strings.ToLower(strings.TrimSpace(term)),
 	).Scan(&text)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
@@ -175,7 +177,7 @@ func (s *Store) DrillText(term string) (string, bool, error) {
 func (s *Store) WordCard(term string) (meaning, text string, ok bool, err error) {
 	row := s.db.QueryRow(
 		"SELECT COALESCE(meaning,''), text FROM content_pool WHERE kind = ? AND term = ? LIMIT 1",
-		kindWord, strings.ToLower(strings.TrimSpace(term)),
+		config.KindWord, strings.ToLower(strings.TrimSpace(term)),
 	)
 	if err = row.Scan(&meaning, &text); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -219,7 +221,7 @@ func (s *Store) PoolUsageLeader(kind, level string) (chatID int64, seen int, ok 
 // so every word a user receives is enrolled for future review.
 func (s *Store) recordSentFor(kind string, chatID int64, term string) error {
 	switch kind {
-	case kindWord:
+	case config.KindWord:
 		if err := s.RecordSentVocab(chatID, term); err != nil {
 			return err
 		}
@@ -227,13 +229,13 @@ func (s *Store) recordSentFor(kind string, chatID int64, term string) error {
 			log.Printf("⚠️  [SRS] Could not seed review for %q (chat %d): %v", term, chatID, err)
 		}
 		return nil
-	case kindIdiom:
+	case config.KindIdiom:
 		return s.RecordSentIdiom(chatID, term)
-	case kindTip:
+	case config.KindTip:
 		return s.RecordSentTip(chatID, term)
-	case kindCollocation:
+	case config.KindCollocation:
 		return s.RecordSentCollocation(chatID, term)
-	case kindStory:
+	case config.KindStory:
 		return s.RecordSentStory(chatID, term)
 	default:
 		return s.RecordSentWord(chatID, term)
@@ -243,15 +245,15 @@ func (s *Store) recordSentFor(kind string, chatID int64, term string) error {
 // sentTableFor maps a content kind to its per-user history table name.
 func sentTableFor(kind string) string {
 	switch kind {
-	case kindWord:
+	case config.KindWord:
 		return "sent_vocab"
-	case kindIdiom:
+	case config.KindIdiom:
 		return "sent_idioms"
-	case kindTip:
+	case config.KindTip:
 		return "sent_tips"
-	case kindCollocation:
+	case config.KindCollocation:
 		return "sent_collocations"
-	case kindStory:
+	case config.KindStory:
 		return "sent_stories"
 	default:
 		return "sent_words"
@@ -578,7 +580,7 @@ func maybeNotifyPoolExhausted(store *Store, notifier Notifier, chatID int64, kin
 	if notifier == nil {
 		return
 	}
-	mID, err := strconv.ParseInt(strings.TrimSpace(MaintainerChatID), 10, 64)
+	mID, err := strconv.ParseInt(strings.TrimSpace(config.MaintainerChatID), 10, 64)
 	if err != nil {
 		return // maintainer not configured
 	}
@@ -619,7 +621,7 @@ func maybeNotifyPoolExhausted(store *Store, notifier Notifier, chatID int64, kin
 // The caller serves the old card immediately — the refreshed version will be
 // used on the next request.
 func maybeRefreshCard(chain *ProviderChain, store *Store, kind, level, term, text string) {
-	if kind != kindWord || !cardNeedsRefresh(text) {
+	if kind != config.KindWord || !cardNeedsRefresh(text) {
 		return
 	}
 	log.Printf("🔄 [POOL] Card %q (%s/%s) is stale; scheduling background refresh.", term, kind, level)
@@ -642,9 +644,9 @@ func maybeRefreshCard(chain *ProviderChain, store *Store, kind, level, term, tex
 // poolTargetFor returns how many items to keep stocked for a (kind, level) pair.
 // It honours per-kind and per-level admin overrides (set via /config), falling
 // back to the global rule: the default level keeps the full pool, non-default
-// levels keep a smaller pool. See resolvePoolTarget for precedence.
+// levels keep a smaller pool. See config.ResolvePoolTarget for precedence.
 func poolTargetFor(kind, level string) int {
-	return resolvePoolTarget(kind, level)
+	return config.ResolvePoolTarget(kind, level)
 }
 
 // ---------------------------------------------------------------------------
@@ -653,15 +655,15 @@ func poolTargetFor(kind, level string) int {
 
 // poolFiller periodically tops up the content pool for each (kind, active level)
 // until it reaches the level's target, generating one item per step (spaced by
-// genSpacing).
+// config.GenSpacing).
 func poolFiller(ctx context.Context, chain *ProviderChain, store *Store) {
 	if !chain.HasAny() {
 		log.Println("📦 [POOL_FILLER] No providers enabled; pool filler disabled.")
 		return
 	}
-	log.Printf("📦 [POOL_FILLER] Started (target=%d, min=%d, interval=%s).", poolTarget, poolMin, refillInterval)
+	log.Printf("📦 [POOL_FILLER] Started (target=%d, min=%d, interval=%s).", config.PoolTarget, config.PoolMin, config.RefillInterval)
 
-	ticker := time.NewTicker(refillInterval)
+	ticker := time.NewTicker(config.RefillInterval)
 	defer ticker.Stop()
 
 	// Prime once at startup without waiting for the first tick.
@@ -679,31 +681,31 @@ func poolFiller(ctx context.Context, chain *ProviderChain, store *Store) {
 }
 
 // runRefillCycle attempts one refill step for every (kind, active level) pair,
-// spacing generations by genSpacing and honouring context cancellation.
+// spacing generations by config.GenSpacing and honouring context cancellation.
 func runRefillCycle(ctx context.Context, chain *ProviderChain, store *Store) {
 	levels, err := store.ActiveLevels()
 	if err != nil {
 		log.Printf("⚠️  [POOL_FILLER] Could not load active levels: %v (using default only)", err)
-		levels = []string{defaultLevel}
+		levels = []string{config.DefaultLevel}
 	}
-	for _, kind := range []string{kindDrill, kindWord, kindIdiom, kindCollocation, kindStory} {
+	for _, kind := range []string{config.KindDrill, config.KindWord, config.KindIdiom, config.KindCollocation, config.KindStory} {
 		for _, level := range levels {
 			if ctx.Err() != nil {
 				return
 			}
 			if refillKind(ctx, chain, store, kind, level) {
 				select {
-				case <-time.After(genSpacing):
+				case <-time.After(config.GenSpacing):
 				case <-ctx.Done():
 					return
+				}
+			}
+			// Tips are universal (level-independent), so keep one shared tip pool.
+			if ctx.Err() != nil {
+				return
+			}
+			_ = refillKind(ctx, chain, store, config.KindTip, config.DefaultLevel)
 		}
-	}
-	// Tips are universal (level-independent), so keep one shared tip pool.
-	if ctx.Err() != nil {
-		return
-	}
-	_ = refillKind(ctx, chain, store, kindTip, defaultLevel)
-}
 	}
 }
 

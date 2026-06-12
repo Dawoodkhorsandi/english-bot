@@ -7,6 +7,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -375,7 +377,7 @@ func (s *Store) DeckDetail(chatID int64, deckID string) (DeckDetail, bool, error
 		chatID, deckID, now,
 	).Scan(&nextRaw); err == nil {
 		if ts, ok := parseStoredUTC(nextRaw); ok {
-			det.NextReview = ts.In(appLocation).Format("2 Jan")
+			det.NextReview = ts.In(config.AppLocation).Format("2 Jan")
 		}
 	}
 	return det, true, nil

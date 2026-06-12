@@ -4,10 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // maintainerMessages returns the messages the mock captured for the maintainer
-// chat id (parsed from MaintainerChatID).
+// chat id (parsed from config.MaintainerChatID).
 func maintainerMessages(t *testing.T, mock *mockNotifier) []string {
 	t.Helper()
 	var out []string
@@ -28,15 +30,15 @@ func TestPoolExhaustionNotifiesMaintainer(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "999"
+	config.MaintainerChatID = "999"
 
 	store.AddSubscriber(100)
 	// A single-item pool: the first broadcast serve is unseen; the next is a repeat.
-	store.AddToPool(kindDrill, defaultLevel, "walk", "", "drill: walk")
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "walk", "", "drill: walk")
 
 	ctx := context.Background()
 	// First serve: unseen → no exhaustion notice.
-	if _, _, err := serveContent(ctx, emptyProviderChain(), store, mock, 100, kindDrill, defaultLevel, false); err != nil {
+	if _, _, err := serveContent(ctx, emptyProviderChain(), store, mock, 100, config.KindDrill, config.DefaultLevel, false); err != nil {
 		t.Fatalf("serve 1: %v", err)
 	}
 	if got := maintainerMessages(t, mock); len(got) != 0 {
@@ -44,7 +46,7 @@ func TestPoolExhaustionNotifiesMaintainer(t *testing.T) {
 	}
 
 	// Second serve: everything seen → recycle path → maintainer alerted once.
-	if _, _, err := serveContent(ctx, emptyProviderChain(), store, mock, 100, kindDrill, defaultLevel, false); err != nil {
+	if _, _, err := serveContent(ctx, emptyProviderChain(), store, mock, 100, config.KindDrill, config.DefaultLevel, false); err != nil {
 		t.Fatalf("serve 2: %v", err)
 	}
 	msgs := maintainerMessages(t, mock)
@@ -56,7 +58,7 @@ func TestPoolExhaustionNotifiesMaintainer(t *testing.T) {
 	}
 
 	// Third serve: still exhausted, pool unchanged → no duplicate alert.
-	if _, _, err := serveContent(ctx, emptyProviderChain(), store, mock, 100, kindDrill, defaultLevel, false); err != nil {
+	if _, _, err := serveContent(ctx, emptyProviderChain(), store, mock, 100, config.KindDrill, config.DefaultLevel, false); err != nil {
 		t.Fatalf("serve 3: %v", err)
 	}
 	if got := maintainerMessages(t, mock); len(got) != 1 {
@@ -70,23 +72,23 @@ func TestPoolExhaustionReAlertsAfterGrowth(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "999"
+	config.MaintainerChatID = "999"
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "card: apple")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "card: apple")
 
 	ctx := context.Background()
 	// Serve once (unseen) then again (recycle → first alert).
-	_, _, _ = serveContent(ctx, emptyProviderChain(), store, mock, 100, kindWord, defaultLevel, false)
-	_, _, _ = serveContent(ctx, emptyProviderChain(), store, mock, 100, kindWord, defaultLevel, false)
+	_, _, _ = serveContent(ctx, emptyProviderChain(), store, mock, 100, config.KindWord, config.DefaultLevel, false)
+	_, _, _ = serveContent(ctx, emptyProviderChain(), store, mock, 100, config.KindWord, config.DefaultLevel, false)
 	if got := maintainerMessages(t, mock); len(got) != 1 {
 		t.Fatalf("expected 1 alert before growth, got %d", len(got))
 	}
 
 	// Admin grows the pool. The user serves the new (unseen) item, then re-exhausts.
-	store.AddToPool(kindWord, defaultLevel, "banana", "a fruit", "card: banana")
-	_, _, _ = serveContent(ctx, emptyProviderChain(), store, mock, 100, kindWord, defaultLevel, false) // serves unseen "banana"
-	_, _, _ = serveContent(ctx, emptyProviderChain(), store, mock, 100, kindWord, defaultLevel, false) // recycle → re-alert
+	store.AddToPool(config.KindWord, config.DefaultLevel, "banana", "a fruit", "card: banana")
+	_, _, _ = serveContent(ctx, emptyProviderChain(), store, mock, 100, config.KindWord, config.DefaultLevel, false) // serves unseen "banana"
+	_, _, _ = serveContent(ctx, emptyProviderChain(), store, mock, 100, config.KindWord, config.DefaultLevel, false) // recycle → re-alert
 
 	if got := maintainerMessages(t, mock); len(got) != 2 {
 		t.Fatalf("expected a second alert after pool growth + re-exhaustion, got %d", len(got))
@@ -98,11 +100,11 @@ func TestPoolExhaustionReAlertsAfterGrowth(t *testing.T) {
 func TestPoolExhaustionNilNotifier(t *testing.T) {
 	store := testStoreHelper(t)
 	store.AddSubscriber(100)
-	store.AddToPool(kindDrill, defaultLevel, "walk", "", "drill: walk")
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "walk", "", "drill: walk")
 
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		if _, _, err := serveContent(ctx, emptyProviderChain(), store, nil, 100, kindDrill, defaultLevel, false); err != nil {
+		if _, _, err := serveContent(ctx, emptyProviderChain(), store, nil, 100, config.KindDrill, config.DefaultLevel, false); err != nil {
 			t.Fatalf("serve %d with nil notifier: %v", i, err)
 		}
 	}
@@ -112,21 +114,21 @@ func TestPoolExhaustionNilNotifier(t *testing.T) {
 func TestPoolExhaustionStoreRoundTrip(t *testing.T) {
 	store := testStoreHelper(t)
 
-	if _, ok, err := store.PoolExhaustionNotice(100, kindStory, defaultLevel); err != nil || ok {
+	if _, ok, err := store.PoolExhaustionNotice(100, config.KindStory, config.DefaultLevel); err != nil || ok {
 		t.Fatalf("expected no notice initially, got ok=%v err=%v", ok, err)
 	}
-	if err := store.MarkPoolExhaustionNotice(100, kindStory, defaultLevel, 80); err != nil {
+	if err := store.MarkPoolExhaustionNotice(100, config.KindStory, config.DefaultLevel, 80); err != nil {
 		t.Fatalf("MarkPoolExhaustionNotice: %v", err)
 	}
-	got, ok, err := store.PoolExhaustionNotice(100, kindStory, defaultLevel)
+	got, ok, err := store.PoolExhaustionNotice(100, config.KindStory, config.DefaultLevel)
 	if err != nil || !ok || got != 80 {
 		t.Fatalf("PoolExhaustionNotice = %d,%v,%v; want 80,true,nil", got, ok, err)
 	}
 	// Upsert to a new count.
-	if err := store.MarkPoolExhaustionNotice(100, kindStory, defaultLevel, 150); err != nil {
+	if err := store.MarkPoolExhaustionNotice(100, config.KindStory, config.DefaultLevel, 150); err != nil {
 		t.Fatalf("MarkPoolExhaustionNotice upsert: %v", err)
 	}
-	if got, _, _ := store.PoolExhaustionNotice(100, kindStory, defaultLevel); got != 150 {
+	if got, _, _ := store.PoolExhaustionNotice(100, config.KindStory, config.DefaultLevel); got != 150 {
 		t.Errorf("after upsert got %d, want 150", got)
 	}
 }

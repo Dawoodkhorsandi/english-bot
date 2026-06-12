@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // TestSrsKnownProgression verifies the interval grows on repeated correct recalls
@@ -105,10 +107,10 @@ func TestRecordSentForSeedsReview(t *testing.T) {
 	defer store.Close()
 
 	const chatID = int64(7)
-	if err := store.recordSentFor(kindWord, chatID, "ephemeral"); err != nil {
+	if err := store.recordSentFor(config.KindWord, chatID, "ephemeral"); err != nil {
 		t.Fatalf("recordSentFor word: %v", err)
 	}
-	if err := store.recordSentFor(kindDrill, chatID, "run"); err != nil {
+	if err := store.recordSentFor(config.KindDrill, chatID, "run"); err != nil {
 		t.Fatalf("recordSentFor drill: %v", err)
 	}
 
@@ -130,12 +132,12 @@ func TestSuggestLevelChange(t *testing.T) {
 		wantDir        string
 		wantOK         bool
 	}{
-		{"too small a sample", levelIntermediate, 5, 4, "", "", false},
-		{"high accuracy nudges up", levelIntermediate, 19, 20, levelUpperInt, "harder", true},
-		{"low accuracy nudges down", levelUpperInt, 8, 20, levelIntermediate, "easier", true},
-		{"middling stays put", levelIntermediate, 14, 20, "", "", false},
-		{"already hardest, no up", levelAdvanced, 20, 20, "", "", false},
-		{"already easiest, no down", levelBeginner, 2, 20, "", "", false},
+		{"too small a sample", config.LevelIntermediate, 5, 4, "", "", false},
+		{"high accuracy nudges up", config.LevelIntermediate, 19, 20, config.LevelUpperInt, "harder", true},
+		{"low accuracy nudges down", config.LevelUpperInt, 8, 20, config.LevelIntermediate, "easier", true},
+		{"middling stays put", config.LevelIntermediate, 14, 20, "", "", false},
+		{"already hardest, no up", config.LevelAdvanced, 20, 20, "", "", false},
+		{"already easiest, no down", config.LevelBeginner, 2, 20, "", "", false},
 		{"unknown level", "wizard", 20, 20, "", "", false},
 	}
 	for _, c := range cases {
@@ -177,7 +179,7 @@ func TestLevelSuggestionWindow(t *testing.T) {
 		}
 	}
 	target, dir, acc, ok, err := store.LevelSuggestion(chatID, now)
-	if err != nil || !ok || dir != "harder" || target != levelUpperInt {
+	if err != nil || !ok || dir != "harder" || target != config.LevelUpperInt {
 		t.Fatalf("sustained high: target=%q dir=%q ok=%v err=%v", target, dir, ok, err)
 	}
 	if acc < levelUpAccuracy*100 {

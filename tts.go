@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 const geminiTTSModel = "gemini-2.5-flash"
@@ -71,7 +73,7 @@ func extractTTSTerm(card string) string {
 // Generated audio is cached by word in audio_cache so subsequent sends for the
 // same word reuse the Telegram file_id (zero-cost re-send).
 func maybeSendTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string, replyToMessageID int64) {
-	if !ttsEnabled || isQuietHours(time.Now()) || store.IsPaused(chatID) || !store.GetTTSEnabled(chatID) {
+	if !config.TTSEnabled || isQuietHours(time.Now()) || store.IsPaused(chatID) || !store.GetTTSEnabled(chatID) {
 		return
 	}
 
@@ -123,7 +125,7 @@ func generateGeminiTTS(ctx context.Context, text string) ([]byte, string, error)
 
 	endpoint := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		geminiTTSModel, url.QueryEscape(GeminiAPIKey),
+		geminiTTSModel, url.QueryEscape(config.GeminiAPIKey),
 	)
 	payload := map[string]any{
 		"contents": []map[string]any{
@@ -200,7 +202,7 @@ func generateGeminiTTS(ctx context.Context, text string) ([]byte, string, error)
 }
 
 func geminiTTSConfigured() bool {
-	key := strings.TrimSpace(GeminiAPIKey)
+	key := strings.TrimSpace(config.GeminiAPIKey)
 	if key == "" {
 		return false
 	}

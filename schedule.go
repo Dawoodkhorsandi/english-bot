@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -33,7 +35,7 @@ func (l *hourlyLimiter) claimSlot(chatID int64, now time.Time, intervalMinutes i
 	}
 	m := minutesSinceMidnight(now)
 	slot := m / intervalMinutes
-	key := fmt.Sprintf("%s:%d", now.In(appLocation).Format("2006-01-02"), slot)
+	key := fmt.Sprintf("%s:%d", now.In(config.AppLocation).Format("2006-01-02"), slot)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.seen[chatID] == key {
@@ -73,12 +75,12 @@ func parseHourMinute(s string) (hour, min int) {
 // minutesOfDay returns t's wall-clock time as minutes since midnight.
 func minutesOfDay(t time.Time) int { return t.Hour()*60 + t.Minute() }
 
-// isQuietHours reports whether t (in appLocation) falls within the configured
+// isQuietHours reports whether t (in config.AppLocation) falls within the configured
 // quiet window. Handles windows that wrap past midnight.
 func isQuietHours(t time.Time) bool {
-	local := t.In(appLocation)
-	sh, sm := parseHourMinute(quietStart)
-	eh, em := parseHourMinute(quietEnd)
+	local := t.In(config.AppLocation)
+	sh, sm := parseHourMinute(config.QuietStart)
+	eh, em := parseHourMinute(config.QuietEnd)
 	start := sh*60 + sm
 	end := eh*60 + em
 	now := minutesOfDay(local)
@@ -93,10 +95,10 @@ func isQuietHours(t time.Time) bool {
 	return now >= start || now < end
 }
 
-// minutesSinceMidnight returns t's wall-clock position (in appLocation) as
+// minutesSinceMidnight returns t's wall-clock position (in config.AppLocation) as
 // minutes since local midnight.
 func minutesSinceMidnight(t time.Time) int {
-	local := t.In(appLocation)
+	local := t.In(config.AppLocation)
 	return local.Hour()*60 + local.Minute()
 }
 
@@ -114,14 +116,14 @@ func dueAndKind(t time.Time, interval int) (due bool, kind string) {
 		return false, ""
 	}
 	if (m/interval)%2 == 0 {
-		return true, kindDrill
+		return true, config.KindDrill
 	}
-	return true, kindWord
+	return true, config.KindWord
 }
 
 // nextHalfHour returns the next :00 or :30 boundary after t.
 func nextHalfHour(t time.Time) time.Time {
-	local := t.In(appLocation)
+	local := t.In(config.AppLocation)
 	truncated := local.Truncate(30 * time.Minute)
 	next := truncated.Add(30 * time.Minute)
 	if !next.After(local) {
@@ -130,11 +132,11 @@ func nextHalfHour(t time.Time) time.Time {
 	return next
 }
 
-// nextMidnight returns the next 00:00 boundary (in appLocation) after t.
+// nextMidnight returns the next 00:00 boundary (in config.AppLocation) after t.
 func nextMidnight(t time.Time) time.Time {
-	local := t.In(appLocation)
+	local := t.In(config.AppLocation)
 	y, m, d := local.Date()
-	midnight := time.Date(y, m, d, 0, 0, 0, 0, appLocation)
+	midnight := time.Date(y, m, d, 0, 0, 0, 0, config.AppLocation)
 	for !midnight.After(local) {
 		midnight = midnight.AddDate(0, 0, 1)
 	}
@@ -153,7 +155,7 @@ func runBroadcastScheduler(ctx context.Context, chain *ProviderChain, store *Sto
 	for {
 		next := nextHalfHour(time.Now())
 		wait := time.Until(next)
-		log.Printf("⏰ [SCHED] Next broadcast slot at %s (in %s).", next.In(appLocation).Format("15:04 MST"), wait.Truncate(time.Second))
+		log.Printf("⏰ [SCHED] Next broadcast slot at %s (in %s).", next.In(config.AppLocation).Format("15:04 MST"), wait.Truncate(time.Second))
 
 		select {
 		case <-ctx.Done():
@@ -164,7 +166,7 @@ func runBroadcastScheduler(ctx context.Context, chain *ProviderChain, store *Sto
 
 		now := time.Now()
 		if isQuietHours(now) {
-			log.Printf("🌙 [SCHED] %s is within quiet hours (%s–%s); skipping broadcast.", now.In(appLocation).Format("15:04"), quietStart, quietEnd)
+			log.Printf("🌙 [SCHED] %s is within quiet hours (%s–%s); skipping broadcast.", now.In(config.AppLocation).Format("15:04"), config.QuietStart, config.QuietEnd)
 			continue
 		}
 
@@ -216,7 +218,7 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 		}
 		// Drills go out paged (page 1 + navigation); words are a single message.
 		var sendErr error
-		if kind == kindDrill {
+		if kind == config.KindDrill {
 			sendErr = sendDrill(notifier, chatID, text)
 		} else {
 			sendErr = sendWordCardWithTTS(ctx, store, notifier, chatID, text, term)
@@ -315,9 +317,9 @@ func runDailyReviewScheduler(ctx context.Context, store *Store, notifier Notifie
 // sendDailyReview computes the just-ended local day window and sends each
 // subscriber the words they saw that day. Idempotent per (chat, day).
 func sendDailyReview(store *Store, notifier Notifier, now time.Time) {
-	local := now.In(appLocation)
+	local := now.In(config.AppLocation)
 	// The day that just ended is "yesterday" relative to the midnight boundary.
-	endLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, appLocation)
+	endLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, config.AppLocation)
 	startLocal := endLocal.AddDate(0, 0, -1)
 	reviewDate := startLocal.Format("2006-01-02")
 
@@ -396,24 +398,24 @@ func formatReview(items []reviewItem) string {
 // Idiom of the day scheduler (Change Q)
 // ---------------------------------------------------------------------------
 
-// nextDailyTime returns the next occurrence of hh:mm (in appLocation) after t.
+// nextDailyTime returns the next occurrence of hh:mm (in config.AppLocation) after t.
 func nextDailyTime(t time.Time, hh, mm int) time.Time {
-	local := t.In(appLocation)
-	target := time.Date(local.Year(), local.Month(), local.Day(), hh, mm, 0, 0, appLocation)
+	local := t.In(config.AppLocation)
+	target := time.Date(local.Year(), local.Month(), local.Day(), hh, mm, 0, 0, config.AppLocation)
 	for !target.After(local) {
 		target = target.AddDate(0, 0, 1)
 	}
 	return target
 }
 
-// runIdiomScheduler fires once a day at idiomTime (local) and broadcasts one
+// runIdiomScheduler fires once a day at config.IdiomTime (local) and broadcasts one
 // idiom of the day to every active subscriber. Set IDIOM_TIME=off to disable.
 func runIdiomScheduler(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
-	if strings.EqualFold(strings.TrimSpace(idiomTime), "off") {
+	if strings.EqualFold(strings.TrimSpace(config.IdiomTime), "off") {
 		log.Println("🗣️  [IDIOM] Idiom-of-the-day scheduler disabled (IDIOM_TIME=off).")
 		return
 	}
-	hh, mm := parseHourMinute(idiomTime)
+	hh, mm := parseHourMinute(config.IdiomTime)
 	log.Printf("🗣️  [IDIOM] Idiom-of-the-day scheduler started (fires daily at %02d:%02d local).", hh, mm)
 	for {
 		next := nextDailyTime(time.Now(), hh, mm)
@@ -435,7 +437,7 @@ func runIdiomScheduler(ctx context.Context, chain *ProviderChain, store *Store, 
 // per (chat, local date). Pool-only (never generates inline) so the daily
 // fan-out never hammers the AI; the pool filler keeps idioms stocked.
 func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, now time.Time) {
-	idiomDate := now.In(appLocation).Format("2006-01-02")
+	idiomDate := now.In(config.AppLocation).Format("2006-01-02")
 	chats, err := store.Subscribers()
 	if err != nil {
 		log.Printf("❌ [IDIOM] Could not read subscribers: %v", err)
@@ -465,7 +467,7 @@ func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, not
 		if delivered {
 			continue
 		}
-		text, _, err := serveContent(ctx, chain, store, notifier, chatID, kindIdiom, store.GetLevel(chatID), false)
+		text, _, err := serveContent(ctx, chain, store, notifier, chatID, config.KindIdiom, store.GetLevel(chatID), false)
 		if err != nil {
 			log.Printf("⚠️  [IDIOM] No idiom available for chat %d: %v", chatID, err)
 			continue
@@ -486,14 +488,14 @@ func sendIdiomOfDay(ctx context.Context, chain *ProviderChain, store *Store, not
 // Daily grammar tip scheduler
 // ---------------------------------------------------------------------------
 
-// runDailyTipScheduler fires once per local day at tipTime and sends one grammar
+// runDailyTipScheduler fires once per local day at config.TipTime and sends one grammar
 // tip to each non-paused subscriber who has tips enabled.
 func runDailyTipScheduler(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
-	if strings.EqualFold(strings.TrimSpace(tipTime), "off") {
+	if strings.EqualFold(strings.TrimSpace(config.TipTime), "off") {
 		log.Println("💡 [TIP] Daily tip scheduler disabled (TIP_TIME=off).")
 		return
 	}
-	hh, mm := parseHourMinute(tipTime)
+	hh, mm := parseHourMinute(config.TipTime)
 	log.Printf("💡 [TIP] Daily tip scheduler started (fires daily at %02d:%02d local).", hh, mm)
 	for {
 		next := nextDailyTime(time.Now(), hh, mm)
@@ -515,11 +517,11 @@ func runDailyTipScheduler(ctx context.Context, chain *ProviderChain, store *Stor
 // idempotent per (chat, local date), quiet-hour aware, and best-effort.
 func sendDailyTip(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, now time.Time) {
 	if isQuietHours(now) {
-		log.Printf("🌙 [TIP] %s is within quiet hours (%s–%s); skipping tip sweep.", now.In(appLocation).Format("15:04"), quietStart, quietEnd)
+		log.Printf("🌙 [TIP] %s is within quiet hours (%s–%s); skipping tip sweep.", now.In(config.AppLocation).Format("15:04"), config.QuietStart, config.QuietEnd)
 		return
 	}
 
-	tipDate := now.In(appLocation).Format("2006-01-02")
+	tipDate := now.In(config.AppLocation).Format("2006-01-02")
 	chats, err := store.Subscribers()
 	if err != nil {
 		log.Printf("❌ [TIP] Could not read subscribers: %v", err)
@@ -552,7 +554,7 @@ func sendDailyTip(ctx context.Context, chain *ProviderChain, store *Store, notif
 		}
 
 		// Best effort: pool-first, no inline generation on scheduler path.
-		tipText, _, err := serveContent(ctx, chain, store, notifier, chatID, kindTip, defaultLevel, false)
+		tipText, _, err := serveContent(ctx, chain, store, notifier, chatID, config.KindTip, config.DefaultLevel, false)
 		if err != nil {
 			log.Printf("⚠️  [TIP] Could not get tip for chat %d: %v", chatID, err)
 			continue
@@ -573,15 +575,15 @@ func sendDailyTip(ctx context.Context, chain *ProviderChain, store *Store, notif
 // Collocation of the day scheduler
 // ---------------------------------------------------------------------------
 
-// runCollocationScheduler fires once per local day at collocationTime and sends
+// runCollocationScheduler fires once per local day at config.CollocationTime and sends
 // one collocation card to each non-paused subscriber who has collocations
 // enabled. Set COLLOCATION_TIME=off to disable.
 func runCollocationScheduler(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
-	if strings.EqualFold(strings.TrimSpace(collocationTime), "off") {
+	if strings.EqualFold(strings.TrimSpace(config.CollocationTime), "off") {
 		log.Println("🔗 [COLLOCATION] Collocation-of-the-day scheduler disabled (COLLOCATION_TIME=off).")
 		return
 	}
-	hh, mm := parseHourMinute(collocationTime)
+	hh, mm := parseHourMinute(config.CollocationTime)
 	log.Printf("🔗 [COLLOCATION] Collocation-of-the-day scheduler started (fires daily at %02d:%02d local).", hh, mm)
 	for {
 		next := nextDailyTime(time.Now(), hh, mm)
@@ -604,11 +606,11 @@ func runCollocationScheduler(ctx context.Context, chain *ProviderChain, store *S
 // generates inline) so the daily fan-out never hammers the AI.
 func sendCollocationOfDay(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, now time.Time) {
 	if isQuietHours(now) {
-		log.Printf("🌙 [COLLOCATION] %s is within quiet hours (%s–%s); skipping collocation sweep.", now.In(appLocation).Format("15:04"), quietStart, quietEnd)
+		log.Printf("🌙 [COLLOCATION] %s is within quiet hours (%s–%s); skipping collocation sweep.", now.In(config.AppLocation).Format("15:04"), config.QuietStart, config.QuietEnd)
 		return
 	}
 
-	collocationDate := now.In(appLocation).Format("2006-01-02")
+	collocationDate := now.In(config.AppLocation).Format("2006-01-02")
 	chats, err := store.Subscribers()
 	if err != nil {
 		log.Printf("❌ [COLLOCATION] Could not read subscribers: %v", err)
@@ -638,7 +640,7 @@ func sendCollocationOfDay(ctx context.Context, chain *ProviderChain, store *Stor
 		if delivered {
 			continue
 		}
-		text, _, err := serveContent(ctx, chain, store, notifier, chatID, kindCollocation, prefs.Level, false)
+		text, _, err := serveContent(ctx, chain, store, notifier, chatID, config.KindCollocation, prefs.Level, false)
 		if err != nil {
 			log.Printf("⚠️  [COLLOCATION] No collocation available for chat %d: %v", chatID, err)
 			continue
@@ -659,15 +661,15 @@ func sendCollocationOfDay(ctx context.Context, chain *ProviderChain, store *Stor
 // Daily mini story scheduler
 // ---------------------------------------------------------------------------
 
-// runStoryScheduler fires once per local day at storyTime and sends one mini
+// runStoryScheduler fires once per local day at config.StoryTime and sends one mini
 // story to each non-paused subscriber who has stories enabled. Set
 // STORY_TIME=off to disable.
 func runStoryScheduler(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier) {
-	if strings.EqualFold(strings.TrimSpace(storyTime), "off") {
+	if strings.EqualFold(strings.TrimSpace(config.StoryTime), "off") {
 		log.Println("📖 [STORY] Daily mini story scheduler disabled (STORY_TIME=off).")
 		return
 	}
-	hh, mm := parseHourMinute(storyTime)
+	hh, mm := parseHourMinute(config.StoryTime)
 	log.Printf("📖 [STORY] Daily mini story scheduler started (fires daily at %02d:%02d local).", hh, mm)
 	for {
 		next := nextDailyTime(time.Now(), hh, mm)
@@ -690,11 +692,11 @@ func runStoryScheduler(ctx context.Context, chain *ProviderChain, store *Store, 
 // generates inline) so the daily fan-out never hammers the AI.
 func sendMiniStory(ctx context.Context, chain *ProviderChain, store *Store, notifier Notifier, now time.Time) {
 	if isQuietHours(now) {
-		log.Printf("🌙 [STORY] %s is within quiet hours (%s–%s); skipping story sweep.", now.In(appLocation).Format("15:04"), quietStart, quietEnd)
+		log.Printf("🌙 [STORY] %s is within quiet hours (%s–%s); skipping story sweep.", now.In(config.AppLocation).Format("15:04"), config.QuietStart, config.QuietEnd)
 		return
 	}
 
-	storyDate := now.In(appLocation).Format("2006-01-02")
+	storyDate := now.In(config.AppLocation).Format("2006-01-02")
 	chats, err := store.Subscribers()
 	if err != nil {
 		log.Printf("❌ [STORY] Could not read subscribers: %v", err)
@@ -724,7 +726,7 @@ func sendMiniStory(ctx context.Context, chain *ProviderChain, store *Store, noti
 		if delivered {
 			continue
 		}
-		text, _, err := serveContent(ctx, chain, store, notifier, chatID, kindStory, prefs.Level, false)
+		text, _, err := serveContent(ctx, chain, store, notifier, chatID, config.KindStory, prefs.Level, false)
 		if err != nil {
 			log.Printf("⚠️  [STORY] No story available for chat %d: %v", chatID, err)
 			continue
@@ -749,14 +751,14 @@ func sendMiniStory(ctx context.Context, chain *ProviderChain, store *Store, noti
 // sends each subscriber a recap of the week's words, quiz accuracy, streak,
 // and a "word of the week" highlight.
 func runWeeklyDigestScheduler(ctx context.Context, store *Store, notifier Notifier) {
-	if digestDay < 0 {
+	if config.DigestDay < 0 {
 		log.Println("📅 [DIGEST] Weekly digest scheduler disabled.")
 		return
 	}
-	weekdayName := time.Weekday(digestDay).String()
-	log.Printf("📅 [DIGEST] Weekly digest scheduler started (%s at %s).", weekdayName, digestTime)
+	weekdayName := time.Weekday(config.DigestDay).String()
+	log.Printf("📅 [DIGEST] Weekly digest scheduler started (%s at %s).", weekdayName, config.DigestTime)
 	for {
-		next := nextWeekdayTime(time.Now(), time.Weekday(digestDay), digestTime)
+		next := nextWeekdayTime(time.Now(), time.Weekday(config.DigestDay), config.DigestTime)
 		wait := time.Until(next)
 		log.Printf("📅 [DIGEST] Next digest at %s (in %s).", next.Format("2006-01-02 15:04 MST"), wait.Truncate(time.Second))
 
@@ -778,11 +780,11 @@ func runWeeklyDigestScheduler(ctx context.Context, store *Store, notifier Notifi
 // runDBBackupScheduler sends one SQLite backup per day to the maintainer at
 // BACKUP_TIME (local). Set BACKUP_TIME=off to disable.
 func runDBBackupScheduler(ctx context.Context, store *Store, notifier Notifier) {
-	if strings.EqualFold(strings.TrimSpace(backupTime), "off") {
+	if strings.EqualFold(strings.TrimSpace(config.BackupTime), "off") {
 		log.Println("🗄️  [BACKUP] Nightly backup scheduler disabled (BACKUP_TIME=off).")
 		return
 	}
-	hh, mm := parseHourMinute(backupTime)
+	hh, mm := parseHourMinute(config.BackupTime)
 	log.Printf("🗄️  [BACKUP] Nightly backup scheduler started (fires daily at %02d:%02d local).", hh, mm)
 	for {
 		next := nextDailyTime(time.Now(), hh, mm)
@@ -811,9 +813,9 @@ func runNightlyDBBackup(store *Store, notifier Notifier) {
 // local time (HH:MM format, parsed via parseHourMinute) after t.
 func nextWeekdayTime(t time.Time, weekday time.Weekday, timeStr string) time.Time {
 	h, m := parseHourMinute(timeStr)
-	local := t.In(appLocation)
+	local := t.In(config.AppLocation)
 	y, mo, d := local.Date()
-	target := time.Date(y, mo, d, h, m, 0, 0, appLocation)
+	target := time.Date(y, mo, d, h, m, 0, 0, config.AppLocation)
 
 	// Advance until we reach the correct weekday AND the time is in the future.
 	for target.Weekday() != weekday || !target.After(local) {
@@ -826,12 +828,12 @@ func nextWeekdayTime(t time.Time, weekday time.Weekday, timeStr string) time.Tim
 // recap of the week's vocabulary, quiz accuracy, streak and a word highlight.
 // Idempotent per (chat, week_start) via weekly_digest_delivery.
 func sendWeeklyDigest(store *Store, notifier Notifier, now time.Time) {
-	local := now.In(appLocation)
-	weekStartLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, appLocation).AddDate(0, 0, -7)
+	local := now.In(config.AppLocation)
+	weekStartLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, config.AppLocation).AddDate(0, 0, -7)
 	weekStart := weekStartLocal.Format("2006-01-02")
 
 	startUTC := weekStartLocal.UTC().Format("2006-01-02 15:04:05")
-	endUTC := time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), local.Minute(), 0, 0, appLocation).UTC().Format("2006-01-02 15:04:05")
+	endUTC := time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), local.Minute(), 0, 0, config.AppLocation).UTC().Format("2006-01-02 15:04:05")
 
 	chats, err := store.Subscribers()
 	if err != nil {

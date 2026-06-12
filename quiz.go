@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -478,7 +480,7 @@ type pendingQuizPoll struct {
 }
 
 var (
-	quizPollMu      sync.Mutex
+	quizPollMu       sync.Mutex
 	pendingQuizPolls = make(map[string]pendingQuizPoll)
 )
 
@@ -599,9 +601,9 @@ func handleQuizCallback(store *Store, notifier Notifier, cb *TelegramCallbackQue
 // Quiz scheduler goroutine
 // ---------------------------------------------------------------------------
 
-// nextTopOfHour returns the next top-of-hour boundary after t (in appLocation).
+// nextTopOfHour returns the next top-of-hour boundary after t (in config.AppLocation).
 func nextTopOfHour(t time.Time) time.Time {
-	local := t.In(appLocation)
+	local := t.In(config.AppLocation)
 	truncated := local.Truncate(time.Hour)
 	next := truncated.Add(time.Hour)
 	if !next.After(local) {
@@ -617,7 +619,7 @@ func quizDueForUser(t time.Time, intervalHours int) bool {
 	if intervalHours <= 0 {
 		return false
 	}
-	h := t.In(appLocation).Hour()
+	h := t.In(config.AppLocation).Hour()
 	return h%intervalHours == 0
 }
 
@@ -625,7 +627,7 @@ func quizDueForUser(t time.Time, intervalHours int) bool {
 // to each eligible user whose per-user quiz interval is due this hour.
 // Disabled globally when QUIZ_INTERVAL <= 0 (admin kill-switch).
 func runQuizScheduler(ctx context.Context, store *Store, notifier Notifier) {
-	if quizInterval <= 0 {
+	if config.QuizInterval <= 0 {
 		log.Println("🧩 [QUIZ] Quiz scheduler disabled (QUIZ_INTERVAL <= 0).")
 		return
 	}

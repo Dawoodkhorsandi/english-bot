@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 func fixedRand() *rand.Rand { return rand.New(rand.NewSource(1)) }
@@ -109,12 +111,12 @@ func TestMakeQuizFromSeenWords(t *testing.T) {
 		{"candid", "honest"},
 	}
 	for _, w := range words {
-		if err := store.AddToPool(kindWord, defaultLevel, w.term, w.meaning, "card for "+w.term); err != nil {
+		if err := store.AddToPool(config.KindWord, config.DefaultLevel, w.term, w.meaning, "card for "+w.term); err != nil {
 			t.Fatalf("AddToPool: %v", err)
 		}
 	}
 	// The user has "seen" tedious (also seeds its review schedule).
-	if err := store.recordSentFor(kindWord, chatID, "tedious"); err != nil {
+	if err := store.recordSentFor(config.KindWord, chatID, "tedious"); err != nil {
 		t.Fatalf("recordSentFor: %v", err)
 	}
 

@@ -5,75 +5,60 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
-// saveMaintainer saves and restores MaintainerChatID around a test.
+// saveMaintainer saves and restores config.MaintainerChatID around a test.
 func saveMaintainer(t *testing.T) {
 	t.Helper()
-	orig := MaintainerChatID
-	t.Cleanup(func() { MaintainerChatID = orig })
+	orig := config.MaintainerChatID
+	t.Cleanup(func() { config.MaintainerChatID = orig })
 }
 
-// saveQuietHours saves and restores quietStart/quietEnd around a test.
+// saveQuietHours saves and restores config.QuietStart/config.QuietEnd around a test.
 func saveQuietHours(t *testing.T) {
 	t.Helper()
-	origS, origE := quietStart, quietEnd
-	t.Cleanup(func() { quietStart = origS; quietEnd = origE })
+	origS, origE := config.QuietStart, config.QuietEnd
+	t.Cleanup(func() { config.QuietStart = origS; config.QuietEnd = origE })
 }
 
-// saveAppLocation saves and restores appLocation around a test.
+// saveAppLocation saves and restores config.AppLocation around a test.
 func saveAppLocation(t *testing.T) {
 	t.Helper()
-	orig := appLocation
-	t.Cleanup(func() { appLocation = orig })
+	orig := config.AppLocation
+	t.Cleanup(func() { config.AppLocation = orig })
 }
 
 // savePoolConfig saves and restores pool target knobs around a test.
 func savePoolConfig(t *testing.T) {
 	t.Helper()
-	origTarget, origMin := poolTarget, poolMin
+	origTarget, origMin := config.PoolTarget, config.PoolMin
 	t.Cleanup(func() {
-		poolTarget = origTarget
-		poolMin = origMin
+		config.PoolTarget = origTarget
+		config.PoolMin = origMin
 	})
 }
 
 // saveBotConfig saves and restores all runtime config globals around a test.
 func saveBotConfig(t *testing.T) {
 	t.Helper()
-	origTarget, origMin := poolTarget, poolMin
-	origQS, origQE := quietStart, quietEnd
-	origTTS := ttsEnabled
-	origGS := genSpacing
-	origRBM := reviewBatchMax
+	origTarget, origMin := config.PoolTarget, config.PoolMin
+	origQS, origQE := config.QuietStart, config.QuietEnd
+	origTTS := config.TTSEnabled
+	origGS := config.GenSpacing
+	origRBM := config.ReviewBatchMax
 	// Snapshot the per-(kind,level) / per-kind / per-level pool override maps.
-	poolOverrideMu.RLock()
-	origKindLevel := make(map[string]int, len(poolKindLevelTargets))
-	for k, v := range poolKindLevelTargets {
-		origKindLevel[k] = v
-	}
-	origKind := make(map[string]int, len(poolKindTargets))
-	for k, v := range poolKindTargets {
-		origKind[k] = v
-	}
-	origLevel := make(map[string]int, len(poolLevelTargets))
-	for k, v := range poolLevelTargets {
-		origLevel[k] = v
-	}
-	poolOverrideMu.RUnlock()
+	origKindLevel, origKind, origLevel := config.SnapshotOverrides()
 	t.Cleanup(func() {
-		poolTarget = origTarget
-		poolMin = origMin
-		quietStart = origQS
-		quietEnd = origQE
-		ttsEnabled = origTTS
-		genSpacing = origGS
-		reviewBatchMax = origRBM
-		poolOverrideMu.Lock()
-		poolKindLevelTargets = origKindLevel
-		poolKindTargets = origKind
-		poolLevelTargets = origLevel
-		poolOverrideMu.Unlock()
+		config.PoolTarget = origTarget
+		config.PoolMin = origMin
+		config.QuietStart = origQS
+		config.QuietEnd = origQE
+		config.TTSEnabled = origTTS
+		config.GenSpacing = origGS
+		config.ReviewBatchMax = origRBM
+		config.RestoreOverrides(origKindLevel, origKind, origLevel)
 	})
 }
 
@@ -89,7 +74,7 @@ func resetHourlyLimiter(t *testing.T) {
 func TestIsMaintainer(t *testing.T) {
 	saveMaintainer(t)
 
-	MaintainerChatID = "12345"
+	config.MaintainerChatID = "12345"
 	if !isMaintainer(12345) {
 		t.Error("expected isMaintainer(12345) = true")
 	}
@@ -97,14 +82,14 @@ func TestIsMaintainer(t *testing.T) {
 		t.Error("expected isMaintainer(99999) = false")
 	}
 
-	MaintainerChatID = "not_a_number"
+	config.MaintainerChatID = "not_a_number"
 	if isMaintainer(12345) {
-		t.Error("expected false for non-numeric MaintainerChatID")
+		t.Error("expected false for non-numeric config.MaintainerChatID")
 	}
 
-	MaintainerChatID = ""
+	config.MaintainerChatID = ""
 	if isMaintainer(0) {
-		t.Error("expected false for empty MaintainerChatID")
+		t.Error("expected false for empty config.MaintainerChatID")
 	}
 }
 
@@ -112,7 +97,7 @@ func TestHandleMessageStart(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "999"
+	config.MaintainerChatID = "999"
 
 	msg := &TelegramMessage{
 		MessageID: 1,
@@ -153,7 +138,7 @@ func TestHandleMessageStartReturning(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "999"
+	config.MaintainerChatID = "999"
 
 	store.AddSubscriber(100)
 
@@ -205,7 +190,7 @@ func TestHandleMessageDrill(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindDrill, defaultLevel, "walk", "", "drill text for walk")
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "walk", "", "drill text for walk")
 
 	msg := &TelegramMessage{
 		MessageID: 1,
@@ -231,7 +216,7 @@ func TestHandleMessageDrillPaged(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindDrill, defaultLevel, "walk", "", sampleDrill(21))
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "walk", "", sampleDrill(21))
 
 	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/drill"}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -256,7 +241,7 @@ func TestHandleMessageDrillPaged(t *testing.T) {
 func TestHandleDrillCallbackPaging(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
-	store.AddToPool(kindDrill, defaultLevel, "walk", "", sampleDrill(21))
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "walk", "", sampleDrill(21))
 
 	cb := &TelegramCallbackQuery{
 		ID:      "cb1",
@@ -319,7 +304,7 @@ func TestHandleMessageIdiom(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindIdiom, defaultLevel, "break the ice", "to start a conversation", "idiom card text")
+	store.AddToPool(config.KindIdiom, config.DefaultLevel, "break the ice", "to start a conversation", "idiom card text")
 
 	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/idiom"}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -332,7 +317,7 @@ func TestHandleMessageIdiom(t *testing.T) {
 		t.Errorf("last message should be the idiom card, got %q", texts[len(texts)-1])
 	}
 	// And it should be recorded so it isn't repeated.
-	if _, _, _, ok, _ := store.PooledUnseen(kindIdiom, defaultLevel, 100); ok {
+	if _, _, _, ok, _ := store.PooledUnseen(config.KindIdiom, config.DefaultLevel, 100); ok {
 		t.Error("served idiom should be recorded as seen")
 	}
 }
@@ -342,7 +327,7 @@ func TestHandleMessageWord(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindWord, defaultLevel, "apple", "a fruit", "word card for apple")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "word card for apple")
 
 	msg := &TelegramMessage{
 		MessageID: 1,
@@ -391,7 +376,7 @@ func TestHandleMessageTip(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindTip, defaultLevel, "used to vs would", "", "tip card text")
+	store.AddToPool(config.KindTip, config.DefaultLevel, "used to vs would", "", "tip card text")
 
 	msg := &TelegramMessage{
 		MessageID: 1,
@@ -765,7 +750,7 @@ func TestSrsKnownRevealsMeaning(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindWord, defaultLevel, "tedious", "boring or tiresome", "FULL WORD CARD for tedious")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "tedious", "boring or tiresome", "FULL WORD CARD for tedious")
 	store.SeedReview(100, "tedious", time.Now().Add(-time.Hour))
 
 	cb := &TelegramCallbackQuery{
@@ -792,7 +777,7 @@ func TestSrsForgotRevealsFullCard(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindWord, defaultLevel, "tedious", "boring or tiresome", "FULL WORD CARD for tedious")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "tedious", "boring or tiresome", "FULL WORD CARD for tedious")
 	store.SeedReview(100, "tedious", time.Now().Add(-time.Hour))
 
 	cb := &TelegramCallbackQuery{
@@ -817,8 +802,8 @@ func TestHandleCallbackQuizCorrect(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindWord, defaultLevel, "tedious", "boring", "card")
-	store.recordSentFor(kindWord, 100, "tedious")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "tedious", "boring", "card")
+	store.recordSentFor(config.KindWord, 100, "tedious")
 
 	cb := &TelegramCallbackQuery{
 		ID:   "cb5",
@@ -844,8 +829,8 @@ func TestHandleCallbackQuizWrong(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindWord, defaultLevel, "tedious", "boring", "card")
-	store.recordSentFor(kindWord, 100, "tedious")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "tedious", "boring", "card")
+	store.recordSentFor(config.KindWord, 100, "tedious")
 
 	cb := &TelegramCallbackQuery{
 		ID:   "cb6",
@@ -872,9 +857,9 @@ func TestHandleMetrics(t *testing.T) {
 
 	store.AddSubscriber(100)
 	store.AddSubscriber(200)
-	store.AddToPool(kindDrill, defaultLevel, "run", "", "drill text")
-	store.AddToPool(kindCollocation, defaultLevel, "make a decision", "", "collocation card")
-	store.AddToPool(kindStory, defaultLevel, "the lost ticket", "", "mini story text")
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "run", "", "drill text")
+	store.AddToPool(config.KindCollocation, config.DefaultLevel, "make a decision", "", "collocation card")
+	store.AddToPool(config.KindStory, config.DefaultLevel, "the lost ticket", "", "mini story text")
 
 	chain := mockProviderChain("test")
 	handleMetrics(store, chain, mock, 100)
@@ -888,7 +873,7 @@ func TestHandleMetrics(t *testing.T) {
 	}
 	// Pool depth must report every pooled content kind, including the v1.23.0
 	// collocation and story kinds (and tips).
-	for _, kind := range []string{kindDrill, kindWord, kindIdiom, kindCollocation, kindStory, kindTip} {
+	for _, kind := range []string{config.KindDrill, config.KindWord, config.KindIdiom, config.KindCollocation, config.KindStory, config.KindTip} {
 		if !strings.Contains(text, kind) {
 			t.Errorf("expected %q in pool-depth metrics, got %q", kind, text)
 		}
@@ -899,7 +884,7 @@ func TestHandleAnnounce(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "100"
+	config.MaintainerChatID = "100"
 
 	store.AddSubscriber(100)
 	store.AddSubscriber(200)
@@ -948,7 +933,7 @@ func TestHandleHealth(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	chain := mockProviderChain("test")
 	handleHealth(store, chain, mock, 100)
@@ -966,7 +951,7 @@ func TestHandleMetricsNotMaintainer(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "999"
+	config.MaintainerChatID = "999"
 
 	msg := &TelegramMessage{
 		MessageID: 1,
@@ -984,7 +969,7 @@ func TestHandleBackupNotMaintainer(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "999"
+	config.MaintainerChatID = "999"
 
 	msg := &TelegramMessage{
 		MessageID: 1,
@@ -1005,7 +990,7 @@ func TestHandleBackupMaintainer(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "300"
+	config.MaintainerChatID = "300"
 
 	msg := &TelegramMessage{
 		MessageID: 1,
@@ -1033,7 +1018,7 @@ func TestHandleConfigNotMaintainer(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "999"
+	config.MaintainerChatID = "999"
 
 	msg := &TelegramMessage{
 		MessageID: 1,
@@ -1052,7 +1037,7 @@ func TestHandleConfigShowsPanel(t *testing.T) {
 	mock := &mockNotifier{}
 	saveMaintainer(t)
 	saveBotConfig(t)
-	MaintainerChatID = "300"
+	config.MaintainerChatID = "300"
 
 	msg := &TelegramMessage{
 		MessageID: 1,
@@ -1078,8 +1063,8 @@ func TestConfigCallbackPoolTarget(t *testing.T) {
 	mock := &mockNotifier{}
 	saveMaintainer(t)
 	saveBotConfig(t)
-	MaintainerChatID = "300"
-	poolTarget = 300
+	config.MaintainerChatID = "300"
+	config.PoolTarget = 300
 
 	cb := &TelegramCallbackQuery{
 		ID:      "cb-cfg-1",
@@ -1089,8 +1074,8 @@ func TestConfigCallbackPoolTarget(t *testing.T) {
 	}
 	handleCallback(store, mock, cb)
 
-	if poolTarget != 500 {
-		t.Fatalf("poolTarget = %d, want 500", poolTarget)
+	if config.PoolTarget != 500 {
+		t.Fatalf("config.PoolTarget = %d, want 500", config.PoolTarget)
 	}
 	// Verify persisted to DB.
 	if v, ok := store.GetBotConfig("pool_target"); !ok || v != "500" {
@@ -1107,8 +1092,8 @@ func TestConfigCallbackPoolMin(t *testing.T) {
 	mock := &mockNotifier{}
 	saveMaintainer(t)
 	saveBotConfig(t)
-	MaintainerChatID = "300"
-	poolMin = 100
+	config.MaintainerChatID = "300"
+	config.PoolMin = 100
 
 	cb := &TelegramCallbackQuery{
 		ID:      "cb-cfg-2",
@@ -1118,8 +1103,8 @@ func TestConfigCallbackPoolMin(t *testing.T) {
 	}
 	handleCallback(store, mock, cb)
 
-	if poolMin != 200 {
-		t.Fatalf("poolMin = %d, want 200", poolMin)
+	if config.PoolMin != 200 {
+		t.Fatalf("config.PoolMin = %d, want 200", config.PoolMin)
 	}
 	if v, ok := store.GetBotConfig("pool_min"); !ok || v != "200" {
 		t.Errorf("bot_config pool_min = %q (ok=%v), want '200'", v, ok)
@@ -1131,8 +1116,8 @@ func TestConfigCallbackPerKindPool(t *testing.T) {
 	mock := &mockNotifier{}
 	saveMaintainer(t)
 	saveBotConfig(t)
-	MaintainerChatID = "300"
-	poolTarget, poolMin = 300, 100
+	config.MaintainerChatID = "300"
+	config.PoolTarget, config.PoolMin = 300, 100
 
 	set := func(data string) {
 		handleCallback(store, mock, &TelegramCallbackQuery{
@@ -1145,33 +1130,33 @@ func TestConfigCallbackPerKindPool(t *testing.T) {
 
 	// Set a per-kind override for stories.
 	set("cfg:pk:story:50")
-	if v, ok := poolKindOverride(kindStory); !ok || v != 50 {
-		t.Fatalf("poolKindOverride(story) = %d,%v; want 50,true", v, ok)
+	if v, ok := config.PoolKindOverride(config.KindStory); !ok || v != 50 {
+		t.Fatalf("config.PoolKindOverride(story) = %d,%v; want 50,true", v, ok)
 	}
 	if v, ok := store.GetBotConfig("pool_kind_story"); !ok || v != "50" {
 		t.Errorf("bot_config pool_kind_story = %q (ok=%v), want '50'", v, ok)
 	}
 	// Per-kind override beats the global rule at every level.
-	if got := poolTargetFor(kindStory, defaultLevel); got != 50 {
+	if got := poolTargetFor(config.KindStory, config.DefaultLevel); got != 50 {
 		t.Errorf("poolTargetFor(story, default) = %d, want 50 (override)", got)
 	}
-	if got := poolTargetFor(kindStory, levelAdvanced); got != 50 {
+	if got := poolTargetFor(config.KindStory, config.LevelAdvanced); got != 50 {
 		t.Errorf("poolTargetFor(story, advanced) = %d, want 50 (override)", got)
 	}
 	// Other kinds are unaffected.
-	if got := poolTargetFor(kindWord, defaultLevel); got != 300 {
+	if got := poolTargetFor(config.KindWord, config.DefaultLevel); got != 300 {
 		t.Errorf("poolTargetFor(word, default) = %d, want 300 (global)", got)
 	}
 
 	// Clearing (n=0) removes the override and the persisted key.
 	set("cfg:pk:story:0")
-	if _, ok := poolKindOverride(kindStory); ok {
+	if _, ok := config.PoolKindOverride(config.KindStory); ok {
 		t.Error("expected per-kind override cleared")
 	}
 	if _, ok := store.GetBotConfig("pool_kind_story"); ok {
 		t.Error("expected pool_kind_story deleted from bot_config")
 	}
-	if got := poolTargetFor(kindStory, defaultLevel); got != 300 {
+	if got := poolTargetFor(config.KindStory, config.DefaultLevel); got != 300 {
 		t.Errorf("poolTargetFor(story, default) after clear = %d, want 300", got)
 	}
 }
@@ -1181,8 +1166,8 @@ func TestConfigCallbackPerLevelPool(t *testing.T) {
 	mock := &mockNotifier{}
 	saveMaintainer(t)
 	saveBotConfig(t)
-	MaintainerChatID = "300"
-	poolTarget, poolMin = 300, 100
+	config.MaintainerChatID = "300"
+	config.PoolTarget, config.PoolMin = 300, 100
 
 	handleCallback(store, mock, &TelegramCallbackQuery{
 		ID:      "cb",
@@ -1191,19 +1176,19 @@ func TestConfigCallbackPerLevelPool(t *testing.T) {
 		Data:    "cfg:pl:advanced:200",
 	})
 
-	if v, ok := poolLevelOverride(levelAdvanced); !ok || v != 200 {
-		t.Fatalf("poolLevelOverride(advanced) = %d,%v; want 200,true", v, ok)
+	if v, ok := config.PoolLevelOverride(config.LevelAdvanced); !ok || v != 200 {
+		t.Fatalf("config.PoolLevelOverride(advanced) = %d,%v; want 200,true", v, ok)
 	}
 	if v, ok := store.GetBotConfig("pool_level_advanced"); !ok || v != "200" {
 		t.Errorf("bot_config pool_level_advanced = %q (ok=%v), want '200'", v, ok)
 	}
 	// Per-level override applies to every kind at that level...
-	if got := poolTargetFor(kindWord, levelAdvanced); got != 200 {
+	if got := poolTargetFor(config.KindWord, config.LevelAdvanced); got != 200 {
 		t.Errorf("poolTargetFor(word, advanced) = %d, want 200 (level override)", got)
 	}
 	// ...but a per-kind override still wins over it.
-	setPoolKindOverride(kindWord, 75)
-	if got := poolTargetFor(kindWord, levelAdvanced); got != 75 {
+	config.SetPoolKindOverride(config.KindWord, 75)
+	if got := poolTargetFor(config.KindWord, config.LevelAdvanced); got != 75 {
 		t.Errorf("poolTargetFor(word, advanced) = %d, want 75 (kind beats level)", got)
 	}
 }
@@ -1219,18 +1204,18 @@ func TestLoadBotConfigPoolOverrides(t *testing.T) {
 
 	_ = store.SetBotConfig("pool_kind_collocation", "120")
 	_ = store.SetBotConfig("pool_level_beginner", "40")
-	_ = store.SetBotConfig("pool_kind_bogus", "999") // ignored: not a real kind
+	_ = store.SetBotConfig("pool_kind_bogus", "999")  // ignored: not a real kind
 	_ = store.SetBotConfig("pool_level_bogus", "999") // ignored: not a real level
 
 	store.LoadBotConfig()
 
-	if v, ok := poolKindOverride(kindCollocation); !ok || v != 120 {
-		t.Errorf("after load: poolKindOverride(collocation) = %d,%v; want 120,true", v, ok)
+	if v, ok := config.PoolKindOverride(config.KindCollocation); !ok || v != 120 {
+		t.Errorf("after load: config.PoolKindOverride(collocation) = %d,%v; want 120,true", v, ok)
 	}
-	if v, ok := poolLevelOverride(levelBeginner); !ok || v != 40 {
-		t.Errorf("after load: poolLevelOverride(beginner) = %d,%v; want 40,true", v, ok)
+	if v, ok := config.PoolLevelOverride(config.LevelBeginner); !ok || v != 40 {
+		t.Errorf("after load: config.PoolLevelOverride(beginner) = %d,%v; want 40,true", v, ok)
 	}
-	if _, ok := poolKindOverride("bogus"); ok {
+	if _, ok := config.PoolKindOverride("bogus"); ok {
 		t.Error("bogus kind override should be ignored")
 	}
 }
@@ -1240,8 +1225,8 @@ func TestConfigCallbackToggleTTS(t *testing.T) {
 	mock := &mockNotifier{}
 	saveMaintainer(t)
 	saveBotConfig(t)
-	MaintainerChatID = "300"
-	ttsEnabled = true
+	config.MaintainerChatID = "300"
+	config.TTSEnabled = true
 
 	cb := &TelegramCallbackQuery{
 		ID:      "cb-cfg-tts",
@@ -1251,8 +1236,8 @@ func TestConfigCallbackToggleTTS(t *testing.T) {
 	}
 	handleCallback(store, mock, cb)
 
-	if ttsEnabled {
-		t.Fatal("expected ttsEnabled = false after toggle")
+	if config.TTSEnabled {
+		t.Fatal("expected config.TTSEnabled = false after toggle")
 	}
 	if v, ok := store.GetBotConfig("tts_enabled"); !ok || v != "false" {
 		t.Errorf("bot_config tts_enabled = %q (ok=%v), want 'false'", v, ok)
@@ -1261,8 +1246,8 @@ func TestConfigCallbackToggleTTS(t *testing.T) {
 	// Toggle again.
 	cb.ID = "cb-cfg-tts-2"
 	handleCallback(store, mock, cb)
-	if !ttsEnabled {
-		t.Fatal("expected ttsEnabled = true after second toggle")
+	if !config.TTSEnabled {
+		t.Fatal("expected config.TTSEnabled = true after second toggle")
 	}
 }
 
@@ -1271,7 +1256,7 @@ func TestConfigCallbackQuietHours(t *testing.T) {
 	mock := &mockNotifier{}
 	saveMaintainer(t)
 	saveBotConfig(t)
-	MaintainerChatID = "300"
+	config.MaintainerChatID = "300"
 
 	cb := &TelegramCallbackQuery{
 		ID:      "cb-cfg-qs",
@@ -1280,15 +1265,15 @@ func TestConfigCallbackQuietHours(t *testing.T) {
 		Data:    "cfg:quiet_start:23:00",
 	}
 	handleCallback(store, mock, cb)
-	if quietStart != "23:00" {
-		t.Fatalf("quietStart = %q, want '23:00'", quietStart)
+	if config.QuietStart != "23:00" {
+		t.Fatalf("config.QuietStart = %q, want '23:00'", config.QuietStart)
 	}
 
 	cb.ID = "cb-cfg-qe"
 	cb.Data = "cfg:quiet_end:10:00"
 	handleCallback(store, mock, cb)
-	if quietEnd != "10:00" {
-		t.Fatalf("quietEnd = %q, want '10:00'", quietEnd)
+	if config.QuietEnd != "10:00" {
+		t.Fatalf("config.QuietEnd = %q, want '10:00'", config.QuietEnd)
 	}
 }
 
@@ -1296,7 +1281,7 @@ func TestConfigCallbackNotMaintainer(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveMaintainer(t)
-	MaintainerChatID = "999"
+	config.MaintainerChatID = "999"
 
 	cb := &TelegramCallbackQuery{
 		ID:      "cb-cfg-blocked",
@@ -1330,26 +1315,26 @@ func TestLoadBotConfig(t *testing.T) {
 	// Load and verify all globals are overwritten.
 	store.LoadBotConfig()
 
-	if poolTarget != 777 {
-		t.Errorf("poolTarget = %d, want 777", poolTarget)
+	if config.PoolTarget != 777 {
+		t.Errorf("config.PoolTarget = %d, want 777", config.PoolTarget)
 	}
-	if poolMin != 222 {
-		t.Errorf("poolMin = %d, want 222", poolMin)
+	if config.PoolMin != 222 {
+		t.Errorf("config.PoolMin = %d, want 222", config.PoolMin)
 	}
-	if quietStart != "22:00" {
-		t.Errorf("quietStart = %q, want '22:00'", quietStart)
+	if config.QuietStart != "22:00" {
+		t.Errorf("config.QuietStart = %q, want '22:00'", config.QuietStart)
 	}
-	if quietEnd != "10:00" {
-		t.Errorf("quietEnd = %q, want '10:00'", quietEnd)
+	if config.QuietEnd != "10:00" {
+		t.Errorf("config.QuietEnd = %q, want '10:00'", config.QuietEnd)
 	}
-	if ttsEnabled {
-		t.Error("expected ttsEnabled = false")
+	if config.TTSEnabled {
+		t.Error("expected config.TTSEnabled = false")
 	}
-	if genSpacing.String() != "5s" {
-		t.Errorf("genSpacing = %s, want 5s", genSpacing)
+	if config.GenSpacing.String() != "5s" {
+		t.Errorf("config.GenSpacing = %s, want 5s", config.GenSpacing)
 	}
-	if reviewBatchMax != 3 {
-		t.Errorf("reviewBatchMax = %d, want 3", reviewBatchMax)
+	if config.ReviewBatchMax != 3 {
+		t.Errorf("config.ReviewBatchMax = %d, want 3", config.ReviewBatchMax)
 	}
 }
 
@@ -1427,7 +1412,7 @@ func TestSendPendingChangelogs_SilentSentToMaintainer(t *testing.T) {
 	mock := &mockNotifier{}
 
 	saveMaintainer(t)
-	MaintainerChatID = "300"
+	config.MaintainerChatID = "300"
 	store.AddSubscriber(300)
 
 	// Mark all existing changelogs as seen.
@@ -1481,9 +1466,9 @@ func TestHandleQuiz(t *testing.T) {
 		{"serene", "calm"},
 	}
 	for _, w := range words {
-		store.AddToPool(kindWord, defaultLevel, w.term, w.meaning, "card for "+w.term)
+		store.AddToPool(config.KindWord, config.DefaultLevel, w.term, w.meaning, "card for "+w.term)
 	}
-	store.recordSentFor(kindWord, 100, "tedious")
+	store.recordSentFor(config.KindWord, 100, "tedious")
 
 	handleQuiz(store, mock, 100)
 
@@ -1523,7 +1508,7 @@ func TestHandleWordLookup(t *testing.T) {
 	}
 
 	// Check word was pooled
-	terms, _ := store.PoolTerms(kindWord, defaultLevel)
+	terms, _ := store.PoolTerms(config.KindWord, config.DefaultLevel)
 	found := false
 	for _, term := range terms {
 		if term == "serendipity" {
@@ -1562,9 +1547,9 @@ func TestServeContentFromPool(t *testing.T) {
 	store := testStoreHelper(t)
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindDrill, defaultLevel, "walk", "", "drill text for walk")
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "walk", "", "drill text for walk")
 
-	text, _, err := serveContent(context.Background(), emptyProviderChain(), store, nil, 100, kindDrill, defaultLevel, false)
+	text, _, err := serveContent(context.Background(), emptyProviderChain(), store, nil, 100, config.KindDrill, config.DefaultLevel, false)
 	if err != nil {
 		t.Fatalf("serveContent: %v", err)
 	}
@@ -1579,7 +1564,7 @@ func TestServeContentInlineGenerate(t *testing.T) {
 	store.AddSubscriber(100)
 	chain := mockProviderChain("📘 <b>Word of the Session: ephemeral</b>\n\n<b>Meaning:</b> short-lived")
 
-	text, _, err := serveContent(context.Background(), chain, store, nil, 100, kindWord, defaultLevel, true)
+	text, _, err := serveContent(context.Background(), chain, store, nil, 100, config.KindWord, config.DefaultLevel, true)
 	if err != nil {
 		t.Fatalf("serveContent: %v", err)
 	}
@@ -1588,7 +1573,7 @@ func TestServeContentInlineGenerate(t *testing.T) {
 	}
 
 	// Should be added to pool
-	terms, _ := store.PoolTerms(kindWord, defaultLevel)
+	terms, _ := store.PoolTerms(config.KindWord, config.DefaultLevel)
 	found := false
 	for _, term := range terms {
 		if term == "ephemeral" {
@@ -1605,14 +1590,14 @@ func TestMaybeRefreshCard_StaleCard(t *testing.T) {
 
 	// Pool a word card WITHOUT Persian (old format).
 	oldCard := "📘 <b>Word of the Session: apple</b>\n<b>Meaning:</b> a fruit"
-	store.AddToPool(kindWord, defaultLevel, "apple", "a fruit", oldCard)
+	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", oldCard)
 
 	// Provide a chain that returns a modern card with Persian.
 	modernCard := "📘 <b>Word of the Session: apple</b>\n🇮🇷 <b>Persian</b>\n<tg-spoiler>سیب</tg-spoiler>"
 	chain := mockProviderChain(modernCard)
 
 	// Call maybeRefreshCard — it should detect the stale card and refresh it.
-	maybeRefreshCard(chain, store, kindWord, defaultLevel, "apple", oldCard)
+	maybeRefreshCard(chain, store, config.KindWord, config.DefaultLevel, "apple", oldCard)
 
 	// Wait briefly for the background goroutine to finish.
 	time.Sleep(500 * time.Millisecond)
@@ -1629,12 +1614,12 @@ func TestMaybeRefreshCard_FreshCard(t *testing.T) {
 
 	// Pool a word card WITH Persian (modern format).
 	modernCard := "📘 <b>Word of the Session: banana</b>\n🇮🇷 <b>Persian</b>\n<tg-spoiler>موز</tg-spoiler>"
-	store.AddToPool(kindWord, defaultLevel, "banana", "a fruit", modernCard)
+	store.AddToPool(config.KindWord, config.DefaultLevel, "banana", "a fruit", modernCard)
 
 	// Chain that would return something different if called.
 	chain := mockProviderChain("SHOULD NOT BE CALLED")
 
-	maybeRefreshCard(chain, store, kindWord, defaultLevel, "banana", modernCard)
+	maybeRefreshCard(chain, store, config.KindWord, config.DefaultLevel, "banana", modernCard)
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -1650,11 +1635,11 @@ func TestMaybeRefreshCard_DrillSkipped(t *testing.T) {
 
 	// Pool a drill without Persian — drills should never be refreshed.
 	drillText := "drill text without persian"
-	store.AddToPool(kindDrill, defaultLevel, "run", "", drillText)
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "run", "", drillText)
 
 	chain := mockProviderChain("SHOULD NOT BE CALLED")
 
-	maybeRefreshCard(chain, store, kindDrill, defaultLevel, "run", drillText)
+	maybeRefreshCard(chain, store, config.KindDrill, config.DefaultLevel, "run", drillText)
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -1662,7 +1647,7 @@ func TestMaybeRefreshCard_DrillSkipped(t *testing.T) {
 	var got string
 	_ = store.db.QueryRow(
 		"SELECT text FROM content_pool WHERE kind = ? AND term = ?",
-		kindDrill, "run",
+		config.KindDrill, "run",
 	).Scan(&got)
 	if got != drillText {
 		t.Errorf("drill card should not be modified, got %q", got)
@@ -1674,16 +1659,16 @@ func TestBroadcastSweep(t *testing.T) {
 	mock := &mockNotifier{}
 	saveAppLocation(t)
 	saveQuietHours(t)
-	appLocation = time.UTC
-	quietStart = "00:00"
-	quietEnd = "06:00"
+	config.AppLocation = time.UTC
+	config.QuietStart = "00:00"
+	config.QuietEnd = "06:00"
 
 	store.AddSubscriber(100)
 	store.AddSubscriber(200)
 
 	// Pool items for both kinds at default level
-	store.AddToPool(kindDrill, defaultLevel, "run", "", "drill for run")
-	store.AddToPool(kindWord, defaultLevel, "apple", "fruit", "card for apple")
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "run", "", "drill for run")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "fruit", "card for apple")
 
 	// Use 10:00 UTC — not quiet, minute 600 % 30 == 0, so it's due
 	now := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
@@ -1699,16 +1684,16 @@ func TestBroadcastSweepSkipsPaused(t *testing.T) {
 	mock := &mockNotifier{}
 	saveAppLocation(t)
 	saveQuietHours(t)
-	appLocation = time.UTC
-	quietStart = "00:00"
-	quietEnd = "06:00"
+	config.AppLocation = time.UTC
+	config.QuietStart = "00:00"
+	config.QuietEnd = "06:00"
 
 	store.AddSubscriber(100)
 	store.AddSubscriber(200)
 	store.SetPaused(200, true)
 
-	store.AddToPool(kindDrill, defaultLevel, "run", "", "drill for run")
-	store.AddToPool(kindWord, defaultLevel, "apple", "fruit", "card for apple")
+	store.AddToPool(config.KindDrill, config.DefaultLevel, "run", "", "drill for run")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "fruit", "card for apple")
 
 	now := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
 	broadcastSweep(context.Background(), emptyProviderChain(), store, mock, now)
@@ -1727,9 +1712,9 @@ func TestRunQuizSweep(t *testing.T) {
 	saveAppLocation(t)
 	saveQuietHours(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart = "00:00"
-	quietEnd = "06:00"
+	config.AppLocation = time.UTC
+	config.QuietStart = "00:00"
+	config.QuietEnd = "06:00"
 
 	store.AddSubscriber(100)
 	words := []struct{ term, meaning string }{
@@ -1739,9 +1724,9 @@ func TestRunQuizSweep(t *testing.T) {
 		{"serene", "calm"},
 	}
 	for _, w := range words {
-		store.AddToPool(kindWord, defaultLevel, w.term, w.meaning, "card for "+w.term)
+		store.AddToPool(config.KindWord, config.DefaultLevel, w.term, w.meaning, "card for "+w.term)
 	}
-	store.recordSentFor(kindWord, 100, "tedious")
+	store.recordSentFor(config.KindWord, 100, "tedious")
 
 	// Use hour 12 — aligned with the default 6h quiz interval (12 % 6 == 0).
 	now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -1757,9 +1742,9 @@ func TestRunQuizSweepQuietHours(t *testing.T) {
 	mock := &mockNotifier{}
 	saveAppLocation(t)
 	saveQuietHours(t)
-	appLocation = time.UTC
-	quietStart = "00:00"
-	quietEnd = "12:00"
+	config.AppLocation = time.UTC
+	config.QuietStart = "00:00"
+	config.QuietEnd = "12:00"
 
 	store.AddSubscriber(100)
 	words := []struct{ term, meaning string }{
@@ -1769,9 +1754,9 @@ func TestRunQuizSweepQuietHours(t *testing.T) {
 		{"serene", "calm"},
 	}
 	for _, w := range words {
-		store.AddToPool(kindWord, defaultLevel, w.term, w.meaning, "card for "+w.term)
+		store.AddToPool(config.KindWord, config.DefaultLevel, w.term, w.meaning, "card for "+w.term)
 	}
-	store.recordSentFor(kindWord, 100, "tedious")
+	store.recordSentFor(config.KindWord, 100, "tedious")
 
 	// 3:00 UTC is within quiet hours (00:00-12:00)
 	now := time.Date(2025, 1, 1, 3, 0, 0, 0, time.UTC)
@@ -1929,8 +1914,8 @@ func TestHandleCallbackLevelButton(t *testing.T) {
 		t.Errorf("expected 'Advanced' in edited message, got %q", mock.edits[0].text)
 	}
 	// Verify persisted.
-	if got := store.GetLevel(100); got != levelAdvanced {
-		t.Errorf("level = %q, want %q", got, levelAdvanced)
+	if got := store.GetLevel(100); got != config.LevelAdvanced {
+		t.Errorf("level = %q, want %q", got, config.LevelAdvanced)
 	}
 }
 
@@ -2217,18 +2202,18 @@ func TestHandleReviewCallbackMalformedData(t *testing.T) {
 func TestGetEnvInt(t *testing.T) {
 	// Valid int.
 	t.Setenv("TEST_INT_VALID", "42")
-	if got := getEnvInt("TEST_INT_VALID", 10); got != 42 {
+	if got := config.GetEnvInt("TEST_INT_VALID", 10); got != 42 {
 		t.Errorf("got %d, want 42", got)
 	}
 
 	// Invalid int falls back.
 	t.Setenv("TEST_INT_INVALID", "abc")
-	if got := getEnvInt("TEST_INT_INVALID", 10); got != 10 {
+	if got := config.GetEnvInt("TEST_INT_INVALID", 10); got != 10 {
 		t.Errorf("got %d, want fallback 10", got)
 	}
 
 	// Missing key falls back.
-	if got := getEnvInt("TEST_INT_MISSING_KEY_XYZ", 99); got != 99 {
+	if got := config.GetEnvInt("TEST_INT_MISSING_KEY_XYZ", 99); got != 99 {
 		t.Errorf("got %d, want fallback 99", got)
 	}
 }
@@ -2236,18 +2221,18 @@ func TestGetEnvInt(t *testing.T) {
 func TestGetEnvDuration(t *testing.T) {
 	// Valid duration.
 	t.Setenv("TEST_DUR_VALID", "5m")
-	if got := getEnvDuration("TEST_DUR_VALID", time.Second); got != 5*time.Minute {
+	if got := config.GetEnvDuration("TEST_DUR_VALID", time.Second); got != 5*time.Minute {
 		t.Errorf("got %v, want 5m", got)
 	}
 
 	// Invalid duration falls back.
 	t.Setenv("TEST_DUR_INVALID", "not-a-duration")
-	if got := getEnvDuration("TEST_DUR_INVALID", 30*time.Second); got != 30*time.Second {
+	if got := config.GetEnvDuration("TEST_DUR_INVALID", 30*time.Second); got != 30*time.Second {
 		t.Errorf("got %v, want fallback 30s", got)
 	}
 
 	// Missing key falls back.
-	if got := getEnvDuration("TEST_DUR_MISSING_KEY_XYZ", time.Hour); got != time.Hour {
+	if got := config.GetEnvDuration("TEST_DUR_MISSING_KEY_XYZ", time.Hour); got != time.Hour {
 		t.Errorf("got %v, want fallback 1h", got)
 	}
 }
@@ -2256,20 +2241,20 @@ func TestLoadLocation(t *testing.T) {
 	saveAppLocation(t)
 
 	// Save and restore the global timezone string.
-	origTZ := appTimezone
-	t.Cleanup(func() { appTimezone = origTZ })
+	origTZ := config.AppTimezone
+	t.Cleanup(func() { config.AppTimezone = origTZ })
 
 	// Valid timezone.
-	appTimezone = "America/New_York"
-	loadLocation()
-	if appLocation.String() != "America/New_York" {
-		t.Errorf("appLocation = %q, want America/New_York", appLocation.String())
+	config.AppTimezone = "America/New_York"
+	config.LoadLocation()
+	if config.AppLocation.String() != "America/New_York" {
+		t.Errorf("config.AppLocation = %q, want America/New_York", config.AppLocation.String())
 	}
 
 	// Invalid timezone falls back to UTC.
-	appTimezone = "Invalid/Nonexistent"
-	loadLocation()
-	if appLocation != time.UTC {
-		t.Errorf("appLocation = %q, want UTC for invalid timezone", appLocation.String())
+	config.AppTimezone = "Invalid/Nonexistent"
+	config.LoadLocation()
+	if config.AppLocation != time.UTC {
+		t.Errorf("config.AppLocation = %q, want UTC for invalid timezone", config.AppLocation.String())
 	}
 }

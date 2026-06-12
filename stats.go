@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -86,7 +88,7 @@ func (s *Store) UserStats(chatID int64) (UserStats, error) {
 	var created any
 	if err := s.db.QueryRow("SELECT created_at FROM subscribers WHERE chat_id = ?", chatID).Scan(&created); err == nil {
 		if ts, ok := parseStoredUTC(created); ok {
-			st.MemberSince = ts.In(appLocation)
+			st.MemberSince = ts.In(config.AppLocation)
 			st.HasMemberSince = true
 		}
 	}
@@ -102,7 +104,7 @@ func (s *Store) UserStats(chatID int64) (UserStats, error) {
 		days[d] = true
 		st.ActivityDays = append(st.ActivityDays, d)
 	}
-	st.CurrentStreak, st.LongestStreak = computeStreaks(days, time.Now().In(appLocation))
+	st.CurrentStreak, st.LongestStreak = computeStreaks(days, time.Now().In(config.AppLocation))
 	sort.Strings(st.ActivityDays)
 	return st, nil
 }
@@ -115,7 +117,7 @@ func (s *Store) countByChat(table string, chatID int64) int {
 	return n
 }
 
-// activityDays returns, per distinct local (appLocation) calendar date keyed by
+// activityDays returns, per distinct local (config.AppLocation) calendar date keyed by
 // "2006-01-02", how many drills or words the user received that day.
 func (s *Store) activityDays(chatID int64) (map[string]int, error) {
 	rows, err := s.db.Query(`
@@ -136,7 +138,7 @@ func (s *Store) activityDays(chatID int64) (map[string]int, error) {
 			return nil, err
 		}
 		if ts, ok := parseStoredUTC(raw); ok {
-			days[ts.In(appLocation).Format("2006-01-02")]++
+			days[ts.In(config.AppLocation).Format("2006-01-02")]++
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -145,7 +147,7 @@ func (s *Store) activityDays(chatID int64) (map[string]int, error) {
 
 	// Fold in pull-based learning (in-app reviews, deck study, quiz answers) that
 	// leaves no sent_* footprint. RecordActivity stores the day pre-formatted in
-	// appLocation, so it merges directly into the per-day counts above.
+	// config.AppLocation, so it merges directly into the per-day counts above.
 	logRows, err := s.db.Query("SELECT day, cnt FROM activity_log WHERE chat_id = ?", chatID)
 	if err != nil {
 		return nil, err
@@ -162,12 +164,12 @@ func (s *Store) activityDays(chatID int64) (map[string]int, error) {
 	return days, logRows.Err()
 }
 
-// RecordActivity marks today (in appLocation) as an active learning day for a
+// RecordActivity marks today (in config.AppLocation) as an active learning day for a
 // chat, independent of content delivery. It is called from pull-based learning
 // touch-points — in-app reviews, deck study, and quiz answers — that do not
 // otherwise land in the sent_* history tables, so the streak reflects them.
 func (s *Store) RecordActivity(chatID int64, now time.Time) error {
-	day := now.In(appLocation).Format("2006-01-02")
+	day := now.In(config.AppLocation).Format("2006-01-02")
 	_, err := s.db.Exec(`
 		INSERT INTO activity_log (chat_id, day, cnt) VALUES (?, ?, 1)
 		ON CONFLICT(chat_id, day) DO UPDATE SET cnt = cnt + 1`,

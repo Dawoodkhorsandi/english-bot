@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -22,16 +24,16 @@ import (
 
 const testBotToken = "123456:test-bot-token"
 
-// saveToken pins TelegramBotToken for the duration of a test.
+// saveToken pins config.TelegramBotToken for the duration of a test.
 func saveToken(t *testing.T) {
 	t.Helper()
-	orig := TelegramBotToken
-	TelegramBotToken = testBotToken
-	t.Cleanup(func() { TelegramBotToken = orig })
+	orig := config.TelegramBotToken
+	config.TelegramBotToken = testBotToken
+	t.Cleanup(func() { config.TelegramBotToken = orig })
 }
 
 // signInitData builds a valid initData query string for chatID, signed with the
-// current TelegramBotToken, stamped at authDate.
+// current config.TelegramBotToken, stamped at authDate.
 func signInitData(chatID int64, authDate time.Time) string {
 	vals := map[string]string{
 		"user":      fmt.Sprintf(`{"id":%d,"first_name":"Test"}`, chatID),
@@ -45,7 +47,7 @@ func signInitData(chatID int64, authDate time.Time) string {
 	check := strings.Join(pairs, "\n")
 
 	h1 := hmac.New(sha256.New, []byte("WebAppData"))
-	h1.Write([]byte(TelegramBotToken))
+	h1.Write([]byte(config.TelegramBotToken))
 	secret := h1.Sum(nil)
 	h2 := hmac.New(sha256.New, secret)
 	h2.Write([]byte(check))
@@ -128,7 +130,7 @@ func TestAPIVocabSearchAndBookmark(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	store.AddToPool(kindWord, defaultLevel, "apple", "a round fruit", "card")
+	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a round fruit", "card")
 
 	// Search "ap" → apple + apricot (term match), and "round" → apple (meaning).
 	w := apiCall(store, handleAPIVocab, http.MethodGet, "/api/vocab?q=ap&limit=50", 100, "")
@@ -287,10 +289,10 @@ func TestAPIReviewDedupAndEnrich(t *testing.T) {
 		"📝 <b>Examples</b>\n• She took a <b>vigorous</b> walk.\n" +
 		"🇮🇷 <b>Persian</b>\n<tg-spoiler>پرانرژی</tg-spoiler>"
 	// Same term pooled at two levels — the old query returned a row per level.
-	if err := store.AddToPool(kindWord, "beginner", "vigorous", "full of energy and strength", card); err != nil {
+	if err := store.AddToPool(config.KindWord, "beginner", "vigorous", "full of energy and strength", card); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddToPool(kindWord, "advanced", "vigorous", "full of energy and strength", card); err != nil {
+	if err := store.AddToPool(config.KindWord, "advanced", "vigorous", "full of energy and strength", card); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
@@ -567,7 +569,7 @@ func TestAPIContentAndQuizHistory(t *testing.T) {
 	const chatID = 777
 
 	// Seed an idiom the user has received; the pool keeps the card text.
-	if err := store.AddToPool(kindIdiom, "intermediate", "break the ice",
+	if err := store.AddToPool(config.KindIdiom, "intermediate", "break the ice",
 		"start a conversation", "💬 <b>break the ice</b>\nTo make people feel relaxed."); err != nil {
 		t.Fatalf("AddToPool: %v", err)
 	}
@@ -689,9 +691,9 @@ func TestAPILeaderboardMetricsNoPhoto(t *testing.T) {
 
 func TestAPIConfig(t *testing.T) {
 	saveToken(t)
-	prevUser, prevURL := botUsername, webAppURL
-	botUsername, webAppURL = "@testbot", "https://bot.example.com"
-	t.Cleanup(func() { botUsername, webAppURL = prevUser, prevURL })
+	prevUser, prevURL := config.BotUsername, config.WebAppURL
+	config.BotUsername, config.WebAppURL = "@testbot", "https://bot.example.com"
+	t.Cleanup(func() { config.BotUsername, config.WebAppURL = prevUser, prevURL })
 
 	r := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -700,8 +702,8 @@ func TestAPIConfig(t *testing.T) {
 		t.Fatalf("code = %d, want 200", w.Code)
 	}
 	var resp struct {
-		BotUsername string `json:"botUsername"`
-		WebAppURL   string `json:"webAppURL"`
+		BotUsername string `json:"config.BotUsername"`
+		WebAppURL   string `json:"config.WebAppURL"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
@@ -720,7 +722,7 @@ func TestAPIPracticeServesAndRecords(t *testing.T) {
 	store := testStoreHelper(t)
 	const chatID = 555
 
-	if err := store.AddToPool(kindIdiom, defaultLevel, "hit the books",
+	if err := store.AddToPool(config.KindIdiom, config.DefaultLevel, "hit the books",
 		"to study hard", "💬 <b>hit the books</b>\nTo study hard."); err != nil {
 		t.Fatalf("AddToPool: %v", err)
 	}
@@ -744,7 +746,7 @@ func TestAPIPracticeServesAndRecords(t *testing.T) {
 		t.Errorf("text should be HTML-stripped, got %q", resp.Text)
 	}
 	// The serve was recorded to the per-user history (Library sees it).
-	if n := store.ContentHistoryCount(chatID, kindIdiom); n != 1 {
+	if n := store.ContentHistoryCount(chatID, config.KindIdiom); n != 1 {
 		t.Errorf("ContentHistoryCount = %d, want 1", n)
 	}
 
@@ -774,7 +776,7 @@ func TestAPIQuizNextAndAnswer(t *testing.T) {
 		"vivid": "very bright", "tepid": "slightly warm",
 	}
 	for term, meaning := range words {
-		if err := store.AddToPool(kindWord, defaultLevel, term, meaning, "card "+term); err != nil {
+		if err := store.AddToPool(config.KindWord, config.DefaultLevel, term, meaning, "card "+term); err != nil {
 			t.Fatalf("AddToPool: %v", err)
 		}
 	}
@@ -938,8 +940,8 @@ func TestAPIReviewSummary(t *testing.T) {
 	if resp["suggest"] != true || resp["direction"] != "harder" {
 		t.Fatalf("sustained high: resp = %+v, want suggest=true direction=harder", resp)
 	}
-	if resp["targetLevel"] != levelUpperInt {
-		t.Errorf("targetLevel = %v, want %q", resp["targetLevel"], levelUpperInt)
+	if resp["targetLevel"] != config.LevelUpperInt {
+		t.Errorf("targetLevel = %v, want %q", resp["targetLevel"], config.LevelUpperInt)
 	}
 
 	// A second call right away is suppressed by the cooldown + window reset.
@@ -958,7 +960,7 @@ func TestPracticeSeedsReview(t *testing.T) {
 	store := testStoreHelper(t)
 	const chatID = 100
 
-	if err := store.AddToPool(kindWord, defaultLevel, "ephemeral", "fleeting", "card: ephemeral"); err != nil {
+	if err := store.AddToPool(config.KindWord, config.DefaultLevel, "ephemeral", "fleeting", "card: ephemeral"); err != nil {
 		t.Fatal(err)
 	}
 	w := apiCall(store, handleAPIPractice, http.MethodGet, "/api/practice?kind=word", chatID, "")

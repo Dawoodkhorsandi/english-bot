@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -13,22 +15,22 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBuildCollocationPromptExclusion(t *testing.T) {
-	p := buildCollocationPrompt(defaultLevel, nil)
+	p := buildCollocationPrompt(config.DefaultLevel, nil)
 	if strings.Contains(p, "Do NOT use") {
 		t.Error("prompt without exclusions should not contain an exclusion clause")
 	}
-	p = buildCollocationPrompt(defaultLevel, []string{"make a decision", "heavy rain"})
+	p = buildCollocationPrompt(config.DefaultLevel, []string{"make a decision", "heavy rain"})
 	if !strings.Contains(p, "make a decision, heavy rain") {
 		t.Errorf("prompt should list excluded collocations, got %q", p)
 	}
 }
 
 func TestBuildStoryPromptExclusion(t *testing.T) {
-	p := buildStoryPrompt(defaultLevel, nil)
+	p := buildStoryPrompt(config.DefaultLevel, nil)
 	if strings.Contains(p, "Do NOT reuse") {
 		t.Error("prompt without exclusions should not contain an exclusion clause")
 	}
-	p = buildStoryPrompt(defaultLevel, []string{"the lost ticket"})
+	p = buildStoryPrompt(config.DefaultLevel, []string{"the lost ticket"})
 	if !strings.Contains(p, "the lost ticket") {
 		t.Errorf("prompt should list excluded story titles, got %q", p)
 	}
@@ -36,7 +38,7 @@ func TestBuildStoryPromptExclusion(t *testing.T) {
 
 func TestStoryLevelInstructionPerLevel(t *testing.T) {
 	seen := map[string]bool{}
-	for _, level := range allLevels {
+	for _, level := range config.AllLevels {
 		instr := storyLevelInstruction(level)
 		if instr == "" {
 			t.Errorf("empty story instruction for level %q", level)
@@ -86,7 +88,7 @@ func TestHandleMessageCollocation(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindCollocation, defaultLevel, "make a decision", "to choose", "collocation card text")
+	store.AddToPool(config.KindCollocation, config.DefaultLevel, "make a decision", "to choose", "collocation card text")
 
 	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/collocation"}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -99,7 +101,7 @@ func TestHandleMessageCollocation(t *testing.T) {
 		t.Errorf("last message should be the collocation card, got %q", texts[len(texts)-1])
 	}
 	// And it should be recorded so it isn't repeated.
-	if _, _, _, ok, _ := store.PooledUnseen(kindCollocation, defaultLevel, 100); ok {
+	if _, _, _, ok, _ := store.PooledUnseen(config.KindCollocation, config.DefaultLevel, 100); ok {
 		t.Error("served collocation should be recorded as seen")
 	}
 }
@@ -109,7 +111,7 @@ func TestHandleMessageStory(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindStory, defaultLevel, "the lost ticket", "", "mini story text")
+	store.AddToPool(config.KindStory, config.DefaultLevel, "the lost ticket", "", "mini story text")
 
 	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/story"}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -121,7 +123,7 @@ func TestHandleMessageStory(t *testing.T) {
 	if texts[len(texts)-1] != "mini story text" {
 		t.Errorf("last message should be the story, got %q", texts[len(texts)-1])
 	}
-	if _, _, _, ok, _ := store.PooledUnseen(kindStory, defaultLevel, 100); ok {
+	if _, _, _, ok, _ := store.PooledUnseen(config.KindStory, config.DefaultLevel, 100); ok {
 		t.Error("served story should be recorded as seen")
 	}
 }
@@ -136,11 +138,11 @@ func TestSendCollocationOfDay_DeliversAndMarks(t *testing.T) {
 	saveQuietHours(t)
 	saveAppLocation(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart, quietEnd = "00:00", "00:00"
+	config.AppLocation = time.UTC
+	config.QuietStart, config.QuietEnd = "00:00", "00:00"
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindCollocation, defaultLevel, "make a decision", "to choose", "collocation card")
+	store.AddToPool(config.KindCollocation, config.DefaultLevel, "make a decision", "to choose", "collocation card")
 
 	now := time.Date(2026, 6, 3, 13, 0, 0, 0, time.UTC)
 	sendCollocationOfDay(context.Background(), emptyProviderChain(), store, mock, now)
@@ -163,11 +165,11 @@ func TestSendCollocationOfDay_Idempotent(t *testing.T) {
 	saveQuietHours(t)
 	saveAppLocation(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart, quietEnd = "00:00", "00:00"
+	config.AppLocation = time.UTC
+	config.QuietStart, config.QuietEnd = "00:00", "00:00"
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindCollocation, defaultLevel, "heavy rain", "", "collocation card")
+	store.AddToPool(config.KindCollocation, config.DefaultLevel, "heavy rain", "", "collocation card")
 
 	now := time.Date(2026, 6, 3, 13, 0, 0, 0, time.UTC)
 	sendCollocationOfDay(context.Background(), emptyProviderChain(), store, mock, now)
@@ -184,14 +186,14 @@ func TestSendCollocationOfDay_SkipsPausedAndDisabled(t *testing.T) {
 	saveQuietHours(t)
 	saveAppLocation(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart, quietEnd = "00:00", "00:00"
+	config.AppLocation = time.UTC
+	config.QuietStart, config.QuietEnd = "00:00", "00:00"
 
 	store.AddSubscriber(100)
 	store.AddSubscriber(101)
 	store.SetPaused(100, true)
 	store.SetCollocationEnabled(101, false)
-	store.AddToPool(kindCollocation, defaultLevel, "fast asleep", "", "collocation card")
+	store.AddToPool(config.KindCollocation, config.DefaultLevel, "fast asleep", "", "collocation card")
 
 	now := time.Date(2026, 6, 3, 13, 0, 0, 0, time.UTC)
 	sendCollocationOfDay(context.Background(), emptyProviderChain(), store, mock, now)
@@ -207,11 +209,11 @@ func TestSendCollocationOfDay_SkipsQuietHours(t *testing.T) {
 	saveQuietHours(t)
 	saveAppLocation(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart, quietEnd = "00:00", "23:59"
+	config.AppLocation = time.UTC
+	config.QuietStart, config.QuietEnd = "00:00", "23:59"
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindCollocation, defaultLevel, "strong coffee", "", "collocation card")
+	store.AddToPool(config.KindCollocation, config.DefaultLevel, "strong coffee", "", "collocation card")
 
 	now := time.Date(2026, 6, 3, 13, 0, 0, 0, time.UTC)
 	sendCollocationOfDay(context.Background(), emptyProviderChain(), store, mock, now)
@@ -231,11 +233,11 @@ func TestSendMiniStory_DeliversAndMarks(t *testing.T) {
 	saveQuietHours(t)
 	saveAppLocation(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart, quietEnd = "00:00", "00:00"
+	config.AppLocation = time.UTC
+	config.QuietStart, config.QuietEnd = "00:00", "00:00"
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindStory, defaultLevel, "the lost ticket", "", "mini story text")
+	store.AddToPool(config.KindStory, config.DefaultLevel, "the lost ticket", "", "mini story text")
 
 	now := time.Date(2026, 6, 3, 17, 0, 0, 0, time.UTC)
 	sendMiniStory(context.Background(), emptyProviderChain(), store, mock, now)
@@ -258,11 +260,11 @@ func TestSendMiniStory_Idempotent(t *testing.T) {
 	saveQuietHours(t)
 	saveAppLocation(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart, quietEnd = "00:00", "00:00"
+	config.AppLocation = time.UTC
+	config.QuietStart, config.QuietEnd = "00:00", "00:00"
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindStory, defaultLevel, "a rainy morning", "", "mini story text")
+	store.AddToPool(config.KindStory, config.DefaultLevel, "a rainy morning", "", "mini story text")
 
 	now := time.Date(2026, 6, 3, 17, 0, 0, 0, time.UTC)
 	sendMiniStory(context.Background(), emptyProviderChain(), store, mock, now)
@@ -279,14 +281,14 @@ func TestSendMiniStory_SkipsPausedAndDisabled(t *testing.T) {
 	saveQuietHours(t)
 	saveAppLocation(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart, quietEnd = "00:00", "00:00"
+	config.AppLocation = time.UTC
+	config.QuietStart, config.QuietEnd = "00:00", "00:00"
 
 	store.AddSubscriber(100)
 	store.AddSubscriber(101)
 	store.SetPaused(100, true)
 	store.SetStoryEnabled(101, false)
-	store.AddToPool(kindStory, defaultLevel, "the new job", "", "mini story text")
+	store.AddToPool(config.KindStory, config.DefaultLevel, "the new job", "", "mini story text")
 
 	now := time.Date(2026, 6, 3, 17, 0, 0, 0, time.UTC)
 	sendMiniStory(context.Background(), emptyProviderChain(), store, mock, now)
@@ -302,11 +304,11 @@ func TestSendMiniStory_SkipsQuietHours(t *testing.T) {
 	saveQuietHours(t)
 	saveAppLocation(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart, quietEnd = "00:00", "23:59"
+	config.AppLocation = time.UTC
+	config.QuietStart, config.QuietEnd = "00:00", "23:59"
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindStory, defaultLevel, "the quiet night", "", "mini story text")
+	store.AddToPool(config.KindStory, config.DefaultLevel, "the quiet night", "", "mini story text")
 
 	now := time.Date(2026, 6, 3, 17, 0, 0, 0, time.UTC)
 	sendMiniStory(context.Background(), emptyProviderChain(), store, mock, now)
@@ -327,12 +329,12 @@ func TestCollocationAndStoryShareHourlySlot(t *testing.T) {
 	saveQuietHours(t)
 	saveAppLocation(t)
 	resetHourlyLimiter(t)
-	appLocation = time.UTC
-	quietStart, quietEnd = "00:00", "00:00"
+	config.AppLocation = time.UTC
+	config.QuietStart, config.QuietEnd = "00:00", "00:00"
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindCollocation, defaultLevel, "make a decision", "", "collocation card")
-	store.AddToPool(kindStory, defaultLevel, "the lost ticket", "", "mini story text")
+	store.AddToPool(config.KindCollocation, config.DefaultLevel, "make a decision", "", "collocation card")
+	store.AddToPool(config.KindStory, config.DefaultLevel, "the lost ticket", "", "mini story text")
 
 	now := time.Date(2026, 6, 3, 13, 0, 0, 0, time.UTC)
 	sendCollocationOfDay(context.Background(), emptyProviderChain(), store, mock, now)
@@ -430,7 +432,7 @@ func TestCollocationStoryPrefsMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPrefs: %v", err)
 	}
-	if prefs.Level != levelAdvanced {
+	if prefs.Level != config.LevelAdvanced {
 		t.Errorf("level = %q, want advanced (data lost?)", prefs.Level)
 	}
 	if !prefs.CollocationEnabled || !prefs.StoryEnabled {

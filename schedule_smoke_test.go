@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 func TestDueAndKind(t *testing.T) {
@@ -20,22 +22,22 @@ func TestDueAndKind(t *testing.T) {
 		wantKind string
 	}{
 		// 30-min interval alternates every base slot.
-		{"30m @00:00 drill", at(0, 0), 30, true, kindDrill},
-		{"30m @00:30 word", at(0, 30), 30, true, kindWord},
-		{"30m @01:00 drill", at(1, 0), 30, true, kindDrill},
+		{"30m @00:00 drill", at(0, 0), 30, true, config.KindDrill},
+		{"30m @00:30 word", at(0, 30), 30, true, config.KindWord},
+		{"30m @01:00 drill", at(1, 0), 30, true, config.KindDrill},
 		// 60-min interval: due on the hour only, alternating each hour.
-		{"60m @00:00 drill", at(0, 0), 60, true, kindDrill},
+		{"60m @00:00 drill", at(0, 0), 60, true, config.KindDrill},
 		{"60m @00:30 not due", at(0, 30), 60, false, ""},
-		{"60m @01:00 word", at(1, 0), 60, true, kindWord},
-		{"60m @02:00 drill", at(2, 0), 60, true, kindDrill},
+		{"60m @01:00 word", at(1, 0), 60, true, config.KindWord},
+		{"60m @02:00 drill", at(2, 0), 60, true, config.KindDrill},
 		// 120-min interval: due every 2h, alternating each due slot.
-		{"120m @00:00 drill", at(0, 0), 120, true, kindDrill},
+		{"120m @00:00 drill", at(0, 0), 120, true, config.KindDrill},
 		{"120m @01:00 not due", at(1, 0), 120, false, ""},
-		{"120m @02:00 word", at(2, 0), 120, true, kindWord},
-		{"120m @04:00 drill", at(4, 0), 120, true, kindDrill},
+		{"120m @02:00 word", at(2, 0), 120, true, config.KindWord},
+		{"120m @04:00 drill", at(4, 0), 120, true, config.KindDrill},
 		// Zero/invalid interval falls back to default (60).
 		// At 01:00, slot index = 60/60 = 1 (odd) → word.
-		{"invalid falls back @01:00 word", at(1, 0), 0, true, kindWord},
+		{"invalid falls back @01:00 word", at(1, 0), 0, true, config.KindWord},
 	}
 	for _, c := range cases {
 		due, kind := dueAndKind(c.t, c.interval)
@@ -88,7 +90,7 @@ func TestIntervalMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPrefs: %v", err)
 	}
-	if prefs.Level != levelAdvanced {
+	if prefs.Level != config.LevelAdvanced {
 		t.Errorf("level = %q, want advanced (data lost?)", prefs.Level)
 	}
 	if !prefs.Paused {
@@ -102,7 +104,7 @@ func TestIntervalMigration(t *testing.T) {
 func TestNextWeekdayTime(t *testing.T) {
 	// Wednesday 2026-06-03 14:00 Tehran; next Sunday at 20:00 should be 2026-06-07.
 	loc, _ := time.LoadLocation("Asia/Tehran")
-	appLocation = loc
+	config.AppLocation = loc
 	now := time.Date(2026, 6, 3, 14, 0, 0, 0, loc) // Wednesday
 
 	next := nextWeekdayTime(now, time.Sunday, "20:00")
@@ -124,7 +126,7 @@ func TestNextWeekdayTime(t *testing.T) {
 func TestNextWeekdayTimeSameDay(t *testing.T) {
 	// If today is Sunday at 10:00 and digest is Sunday 20:00, it should be today.
 	loc, _ := time.LoadLocation("Asia/Tehran")
-	appLocation = loc
+	config.AppLocation = loc
 	now := time.Date(2026, 6, 7, 10, 0, 0, 0, loc) // Sunday 10:00
 
 	next := nextWeekdayTime(now, time.Sunday, "20:00")
@@ -136,7 +138,7 @@ func TestNextWeekdayTimeSameDay(t *testing.T) {
 func TestNextWeekdayTimePast(t *testing.T) {
 	// If today is Sunday at 21:00 and digest is Sunday 20:00, next should be next Sunday.
 	loc, _ := time.LoadLocation("Asia/Tehran")
-	appLocation = loc
+	config.AppLocation = loc
 	now := time.Date(2026, 6, 7, 21, 0, 0, 0, loc) // Sunday 21:00
 
 	next := nextWeekdayTime(now, time.Sunday, "20:00")
@@ -169,16 +171,16 @@ func TestParseHourMinute(t *testing.T) {
 }
 
 func TestIsQuietHours(t *testing.T) {
-	savedLoc := appLocation
-	savedStart := quietStart
-	savedEnd := quietEnd
+	savedLoc := config.AppLocation
+	savedStart := config.QuietStart
+	savedEnd := config.QuietEnd
 	defer func() {
-		appLocation = savedLoc
-		quietStart = savedStart
-		quietEnd = savedEnd
+		config.AppLocation = savedLoc
+		config.QuietStart = savedStart
+		config.QuietEnd = savedEnd
 	}()
 
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	cases := []struct {
 		name  string
@@ -198,8 +200,8 @@ func TestIsQuietHours(t *testing.T) {
 		{"wrap midnight 23:30 quiet", "23:00", "06:00", 23, 30, true},
 	}
 	for _, c := range cases {
-		quietStart = c.start
-		quietEnd = c.end
+		config.QuietStart = c.start
+		config.QuietEnd = c.end
 		tm := time.Date(2026, 6, 3, c.hour, c.min, 0, 0, time.UTC)
 		if got := isQuietHours(tm); got != c.want {
 			t.Errorf("%s: isQuietHours = %v, want %v", c.name, got, c.want)
@@ -208,9 +210,9 @@ func TestIsQuietHours(t *testing.T) {
 }
 
 func TestNextHalfHour(t *testing.T) {
-	savedLoc := appLocation
-	defer func() { appLocation = savedLoc }()
-	appLocation = time.UTC
+	savedLoc := config.AppLocation
+	defer func() { config.AppLocation = savedLoc }()
+	config.AppLocation = time.UTC
 
 	cases := []struct {
 		min      int
@@ -235,9 +237,9 @@ func TestNextHalfHour(t *testing.T) {
 }
 
 func TestNextMidnight(t *testing.T) {
-	savedLoc := appLocation
-	defer func() { appLocation = savedLoc }()
-	appLocation = time.UTC
+	savedLoc := config.AppLocation
+	defer func() { config.AppLocation = savedLoc }()
+	config.AppLocation = time.UTC
 
 	cases := []struct {
 		name     string
@@ -259,9 +261,9 @@ func TestNextMidnight(t *testing.T) {
 }
 
 func TestMinutesSinceMidnight(t *testing.T) {
-	savedLoc := appLocation
-	defer func() { appLocation = savedLoc }()
-	appLocation = time.UTC
+	savedLoc := config.AppLocation
+	defer func() { config.AppLocation = savedLoc }()
+	config.AppLocation = time.UTC
 
 	cases := []struct {
 		hour int
@@ -354,9 +356,9 @@ func TestRunReviewSweep_DeliversDueReviews(t *testing.T) {
 	mock := &mockNotifier{}
 	saveQuietHours(t)
 	saveAppLocation(t)
-	appLocation = time.UTC
-	quietStart = "00:00"
-	quietEnd = "00:00" // no quiet hours
+	config.AppLocation = time.UTC
+	config.QuietStart = "00:00"
+	config.QuietEnd = "00:00" // no quiet hours
 
 	store.AddSubscriber(100)
 	now := time.Date(2026, 6, 3, 14, 0, 0, 0, time.UTC)
@@ -379,9 +381,9 @@ func TestRunReviewSweep_SkipsQuietHours(t *testing.T) {
 	mock := &mockNotifier{}
 	saveQuietHours(t)
 	saveAppLocation(t)
-	appLocation = time.UTC
-	quietStart = "00:00"
-	quietEnd = "23:59"
+	config.AppLocation = time.UTC
+	config.QuietStart = "00:00"
+	config.QuietEnd = "23:59"
 
 	store.AddSubscriber(100)
 	store.SeedReview(100, "ephemeral", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
@@ -399,9 +401,9 @@ func TestRunReviewSweep_SkipsPausedUsers(t *testing.T) {
 	mock := &mockNotifier{}
 	saveQuietHours(t)
 	saveAppLocation(t)
-	appLocation = time.UTC
-	quietStart = "00:00"
-	quietEnd = "00:00"
+	config.AppLocation = time.UTC
+	config.QuietStart = "00:00"
+	config.QuietEnd = "00:00"
 
 	store.AddSubscriber(100)
 	store.SetPaused(100, true)
@@ -423,7 +425,7 @@ func TestSendDailyReview_DeliversReview(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
 
@@ -450,7 +452,7 @@ func TestSendDailyReview_DeliversReview(t *testing.T) {
 
 func TestNextDailyTime(t *testing.T) {
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	// Before today's target time → fires today.
 	got := nextDailyTime(time.Date(2026, 6, 3, 8, 0, 0, 0, time.UTC), 9, 0)
@@ -468,10 +470,10 @@ func TestSendIdiomOfDay_DeliversAndIsIdempotent(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
-	store.AddToPool(kindIdiom, defaultLevel, "break the ice", "to start a conversation", "🗣️ idiom card")
+	store.AddToPool(config.KindIdiom, config.DefaultLevel, "break the ice", "to start a conversation", "🗣️ idiom card")
 
 	now := time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC)
 	sendIdiomOfDay(context.Background(), emptyProviderChain(), store, mock, now)
@@ -494,11 +496,11 @@ func TestSendIdiomOfDay_SkipsPausedUsers(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
 	store.SetPaused(100, true)
-	store.AddToPool(kindIdiom, defaultLevel, "piece of cake", "very easy", "card")
+	store.AddToPool(config.KindIdiom, config.DefaultLevel, "piece of cake", "very easy", "card")
 
 	sendIdiomOfDay(context.Background(), emptyProviderChain(), store, mock, time.Date(2026, 6, 3, 9, 0, 0, 0, time.UTC))
 	if mock.sentCount() != 0 {
@@ -510,7 +512,7 @@ func TestSendDailyReview_SkipsPausedUsers(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
 	store.SetPaused(100, true)
@@ -529,7 +531,7 @@ func TestSendDailyReview_Idempotent(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
 	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "word", "2026-06-02 14:00:00")
@@ -548,7 +550,7 @@ func TestSendDailyReview_NoWords(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
 	// No words sent yesterday.
@@ -569,7 +571,7 @@ func TestSendWeeklyDigest_DeliversDigest(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
 
@@ -594,7 +596,7 @@ func TestSendWeeklyDigest_SkipsPausedUsers(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
 	store.SetPaused(100, true)
@@ -613,7 +615,7 @@ func TestSendWeeklyDigest_Idempotent(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
 	store.db.Exec("INSERT INTO sent_vocab (chat_id, word, sent_at) VALUES (?, ?, ?)", 100, "word", "2026-05-28 10:00:00")
@@ -632,7 +634,7 @@ func TestSendWeeklyDigest_NoActivity(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 	saveAppLocation(t)
-	appLocation = time.UTC
+	config.AppLocation = time.UTC
 
 	store.AddSubscriber(100)
 	// No words or quizzes this week.
@@ -648,9 +650,9 @@ func TestSendWeeklyDigest_NoActivity(t *testing.T) {
 func TestRunNightlyDBBackup_SendsToMaintainer(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
-	origMaintainer := MaintainerChatID
-	t.Cleanup(func() { MaintainerChatID = origMaintainer })
-	MaintainerChatID = "777"
+	origMaintainer := config.MaintainerChatID
+	t.Cleanup(func() { config.MaintainerChatID = origMaintainer })
+	config.MaintainerChatID = "777"
 
 	runNightlyDBBackup(store, mock)
 

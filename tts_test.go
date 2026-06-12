@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"testing"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
 func TestSanitizeTTSText(t *testing.T) {
@@ -99,27 +101,27 @@ func TestExtractTTSTerm(t *testing.T) {
 }
 
 func TestGeminiTTSConfigured(t *testing.T) {
-	origKey := GeminiAPIKey
-	defer func() { GeminiAPIKey = origKey }()
+	origKey := config.GeminiAPIKey
+	defer func() { config.GeminiAPIKey = origKey }()
 
-	GeminiAPIKey = ""
+	config.GeminiAPIKey = ""
 	if geminiTTSConfigured() {
 		t.Error("expected false for empty key")
 	}
 
-	GeminiAPIKey = "YOUR_GEMINI_API_KEY"
+	config.GeminiAPIKey = "YOUR_GEMINI_API_KEY"
 	if geminiTTSConfigured() {
 		t.Error("expected false for placeholder key")
 	}
 
-	GeminiAPIKey = "real-key-123"
+	config.GeminiAPIKey = "real-key-123"
 	if !geminiTTSConfigured() {
 		t.Error("expected true for real key")
 	}
 }
 
 func TestSendWordCardWithTTS_SendsCardAndVoice(t *testing.T) {
-	// TTS requires ttsEnabled=true, non-quiet hours, non-paused user, user TTS on.
+	// TTS requires config.TTSEnabled=true, non-quiet hours, non-paused user, user TTS on.
 	// Since we can't call real TTS providers in tests, we verify the card is sent
 	// and that maybeSendTTS doesn't panic on a card with no parseable word.
 	store := testStoreHelper(t)
@@ -154,9 +156,9 @@ func TestMaybeSendTTS_SkipsWhenDisabled(t *testing.T) {
 	card := "📘 <b>Word of the Session: hello</b>\n————\n💬 Meaning — a greeting"
 
 	// Disable TTS globally
-	origTTS := ttsEnabled
-	ttsEnabled = false
-	defer func() { ttsEnabled = origTTS }()
+	origTTS := config.TTSEnabled
+	config.TTSEnabled = false
+	defer func() { config.TTSEnabled = origTTS }()
 
 	maybeSendTTS(context.Background(), store, mock, chatID, card, 1)
 	if len(mock.voices) != 0 {
@@ -173,9 +175,9 @@ func TestMaybeSendTTS_SkipsWhenUserDisabled(t *testing.T) {
 
 	card := "📘 <b>Word of the Session: hello</b>\n————\n💬 Meaning — a greeting"
 
-	origTTS := ttsEnabled
-	ttsEnabled = true
-	defer func() { ttsEnabled = origTTS }()
+	origTTS := config.TTSEnabled
+	config.TTSEnabled = true
+	defer func() { config.TTSEnabled = origTTS }()
 
 	maybeSendTTS(context.Background(), store, mock, chatID, card, 1)
 	if len(mock.voices) != 0 {
