@@ -28,9 +28,9 @@ jobs:
         id: ver
         run: |
           # Newest changelog entry is the last `Version: "X.Y.Z"` in the slice.
-          VERSION=$(grep -oP 'Version:\s*"\K[0-9]+\.[0-9]+\.[0-9]+' main.go | tail -1)
+          VERSION=$(grep -oP 'Version:\s*"\K[0-9]+\.[0-9]+\.[0-9]+' internal/app/changelog.go | tail -1)
           if [ -z "$VERSION" ]; then
-            echo "::error::No Changelogs version found in main.go"
+            echo "::error::No Changelogs version found in internal/app/changelog.go"
             exit 1
           fi
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"

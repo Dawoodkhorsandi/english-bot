@@ -9,7 +9,7 @@ RUN go mod download
 
 # Build a static, CGO-free binary (modernc.org/sqlite is pure Go).
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/english-bot .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/english-bot ./cmd/english-bot
 
 # ---- Runtime stage ----
 FROM alpine:3.20

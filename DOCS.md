@@ -20,28 +20,49 @@ The bot uses Google Gemini 2.5 Flash to generate unique, personalized content an
 
 ## Architecture
 
+The code is organised as a `cmd/` entrypoint plus `internal/` packages. The
+dependency graph is acyclic: `config` is a leaf; `ai`, `telegram`, and
+`content` depend only on `config` (content also on `ai`/`telegram`); `app`
+depends on all four; and `cmd` depends on `app`. Nothing imports `app`.
+
 ```
-Go application (multi-file, single package main)
-├── main.go           — startup, wiring, Telegram types, command router, Store (SQLite), env-var helpers (getEnv, lookupEnv)
-├── config.go         — timezone, pool & scheduler tuning knobs, WEB_APP_URL/WEB_APP_PORT
-├── providers.go      — Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain
-├── generation.go     — prompt builders, generateContent, generateWordFor, term/meaning parsers
-├── pool.go           — content_pool Store methods, serveContent, poolFiller goroutine
-├── schedule.go       — quiet hours, broadcast scheduler, daily review scheduler, daily tip scheduler, weekly digest scheduler
-├── prefs.go          — user_prefs Store methods, level/interval/pause/tip/feature-toggle helpers, SetFirstName, streak helpers
-├── tts.go            — pronunciation TTS generation (Gemini + espeak-ng fallback) and sendVoice helper
-├── srs.go            — spaced-repetition SM-2-lite logic, review_schedule Store methods, review scheduler
-├── quiz.go           — quiz building (4 types + native poll), quiz_results, poll registry, quiz scheduler
-├── stats.go          — /stats computation (streaks, activity days, progressBar, formatStats), admin metrics
-├── admin.go          — admin panel: paginated /users list, user detail view, direct messaging to users
-├── webapp.go         — Mini App hub: HTTP server, embedded SPA, HMAC-SHA256 initData auth (+auth_date TTL), JSON API
-├── leaderboard.go    — cross-user ranking, display names, deterministic funny-name fallback
-├── leitner.go        — curated Leitner decks (deck_cards/leitner_progress), 5-box scheduler, field backfill worker (example/Persian/pronunciation)
-├── grammar.go        — static grammar-lesson curriculum loaded from webapp/grammar/lessons.json (/grammar + /api/grammar)
-└── vocab.go          — /mywords (browse learned vocabulary) and /bookmark (save favourite words) features
+cmd/english-bot/main.go — entrypoint; calls app.Run()
+
+internal/config/        — env helpers + tuning knobs (no deps beyond stdlib)
+  config.go             — env-var helpers (GetEnv, GetEnvInt/Duration/Bool/Weekday), timezone/AppLocation, pool & scheduler knobs, pool-size overrides
+  kinds.go              — content kind + difficulty level constants, IsConfigurableKind
+  secrets.go            — TelegramBotToken / GeminiAPIKey / MaintainerChatID from env
+
+internal/ai/providers.go      — Provider interface, GeminiProvider, OpenAICompatProvider, ProviderChain (NewProviderChain / NewChain)
+
+internal/telegram/      — Telegram Bot API transport
+  types.go              — Bot API DTOs (Update, Message, CallbackQuery, Chat, User, PollAnswer) + InlineButton/WebAppInfo
+  transport.go          — Post(method, payload) + shared HTTP client
+  notifier.go           — Notifier interface + production implementation (NewNotifier)
+
+internal/content/generation.go — prompt builders, GenerateContent/GenerateWordFor, card parsers, drill pagination
+
+internal/app/           — the coupled core (package app)
+  app.go                — Run(), schema, command router (handleMessage/handleCallback), Store (SQLite)
+  changelog.go          — ChangelogEntry + the append-only Changelogs release history
+  pool.go               — content_pool Store methods, serveContent, poolFiller goroutine
+  schedule.go           — quiet hours, broadcast scheduler, daily review scheduler, daily tip scheduler, weekly digest scheduler
+  prefs.go              — user_prefs Store methods, level/interval/pause/tip/feature-toggle helpers, SetFirstName, streak helpers
+  tts.go                — pronunciation TTS generation (Gemini + espeak-ng fallback) and sendVoice helper
+  srs.go                — spaced-repetition SM-2-lite logic, review_schedule Store methods, review scheduler
+  quiz.go               — quiz building (4 types + native poll), quiz_results, poll registry, quiz scheduler
+  stats.go              — /stats computation (streaks, activity days, progressBar, formatStats), admin metrics
+  admin.go              — admin panel: paginated /users list, user detail view, direct messaging to users
+  webapp.go             — Mini App hub: HTTP server, embedded SPA, HMAC-SHA256 initData auth (+auth_date TTL), JSON API
+  leaderboard.go        — cross-user ranking, display names, deterministic funny-name fallback
+  leitner.go            — curated Leitner decks (deck_cards/leitner_progress), 5-box scheduler, field backfill worker (example/Persian/pronunciation)
+  grammar.go            — static grammar-lesson curriculum loaded from webapp/grammar/lessons.json (/grammar + /api/grammar)
+  vocab.go              — /mywords (browse learned vocabulary) and /bookmark (save favourite words) features
+
+internal/docsync/       — CI tests that keep README.md & DOCS.md in sync with the code (doc_test.go)
 ```
 
-The Mini App frontend is embedded from `webapp/` (`index.html`, `app.js`, `styles.css`) and curated deck data from `webapp/decks/*.json`, all via `go:embed`.
+The Mini App frontend is embedded from `internal/app/webapp/` (`index.html`, `app.js`, `styles.css`) and curated deck data from `internal/app/webapp/decks/*.json`, all via `go:embed`.
 
 The application runs fourteen concurrent goroutines (plus an optional web server goroutine when `WEB_APP_URL` is set):
 1. **Pool filler** (`poolFiller`) — tops up the pre-generated content pool in the background

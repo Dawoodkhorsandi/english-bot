@@ -1,0 +1,43 @@
+# golangci-lint v2 configuration.
+# Conservative, curated set: the default analyzers (errcheck, govet, ineffassign,
+# staticcheck, unused) plus a few high-signal extras. Formatting is enforced via
+# the formatters block (gofmt + goimports).
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - unconvert
+  settings:
+    errcheck:
+      # Well-known functions whose error is conventionally ignored: deferred
+      # Close on rows/response bodies, temp-file cleanup, and writes to in-memory
+      # hash/buffer writers (which never fail).
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*database/sql.Rows).Close
+        - fmt.Fprintf
+        - fmt.Sscanf
+        - os.Remove
+  exclusions:
+    rules:
+      # Tests legitimately ignore errors (e.g. seed INSERTs) and keep scratch helpers.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - unused
+      # QF1012 is a stylistic quickfix (WriteString(Sprintf) -> Fprintf); the
+      # codebase uses the WriteString form throughout, so keep it off.
+      - linters:
+          - staticcheck
+        text: QF1012
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Dawoodkhorsandi/english-bot

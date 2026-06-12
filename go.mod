@@ -1,4 +1,4 @@
-module english-bot
+module github.com/Dawoodkhorsandi/english-bot
 
 go 1.26.2
 
