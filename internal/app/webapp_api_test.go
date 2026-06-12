@@ -703,8 +703,8 @@ func TestAPIConfig(t *testing.T) {
 		t.Fatalf("code = %d, want 200", w.Code)
 	}
 	var resp struct {
-		BotUsername string `json:"config.BotUsername"`
-		WebAppURL   string `json:"config.WebAppURL"`
+		BotUsername string `json:"botUsername"`
+		WebAppURL   string `json:"webAppURL"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)

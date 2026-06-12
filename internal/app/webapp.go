@@ -948,8 +948,8 @@ func handleAPIQuizzes(w http.ResponseWriter, r *http.Request, chatID int64, stor
 func handleAPIConfig(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 	writeJSON(w, map[string]interface{}{
-		"config.BotUsername": config.BotUsername,
-		"config.WebAppURL":   config.WebAppURL,
+		"botUsername": config.BotUsername,
+		"webAppURL":   config.WebAppURL,
 	})
 }
 

@@ -135,7 +135,7 @@ func generateGeminiTTS(ctx context.Context, text string) ([]byte, string, error)
 	}
 
 	endpoint := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:content.GenerateContent?key=%s",
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		geminiTTSModel, url.QueryEscape(config.GeminiAPIKey),
 	)
 	payload := map[string]any{

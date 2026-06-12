@@ -266,7 +266,7 @@ func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, n
 
 			mID, parseErr := strconv.ParseInt(config.MaintainerChatID, 10, 64)
 			if parseErr != nil {
-				log.Printf("❌ [PARSE_ERR] Invalid config.MaintainerChatID %q: %v", config.MaintainerChatID, parseErr)
+				log.Printf("❌ [PARSE_ERR] Invalid MaintainerChatID %q: %v", config.MaintainerChatID, parseErr)
 			} else {
 				_ = notifier.Send(mID, maintainerMsg)
 			}
@@ -2482,7 +2482,7 @@ func sendDrill(notifier telegram.Notifier, chatID int64, fullText string) error 
 	if verb == "" {
 		// Cannot paginate without a verb — the callback handler needs it to
 		// reload the drill from the pool. Send the full text as a single message.
-		log.Printf("⚠️  [DRILL] content.ParseVerb returned empty for chat %d; sending un-paged.", chatID)
+		log.Printf("⚠️  [DRILL] ParseVerb returned empty for chat %d; sending un-paged.", chatID)
 		return notifier.Send(chatID, fullText)
 	}
 	text, total := content.RenderDrillPage(fullText, 1)
