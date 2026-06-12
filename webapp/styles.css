@@ -15,6 +15,8 @@
   --bottom-bar: var(--tg-theme-bottom-bar-bg-color, var(--bg));
   --success: #4CAF50;
   --border: rgba(128, 128, 128, .18);
+  /* Let native controls/scrollbars follow the Telegram light/dark theme. */
+  color-scheme: light dark;
 }
 
 body {
@@ -27,6 +29,23 @@ body {
 }
 
 h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
+
+/* ---- Interaction affordances & accessibility (WIG compliance) ---- */
+button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manipulation; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+@media (hover: hover) {
+  button:hover, .chip:hover, .tab:hover, .word.expandable:hover,
+  .deck:hover, .grammar-cta:hover, .link-btn:hover { filter: brightness(1.06); }
+}
+/* Steady digits in number displays (no jitter as values change). */
+.stat-n, .vs-val, .deck-pct, .ring-pct, .streak-num, .big, .rank { font-variant-numeric: tabular-nums; }
+/* Respect the OS "reduce motion" setting. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important; scroll-behavior: auto !important;
+  }
+}
 
 /* ---- Views ---- */
 .view { animation: fade .2s ease; }
@@ -201,27 +220,46 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 }
 
 /* ---- Profile (leaderboard drill-down) ---- */
-.profile-head { display: flex; align-items: center; gap: 12px; margin: 6px 0 14px; }
+/* Matchup header: you · VS medallion · them. */
+.card.matchup { display: flex; align-items: center; gap: 8px; }
+.vs-side { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
 .avatar-fallback.lg { width: 52px; height: 52px; font-size: 22px; }
-.profile-name { flex: 1; min-width: 0; font-size: 18px; font-weight: 700; }
-.kudos-btn {
-  border: 1px solid var(--accent); background: var(--bg); color: var(--fg);
-  border-radius: 999px; padding: 8px 14px; font-size: 15px; font-weight: 600; cursor: pointer;
+.avatar-fallback.you-av { background: var(--card); color: var(--accent); border: 2px solid var(--accent); }
+.vs-name { font-size: 14px; font-weight: 700; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-medallion {
+  flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800; letter-spacing: .5px;
+  color: var(--accent); border: 2px dashed var(--accent);
 }
-.kudos-btn.on { background: var(--accent); color: var(--accent-text); }
-.cmp-row { margin-top: 12px; }
-.cmp-row:first-child { margin-top: 6px; }
-.cmp-head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
-.cmp-up { color: var(--success); }
-.cmp-down { color: var(--danger); }
-.cmp-tie { color: var(--hint); }
-.cmp-line { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-.cmp-tag { width: 38px; font-size: 11px; color: var(--hint); }
-.cmp-track { flex: 1; background: var(--border); border-radius: 6px; height: 9px; overflow: hidden; }
-.cmp-fill { height: 100%; border-radius: 6px; transition: width .4s ease; }
-.cmp-fill.me { background: var(--accent); }
-.cmp-fill.them { background: var(--hint); }
-.cmp-val { width: 38px; text-align: right; font-size: 13px; font-weight: 700; }
+.kudos-bar { display: flex; align-items: center; gap: 12px; margin: -4px 0 4px; }
+.kudos-btn {
+  border: 1px solid var(--accent); background: var(--bg); color: var(--text);
+  border-radius: 999px; padding: 8px 14px; font-size: 15px; font-weight: 600; cursor: pointer;
+  font-variant-numeric: tabular-nums; transition: transform .15s ease;
+}
+.kudos-btn.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.kudos-btn:active { transform: scale(.94); }
+/* Tug-of-war comparison: your share (accent) meets theirs (muted) at a divider. */
+.vs-row { margin-top: 14px; }
+.vs-row:first-child { margin-top: 4px; }
+.vs-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.vs-metric { color: var(--text); }
+.vs-verdict { font-size: 11px; font-weight: 700; }
+.vs-verdict.up { color: var(--success); }
+.vs-verdict.down { color: var(--danger); }
+.vs-verdict.tie { color: var(--hint); }
+.vs-track { display: flex; align-items: stretch; height: 26px; border-radius: 8px; overflow: hidden; background: var(--border); }
+.vs-track.empty { align-items: center; justify-content: center; }
+.vs-none { color: var(--hint); font-size: 13px; font-weight: 700; }
+.vs-me, .vs-them {
+  display: flex; align-items: center; min-width: 22px;
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  transition: width .45s cubic-bezier(.2, .7, .2, 1);
+}
+.vs-me { background: var(--accent); color: var(--accent-text); justify-content: flex-start; padding-left: 8px; }
+.vs-them { background: var(--hint); color: var(--bg); justify-content: flex-end; padding-right: 8px; }
+.vs-me .vs-val, .vs-them .vs-val { opacity: .95; }
 
 /* ---- Decks ---- */
 .deck { cursor: pointer; }

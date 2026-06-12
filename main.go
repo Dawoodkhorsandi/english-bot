@@ -401,6 +401,11 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Fix: profile pages failed to load (\"Could not load this profile\") because each user's opaque public id was never persisted — the leaderboard tried to write it while its own result cursor was still open, which SQLite rejects. Public ids are now stored after the read completes, with a deterministic self-healing fallback for already-affected users.",
 	},
+	{
+		Version: "1.32.2",
+		Silent:  true,
+		Text:    "Mini App: redesigned the profile page as a head-to-head \"VS\" matchup — each stat is a single tug-of-war bar whose divider shifts toward whoever's ahead, so you read who leads at a glance. Plus an accessibility pass across the app: visible keyboard focus, hover states, reduced-motion support, steady tabular numerals, theme-color/color-scheme, and aria-labels on icon-only controls.",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
