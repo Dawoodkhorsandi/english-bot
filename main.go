@@ -406,6 +406,11 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Mini App: redesigned the profile page as a head-to-head \"VS\" matchup — each stat is a single tug-of-war bar whose divider shifts toward whoever's ahead, so you read who leads at a glance. Plus an accessibility pass across the app: visible keyboard focus, hover states, reduced-motion support, steady tabular numerals, theme-color/color-scheme, and aria-labels on icon-only controls.",
 	},
+	{
+		Version: "1.32.3",
+		Silent:  true,
+		Text:    "Fix: the nightly \"🌙 Today's Words\" review could list the same word more than once when that word existed in the content pool at multiple levels (the lookup joined the pool without deduplicating). Words are now grouped so each appears once, preferring a non-empty meaning.",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
