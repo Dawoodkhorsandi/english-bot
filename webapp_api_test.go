@@ -902,3 +902,81 @@ func TestAPIGrammar(t *testing.T) {
 		t.Errorf("unknown lesson code = %d, want 404", w.Code)
 	}
 }
+
+// TestAPIReviewSummary verifies the level-suggestion endpoint reads the rolling
+// review-performance window: a sustained high-accuracy run nudges the user up,
+// then the cooldown suppresses an immediate repeat.
+func TestAPIReviewSummary(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const chatID = 100
+
+	// Before any reviews, nothing to suggest.
+	w := apiCall(store, handleAPIReviewSummary, http.MethodPost, "/api/review/summary", chatID, "{}")
+	if w.Code != http.StatusOK {
+		t.Fatalf("summary code = %d", w.Code)
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["suggest"] != false {
+		t.Fatalf("empty window: suggest = %v, want false", resp["suggest"])
+	}
+
+	// Accumulate a sustained run of correct reviews at the default level.
+	for i := 0; i < reviewPerfMinSample; i++ {
+		if err := store.RecordReviewOutcome(chatID, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w = apiCall(store, handleAPIReviewSummary, http.MethodPost, "/api/review/summary", chatID, "{}")
+	resp = map[string]interface{}{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["suggest"] != true || resp["direction"] != "harder" {
+		t.Fatalf("sustained high: resp = %+v, want suggest=true direction=harder", resp)
+	}
+	if resp["targetLevel"] != levelUpperInt {
+		t.Errorf("targetLevel = %v, want %q", resp["targetLevel"], levelUpperInt)
+	}
+
+	// A second call right away is suppressed by the cooldown + window reset.
+	w = apiCall(store, handleAPIReviewSummary, http.MethodPost, "/api/review/summary", chatID, "{}")
+	resp = map[string]interface{}{}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["suggest"] != false {
+		t.Errorf("within cooldown: suggest = %v, want false", resp["suggest"])
+	}
+}
+
+// TestPracticeSeedsReview verifies self-paced learning works without any push:
+// an on-demand /api/practice word enrols the term for spaced review.
+func TestPracticeSeedsReview(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const chatID = 100
+
+	if err := store.AddToPool(kindWord, defaultLevel, "ephemeral", "fleeting", "card: ephemeral"); err != nil {
+		t.Fatal(err)
+	}
+	w := apiCall(store, handleAPIPractice, http.MethodGet, "/api/practice?kind=word", chatID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("practice code = %d", w.Code)
+	}
+	var resp struct {
+		Available bool   `json:"available"`
+		Term      string `json:"term"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Available || resp.Term != "ephemeral" {
+		t.Fatalf("practice payload = %+v, want available ephemeral", resp)
+	}
+	// The practised word must now be enrolled for spaced review.
+	if _, _, _, ok, err := store.getReview(chatID, "ephemeral"); err != nil || !ok {
+		t.Fatalf("practised word not scheduled for review: ok=%v err=%v", ok, err)
+	}
+}

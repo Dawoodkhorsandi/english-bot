@@ -139,7 +139,41 @@ func (s *Store) activityDays(chatID int64) (map[string]int, error) {
 			days[ts.In(appLocation).Format("2006-01-02")]++
 		}
 	}
-	return days, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Fold in pull-based learning (in-app reviews, deck study, quiz answers) that
+	// leaves no sent_* footprint. RecordActivity stores the day pre-formatted in
+	// appLocation, so it merges directly into the per-day counts above.
+	logRows, err := s.db.Query("SELECT day, cnt FROM activity_log WHERE chat_id = ?", chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer logRows.Close()
+	for logRows.Next() {
+		var day string
+		var cnt int
+		if err := logRows.Scan(&day, &cnt); err != nil {
+			return nil, err
+		}
+		days[day] += cnt
+	}
+	return days, logRows.Err()
+}
+
+// RecordActivity marks today (in appLocation) as an active learning day for a
+// chat, independent of content delivery. It is called from pull-based learning
+// touch-points — in-app reviews, deck study, and quiz answers — that do not
+// otherwise land in the sent_* history tables, so the streak reflects them.
+func (s *Store) RecordActivity(chatID int64, now time.Time) error {
+	day := now.In(appLocation).Format("2006-01-02")
+	_, err := s.db.Exec(`
+		INSERT INTO activity_log (chat_id, day, cnt) VALUES (?, ?, 1)
+		ON CONFLICT(chat_id, day) DO UPDATE SET cnt = cnt + 1`,
+		chatID, day,
+	)
+	return err
 }
 
 // computeStreaks derives the current and longest consecutive-day streaks from a

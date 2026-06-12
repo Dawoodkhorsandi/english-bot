@@ -445,7 +445,12 @@ func (s *Store) RecordQuizResult(chatID int64, word string, correct bool) error 
 		"INSERT INTO quiz_results (chat_id, word, correct) VALUES (?, ?, ?)",
 		chatID, strings.ToLower(strings.TrimSpace(word)), c,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// Answering a quiz counts as a learning day for the streak (quiz answers
+	// leave no sent_* footprint of their own). Best-effort.
+	return s.RecordActivity(chatID, time.Now())
 }
 
 // QuizStats returns the total answered and correct counts for a user.

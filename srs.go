@@ -293,3 +293,136 @@ func reviewKeyboard(term string) [][]inlineButton {
 		{Text: "❌ Forgot", CallbackData: "srs:forgot:" + term},
 	}}
 }
+
+const (
+	// minBatchForLevelSuggestion is the smallest sample we'll draw a level-change
+	// conclusion from — fewer cards is too noisy to trust.
+	minBatchForLevelSuggestion = 5
+	// levelUpAccuracy / levelDownAccuracy are the rolling-accuracy thresholds for
+	// nudging the user to a harder / easier level.
+	levelUpAccuracy   = 0.85
+	levelDownAccuracy = 0.50
+	// reviewPerfMinSample is how many recent review answers must accumulate before
+	// we'll even consider a level suggestion. The suggestion is based on this
+	// rolling window, NOT a single session, so it only fires once we're confident
+	// the user's level is genuinely mismatched.
+	reviewPerfMinSample = 20
+	// reviewPerfWindowCap keeps the rolling window recency-weighted: once it grows
+	// past this, both counters halve so old performance fades out.
+	reviewPerfWindowCap = 60
+	// reviewSuggestCooldown is the minimum gap between two level suggestions, so a
+	// user is never nagged session after session.
+	reviewSuggestCooldown = 7 * 24 * time.Hour
+)
+
+// suggestLevelChange inspects how an in-app review batch went and, when the
+// signal is strong enough, proposes the adjacent difficulty level. It returns
+// the target level, a "harder"/"easier" direction, and ok=true only when a
+// suggestion is warranted: a high-accuracy batch nudges up (unless already at
+// the hardest level), a low-accuracy batch nudges down (unless already easiest).
+// Batches smaller than minBatchForLevelSuggestion never suggest.
+func suggestLevelChange(currentLevel string, correct, total int) (target, direction string, ok bool) {
+	if total < minBatchForLevelSuggestion || correct < 0 || correct > total {
+		return "", "", false
+	}
+	idx := -1
+	for i, l := range allLevels {
+		if l == currentLevel {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return "", "", false
+	}
+	accuracy := float64(correct) / float64(total)
+	switch {
+	case accuracy >= levelUpAccuracy && idx < len(allLevels)-1:
+		return allLevels[idx+1], "harder", true
+	case accuracy <= levelDownAccuracy && idx > 0:
+		return allLevels[idx-1], "easier", true
+	default:
+		return "", "", false
+	}
+}
+
+// RecordReviewOutcome folds one review answer into the user's rolling
+// performance window (used to decide whether to suggest a level change). The
+// window is recency-weighted: once it grows past reviewPerfWindowCap both
+// counters halve, so a level the user has since outgrown doesn't haunt them.
+func (s *Store) RecordReviewOutcome(chatID int64, known bool) error {
+	c := 0
+	if known {
+		c = 1
+	}
+	if _, err := s.db.Exec(`
+		INSERT INTO review_perf (chat_id, window_correct, window_total) VALUES (?, ?, 1)
+		ON CONFLICT(chat_id) DO UPDATE SET
+			window_correct = window_correct + ?,
+			window_total   = window_total + 1`,
+		chatID, c, c,
+	); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`
+		UPDATE review_perf SET window_correct = window_correct / 2, window_total = window_total / 2
+		WHERE chat_id = ? AND window_total > ?`,
+		chatID, reviewPerfWindowCap,
+	)
+	return err
+}
+
+// reviewPerf reads a user's rolling review window and the time of their last
+// level suggestion (lastOK=false when none yet).
+func (s *Store) reviewPerf(chatID int64) (correct, total int, last time.Time, lastOK bool, err error) {
+	var lastRaw any
+	err = s.db.QueryRow(
+		"SELECT window_correct, window_total, last_suggest_at FROM review_perf WHERE chat_id = ?",
+		chatID,
+	).Scan(&correct, &total, &lastRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, time.Time{}, false, nil
+	}
+	if err != nil {
+		return 0, 0, time.Time{}, false, err
+	}
+	if ts, ok := parseStoredUTC(lastRaw); ok {
+		last, lastOK = ts, true
+	}
+	return correct, total, last, lastOK, nil
+}
+
+// markLevelSuggested stamps the cooldown and resets the rolling window so the
+// next suggestion is judged on fresh performance after the user acts.
+func (s *Store) markLevelSuggested(chatID int64, now time.Time) error {
+	_, err := s.db.Exec(
+		"UPDATE review_perf SET window_correct = 0, window_total = 0, last_suggest_at = ? WHERE chat_id = ?",
+		now.UTC().Format(srsTimeLayout), chatID,
+	)
+	return err
+}
+
+// LevelSuggestion decides, from a user's accumulated review performance, whether
+// to nudge them to a different difficulty level. It only fires once the rolling
+// window has at least reviewPerfMinSample answers and the cooldown has elapsed,
+// so it surfaces after a sustained run of reviews — never after a single batch.
+// When it returns ok=true it has already stamped the cooldown and reset the
+// window (the caller need only render the suggestion).
+func (s *Store) LevelSuggestion(chatID int64, now time.Time) (target, direction string, accuracy int, ok bool, err error) {
+	correct, total, last, lastOK, err := s.reviewPerf(chatID)
+	if err != nil || total < reviewPerfMinSample {
+		return "", "", 0, false, err
+	}
+	if lastOK && now.Sub(last) < reviewSuggestCooldown {
+		return "", "", 0, false, nil
+	}
+	target, direction, ok = suggestLevelChange(s.GetLevel(chatID), correct, total)
+	if !ok {
+		return "", "", 0, false, nil
+	}
+	accuracy = correct * 100 / total
+	if err := s.markLevelSuggested(chatID, now); err != nil {
+		return "", "", 0, false, err
+	}
+	return target, direction, accuracy, true, nil
+}

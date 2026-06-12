@@ -225,6 +225,10 @@ func broadcastSweep(ctx context.Context, chain *ProviderChain, store *Store, not
 			log.Printf("❌ [BROADCAST] Send to chat %d failed: %v", chatID, sendErr)
 			continue
 		}
+		// A scheduled send records activity (sent_words/sent_vocab) but, unlike the
+		// on-demand /drill and /word commands, never fired the streak milestone
+		// celebration — so users hitting a milestone via the daily push saw nothing.
+		checkStreakCelebration(store, notifier, chatID, prefs.FirstName)
 		sent++
 	}
 	log.Printf("✅ [BROADCAST] Slot sweep complete: delivered to %d/%d subscriber(s).", sent, len(chats))

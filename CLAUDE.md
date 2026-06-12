@@ -43,7 +43,9 @@ kept in sync with the code and **CI enforces it** (see Testing).
 - API: `/api/config` (public: bot handle + web app URL), `/api/stats`,
   `/api/vocab`, `/api/bookmark`, `/api/leaderboard`(+`/name`; metrics
   words/mastered/weekly/today; **no profile photos** — privacy),
-  `/api/review/next`+`/answer` (cards carry pronunciation/persian/example),
+  `/api/review/next`+`/answer`+`/summary` (cards carry pronunciation/persian/example;
+  `/summary` proposes a harder/easier level from the rolling review-perf window —
+  throttled, fires after a sustained run, never every batch),
   `/api/decks`(+`/study`,`/swipe`,`/detail`), `/api/settings`
   (GET reads prefs, POST applies one `{key,value}` via existing setters),
   `/api/content?kind=` (Library history: idiom/collocation/story/tip),
@@ -116,5 +118,15 @@ be run manually via `workflow_dispatch`. Gotchas:
 - Levels: `beginner`, `intermediate` (default), `upper-intermediate`, `advanced`
   (`allLevels`, `normalizeLevel`, `levelLabel` in `prefs.go`).
 - Mastered threshold: `srsMasteredIntervalDays = 21`.
+- **Streak counts all learning** (`activityDays` in `stats.go`): delivered words/drills
+  (`sent_words`/`sent_vocab`) *plus* pull-based learning (in-app reviews, deck study, quiz
+  answers) recorded via `RecordActivity` into the `activity_log` table. Add `RecordActivity`
+  to any new learning action that has no `sent_*` footprint.
+- **Self-paced mode** reuses the `paused` pref (a master kill-switch every scheduler honours);
+  the webapp surfaces it as "Self-paced mode — silence all automatic messages". On-demand
+  `/api/practice` still seeds reviews, so the pull-based loop works with all pushes off.
+- **Level suggestion**: review answers feed a recency-weighted window in `review_perf`
+  (`RecordReviewOutcome`); `LevelSuggestion` proposes a level change only past
+  `reviewPerfMinSample` answers and a `reviewSuggestCooldown` gap, then resets the window.
 - Maintainer commands: `/metrics /poolusage /health /config /users /announce
   /backup /admin` (see `/admin` for the live list).

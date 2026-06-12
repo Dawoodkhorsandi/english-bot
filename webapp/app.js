@@ -143,8 +143,11 @@ function renderDashboard(s) {
 
   let html = '<h1>📊 Your Progress</h1>';
   if (s.paused) {
-    html += '<div class="card" style="background:rgba(244,67,54,.12)">' +
-      '<div class="sub" style="color:var(--danger)">⏸️ Scheduled sends are paused — send /resume in the chat.</div></div>';
+    html += '<div class="card self-paced"><h2>🧘 Self-paced mode</h2>' +
+      '<div class="sub">Automatic messages are silenced. Learn whenever you like — grab a new word or run a review right here.</div>' +
+      '<div class="chips" style="margin-top:12px">' +
+      '<button class="chip chip-on" id="sp-word">📘 Get a new word</button>' +
+      '<button class="chip" id="sp-review">🧠 Review now</button></div></div>';
   }
   const shareBtn = s.current_streak >= 3
     ? '<button class="chip" id="share-streak">📣 Share my streak</button>' : '';
@@ -189,11 +192,7 @@ function renderDashboard(s) {
       bar(s.quiz_pct, 'var(--success)') + '</div>';
   }
 
-  html += '<div class="card"><h2>Activity · last 4 months</h2>' +
-    heatmapHTML(s.activity_counts || {}) +
-    '<div class="heat-legend"><span>Less</span>' +
-    '<i class="heat-cell"></i><i class="heat-cell l1"></i><i class="heat-cell l2"></i>' +
-    '<i class="heat-cell l3"></i><i class="heat-cell l4"></i><span>More</span></div></div>';
+  html += activitySection(s);
 
   html += '<div class="card"><h2>Level</h2>' +
     '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
@@ -210,6 +209,12 @@ function renderDashboard(s) {
       ex.hidden = !ex.hidden;
     });
   }
+
+  // Self-paced banner CTAs: jump straight into pull-based learning.
+  const spWord = document.getElementById('sp-word');
+  if (spWord) spWord.addEventListener('click', () => { hapticSelect(); showView('decks'); openPractice('word'); });
+  const spReview = document.getElementById('sp-review');
+  if (spReview) spReview.addEventListener('click', () => { hapticSelect(); showView('review'); });
 
   const share = document.getElementById('share-streak');
   if (share) {
@@ -259,9 +264,12 @@ async function maybeOfferHomeScreen(streak) {
   } catch (e) { /* older clients */ }
 }
 
-// GitHub-style activity heatmap: 17 week columns × 7 day rows (Mon top),
+// GitHub-style activity heatmap: HEAT_WEEKS week columns × 7 day rows (Mon top),
 // ending in the current week. Shade deepens with the day's activity count,
 // GitHub-commit style. Pure CSS grid — no chart library.
+const HEAT_WEEKS = 17;
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 function heatLevel(n) {
   if (n >= 10) return 4;
   if (n >= 6) return 3;
@@ -270,15 +278,91 @@ function heatLevel(n) {
   return 0;
 }
 
-function heatmapHTML(counts) {
-  const WEEKS = 17;
+// heatStart returns the Monday of the leftmost heatmap column.
+function heatStart() {
   const today = new Date();
-  const todayKey = localDateKey(today);
   const start = new Date(today);
-  start.setDate(today.getDate() - ((today.getDay() + 6) % 7) - (WEEKS - 1) * 7);
+  start.setDate(today.getDate() - ((today.getDay() + 6) % 7) - (HEAT_WEEKS - 1) * 7);
+  return start;
+}
+
+// activitySection renders the whole "Activity" card: headline numbers, a
+// per-week bar plot, the month-labelled heatmap, and the intensity legend.
+function activitySection(s) {
+  const counts = s.activity_counts || {};
+  let total = 0, best = 0, bestKey = '';
+  for (const k in counts) {
+    const n = counts[k] || 0; total += n;
+    if (n > best) { best = n; bestKey = k; }
+  }
+  const today = new Date();
+  let week = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    week += counts[localDateKey(d)] || 0;
+  }
+  const tile = (emoji, n, label) =>
+    '<div class="stat-tile"><div class="stat-emoji">' + emoji + '</div>' +
+    '<div class="stat-n">' + n + '</div><div class="sub">' + label + '</div></div>';
+
+  return '<div class="card"><h2>Activity · last 4 months</h2>' +
+    '<div class="stat-tiles t3">' +
+    tile('⚡', total, 'Activities') +
+    tile('📆', week, 'This week') +
+    tile('🌟', best, 'Best day') +
+    '</div>' +
+    weeklyBarsHTML(counts) +
+    monthLabelsHTML() +
+    heatmapHTML(counts) +
+    '<div class="heat-legend"><span>Less</span>' +
+    '<i class="heat-cell"></i><i class="heat-cell l1"></i><i class="heat-cell l2"></i>' +
+    '<i class="heat-cell l3"></i><i class="heat-cell l4"></i><span>More</span></div></div>';
+}
+
+// monthLabelsHTML renders a row of month abbreviations aligned to the heatmap's
+// week columns — a label appears on the first column that falls in a new month.
+function monthLabelsHTML() {
+  const d = heatStart();
+  let prevMonth = -1, cells = '';
+  for (let w = 0; w < HEAT_WEEKS; w++) {
+    const m = d.getMonth();
+    cells += '<span>' + (m !== prevMonth ? MONTH_ABBR[m] : '') + '</span>';
+    prevMonth = m;
+    d.setDate(d.getDate() + 7);
+  }
+  return '<div class="heat-months">' + cells + '</div>';
+}
+
+// weeklyBarsHTML renders a compact bar plot of total activity per week across
+// the heatmap window — the "fancier" companion to the day-level heatmap.
+function weeklyBarsHTML(counts) {
+  const todayKey = localDateKey(new Date());
+  const d = heatStart();
+  const weeks = [];
+  let max = 1;
+  for (let w = 0; w < HEAT_WEEKS; w++) {
+    let sum = 0, label = '';
+    for (let i = 0; i < 7; i++) {
+      const key = localDateKey(d);
+      if (i === 0) label = key;
+      if (key <= todayKey) sum += counts[key] || 0;
+      d.setDate(d.getDate() + 1);
+    }
+    if (sum > max) max = sum;
+    weeks.push({ sum, label });
+  }
+  const bars = weeks.map(wk =>
+    '<div class="wbar" title="' + wk.sum + ' in week of ' + wk.label + '">' +
+    '<div class="wbar-fill" style="height:' + Math.round(wk.sum * 100 / max) + '%"></div></div>'
+  ).join('');
+  return '<div class="wbars">' + bars + '</div>';
+}
+
+function heatmapHTML(counts) {
+  const todayKey = localDateKey(new Date());
   let cells = '';
-  const d = new Date(start);
-  for (let i = 0; i < WEEKS * 7; i++) {
+  const d = heatStart();
+  for (let i = 0; i < HEAT_WEEKS * 7; i++) {
     const key = localDateKey(d);
     const n = counts[key] || 0;
     let cls = 'heat-cell';
@@ -602,6 +686,8 @@ function createSwipeSession(container, opts) {
       '<div class="swipe-back">' + esc(msg) + '</div>' + summary + '</div>';
     actions.style.display = 'none';
     progress.textContent = '';
+    // Let the caller append a post-session footer (e.g. a level-up suggestion).
+    if (opts.onFinish && answered > 0) opts.onFinish(knownCount, answered, container);
   }
 
   function showCard() {
@@ -727,9 +813,44 @@ function loadReview() {
       }));
     },
     onAnswer: (card, known) => api('/api/review/answer', { method: 'POST', body: JSON.stringify({ term: card.term, known }) }),
+    onFinish: maybeSuggestLevel,
     emptyText: 'No words are due for review right now. Great job — come back later!',
     doneText: 'Review complete! Come back tomorrow to keep your streak going.',
   });
+}
+
+// maybeSuggestLevel asks the server whether the user's *sustained* review
+// performance (a rolling window across many sessions, not this one batch)
+// warrants a difficulty change. The server throttles this — it only returns a
+// suggestion occasionally, once it's confident — so we just render whatever it
+// says, with a one-tap switch (reusing the /api/settings level POST). Silent on
+// errors or no suggestion.
+async function maybeSuggestLevel(correct, total, container) {
+  let s;
+  try { s = await api('/api/review/summary', { method: 'POST', body: '{}' }); }
+  catch (e) { return; }
+  if (!s || !s.suggest) return;
+  const card = document.createElement('div');
+  card.className = 'card level-suggest';
+  card.innerHTML =
+    '<div class="ls-emoji">' + (s.direction === 'harder' ? '🚀' : '🌱') + '</div>' +
+    '<div class="ls-msg">' + esc(s.message) + '</div>' +
+    '<div class="sub">Your recent reviews: ' + s.accuracy + '% correct.</div>' +
+    '<div class="chips" style="margin-top:12px">' +
+    '<button class="chip chip-on" id="ls-switch">Switch to ' + esc(s.targetLabel) + '</button>' +
+    '<button class="chip" id="ls-keep">Keep ' + esc(s.currentLabel) + '</button>' +
+    '</div>';
+  container.appendChild(card);
+  card.querySelector('#ls-switch').addEventListener('click', async () => {
+    haptic('light');
+    try {
+      await api('/api/settings', { method: 'POST', body: JSON.stringify({ key: 'level', value: s.targetLevel }) });
+      hapticNotify('success');
+      card.innerHTML = '<div class="ls-emoji">✅</div><div class="ls-msg">You\'re now learning at <b>' +
+        esc(s.targetLabel) + '</b>. New words will match.</div>';
+    } catch (e) { hapticNotify('error'); }
+  });
+  card.querySelector('#ls-keep').addEventListener('click', () => { hapticSelect(); card.remove(); });
 }
 
 // ---------------------------------------------------------------------------
@@ -1083,9 +1204,12 @@ function renderSettings(s) {
     '<button class="chip chip-on" id="set-name-save">Save</button></div>' +
     '<div class="sub">This is what others see next to your rank. Leave blank for a fun random name.</div></div>';
 
-  html += '<div class="card">' +
-    row('Pause scheduled sends', toggleHTML('paused', s.paused)) +
-    row('Delivery every (minutes)', '<input class="num" id="set-interval" type="number" min="15" max="1440" value="' + s.interval + '">') +
+  html += '<div class="card"><h2>Self-paced mode</h2>' +
+    row('Silence all automatic messages', toggleHTML('paused', s.paused)) +
+    '<div class="sub">Stops daily words, reviews, quizzes &amp; tips. You can still learn anytime in the app — grab a new word in Study and review here whenever you like.</div>' +
+    '<div class="set-row" style="margin-top:12px"><span>Delivery every (minutes)</span>' +
+    '<input class="num" id="set-interval" type="number" min="15" max="1440" value="' + s.interval + '"></div>' +
+    '<div class="sub">How often automatic messages arrive when self-paced mode is off.</div>' +
     '</div>';
 
   html += '<div class="card"><h2>Content</h2>';

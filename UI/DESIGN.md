@@ -98,7 +98,10 @@ factory in `app.js` where one exists.
 | Progress bar | `.bar-wrap` / `.bar-fill`; `bar(pct, colour)` | Width transition .4s; colour param should be a token |
 | Stat grid | `.grid` | 2-column |
 | Stat tiles | `.stat-tiles` / `.stat-tile` / `.stat-emoji` / `.stat-n` | 4-up emoji+count tiles; Library breakdown on the dashboard, shown only when any kind > 0 (✅ v1.29.2) |
+| Activity section | `activitySection(s)`: 3-up `.stat-tiles.t3` headline numbers (Activities / This week / Best day) + `.wbars`/`.wbar`/`.wbar-fill` per-week bar plot + `.heat-months` labels + heatmap + legend | Richer Stats activity block (✅ v1.31.0) |
 | Activity heatmap | `.heatmap` / `.heat-cell` (+`.l1`–`.l4`, `.today`, `.future`), `.heat-legend`; `heatmapHTML(counts)`, `heatLevel(n)` | 17×7 CSS grid; GitHub-style intensity from `activity_counts` (1/3/6/10+ thresholds) with Less→More legend (✅ v1.29.0) |
+| Self-paced banner | `.card.self-paced`; shown when `paused` | Replaces the old "paused → /resume in chat" warning with a positive banner + "Get a new word" / "Review now" CTAs (✅ v1.31.0) |
+| Level suggestion | `.level-suggest` (`.ls-emoji` / `.ls-msg`); `maybeSuggestLevel()` appended in the Review `onFinish` | One-tap harder/easier switch shown only after a sustained review run, throttled server-side (✅ v1.31.0) |
 | Chips | `.chips` / `.chip` / `.chip-on` | Filter + action duty; active = accent |
 | Search | `.search` | Debounce input 250ms |
 | List + row | `.list`, `.word`, `.word-main`, `.word-term`, `.word-meaning`, `.word-mastery`; `wordRow(w)` | Mastery icons: ✅ mastered · 📖 learning · 🆕 new |
@@ -143,10 +146,10 @@ deck study is a `BackButton` drill-down inside the Decks tab.
 
 | Screen | Data | Layout | Target additions (`GAP`) |
 |---|---|---|---|
-| **Stats** `#view-dashboard` | `GET /api/stats` | Paused banner → **hero streak card** (progress ring `streakRing` + ⓘ streak explainer) → Vocabulary tiles (Words/Mastered/Drills/Quiz) → Library tiles → Quiz accuracy → heatmap (intensity + legend) → Level | ✅ hero/ring + explainer (v1.30.0) |
+| **Stats** `#view-dashboard` | `GET /api/stats` | Self-paced banner (when paused) → **hero streak card** (progress ring `streakRing` + ⓘ streak explainer) → Vocabulary tiles (Words/Mastered/Drills/Quiz) → Library tiles → Quiz accuracy → **Activity section** (headline numbers + weekly bar plot + month-labelled heatmap) → Level | ✅ richer activity + self-paced banner (v1.31.0) |
 | **Library** `#view-vocab` | `GET /api/vocab` (words/bookmarks), `GET /api/content?kind=` (idiom/collocation/story/tip), `GET /api/quizzes` | Search (words only) → kind chips → list → Load more; content rows expand in place (`contentRow`), quiz rows show ✅/❌ + date (`quizRow`) | `GAP`: result count while searching |
 | **Study** `#view-decks` | `GET /api/decks`(+`/study`,`/swipe`,`/detail`), `GET /api/practice?kind=`, `GET /api/quiz/next`+`/answer`, `GET /api/grammar`(+`/lesson`) | Practice-now chips + Grammar CTA → deck list → **deck detail** (box distribution + Study CTA, `showDeckSub`) → swipe session; Grammar list → lesson detail | ✅ detail page + grammar (v1.30.0) |
-| **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer` | Swipe session, 30-card cap; card shows pronunciation (front sub) + meaning/example/Persian (`cardBack`) | ✅ richer card + iOS touch swipe (v1.30.0) |
+| **Review** `#view-review` | `GET /api/review/next?limit=30`, `POST /api/review/answer`, `POST /api/review/summary` | Swipe session, 30-card cap; card shows pronunciation (front sub) + meaning/example/Persian (`cardBack`); on finish a throttled level suggestion may appear (`maybeSuggestLevel`) | ✅ richer card + iOS touch swipe (v1.30.0); level suggestion (v1.31.0) |
 | **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips (All-time/Weekly/**Today**/Mastered) → your-rank card → top-50 list (initial-letter badges, **no photos**); first-visit name modal | ✅ Today metric, photos removed (v1.30.0) |
 | **Settings** `#view-settings` | `GET/POST /api/settings` | Level chips → leaderboard name → pause + interval → 9 content toggles | Toggle rollback on failed POST |
 

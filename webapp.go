@@ -49,6 +49,7 @@ func startWebServer(store *Store) {
 	mux.HandleFunc("/api/leaderboard/name", withUser(store, handleAPILeaderboardName))
 	mux.HandleFunc("/api/review/next", withUser(store, handleAPIReviewNext))
 	mux.HandleFunc("/api/review/answer", withUser(store, handleAPIReviewAnswer))
+	mux.HandleFunc("/api/review/summary", withUser(store, handleAPIReviewSummary))
 	mux.HandleFunc("/api/decks", withUser(store, handleAPIDecks))
 	mux.HandleFunc("/api/decks/study", withUser(store, handleAPIDeckStudy))
 	mux.HandleFunc("/api/decks/swipe", withUser(store, handleAPIDeckSwipe))
@@ -381,17 +382,65 @@ func handleAPIReviewAnswer(w http.ResponseWriter, r *http.Request, chatID int64,
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	now := time.Now()
 	var err error
 	if body.Known {
-		_, err = store.ApplyReviewKnown(chatID, body.Term, time.Now())
+		_, err = store.ApplyReviewKnown(chatID, body.Term, now)
 	} else {
-		_, err = store.ApplyReviewForgot(chatID, body.Term, time.Now())
+		_, err = store.ApplyReviewForgot(chatID, body.Term, now)
 	}
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	// In-app reviews count toward the daily streak (no sent_* footprint) and feed
+	// the rolling window behind the level-change suggestion.
+	if err := store.RecordActivity(chatID, now); err != nil {
+		log.Printf("⚠️  [API] Could not record review activity for chat %d: %v", chatID, err)
+	}
+	if err := store.RecordReviewOutcome(chatID, body.Known); err != nil {
+		log.Printf("⚠️  [API] Could not record review outcome for chat %d: %v", chatID, err)
+	}
 	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
+// handleAPIReviewSummary is called when an in-app review session ends. It does
+// NOT judge the single session — it consults the user's rolling review window
+// (built up across every review answer, chat or app) and only proposes a level
+// change once that window shows a sustained mismatch and the cooldown has
+// elapsed (see Store.LevelSuggestion). So a suggestion surfaces after a bunch of
+// reviews, never after each batch. When shown, the cooldown is stamped and the
+// window reset. The frontend renders it with a one-tap switch that reuses the
+// existing /api/settings level POST.
+func handleAPIReviewSummary(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	current := store.GetLevel(chatID)
+	resp := map[string]interface{}{
+		"suggest":      false,
+		"currentLevel": current,
+		"currentLabel": levelLabel(current),
+	}
+	target, direction, accuracy, ok, err := store.LevelSuggestion(chatID, time.Now())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if ok {
+		resp["suggest"] = true
+		resp["direction"] = direction
+		resp["accuracy"] = accuracy
+		resp["targetLevel"] = target
+		resp["targetLabel"] = levelLabel(target)
+		if direction == "harder" {
+			resp["message"] = fmt.Sprintf("You've been acing your reviews at %s — ready for a tougher challenge?", levelLabel(current))
+		} else {
+			resp["message"] = fmt.Sprintf("%s has been a grind lately — an easier level can rebuild your momentum.", levelLabel(current))
+		}
+	}
+	writeJSON(w, resp)
 }
 
 // handleAPIDecks lists the curated decks with the user's progress.
@@ -465,9 +514,14 @@ func handleAPIDeckSwipe(w http.ResponseWriter, r *http.Request, chatID int64, st
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if err := store.DeckSwipe(chatID, body.Deck, body.Term, body.Known, time.Now()); err != nil {
+	now := time.Now()
+	if err := store.DeckSwipe(chatID, body.Deck, body.Term, body.Known, now); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	// Studying a deck card counts toward the daily streak.
+	if err := store.RecordActivity(chatID, now); err != nil {
+		log.Printf("⚠️  [API] Could not record deck activity for chat %d: %v", chatID, err)
 	}
 	writeJSON(w, map[string]interface{}{"ok": true})
 }
