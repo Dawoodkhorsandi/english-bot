@@ -32,7 +32,7 @@ const initDataTTL = 24 * time.Hour
 
 // startWebServer starts the embedded HTTP server that serves the Telegram Mini
 // App. It is only called when WEB_APP_URL is configured.
-func startWebServer(store *Store) {
+func startWebServer(store *Store, notifier Notifier) {
 	sub, err := fs.Sub(webappFiles, "webapp")
 	if err != nil {
 		log.Printf("⚠️  [WEBAPP] Could not open embedded assets: %v", err)
@@ -47,6 +47,12 @@ func startWebServer(store *Store) {
 	mux.HandleFunc("/api/bookmark", withUser(store, handleAPIBookmark))
 	mux.HandleFunc("/api/leaderboard", withUser(store, handleAPILeaderboard))
 	mux.HandleFunc("/api/leaderboard/name", withUser(store, handleAPILeaderboardName))
+	mux.HandleFunc("/api/profile", withUser(store, handleAPIProfile))
+	// Kudos can notify the recipient, so it needs the notifier (captured here so
+	// the apiHandler signature stays uniform; nil-safe for tests via mockNotifier).
+	mux.HandleFunc("/api/kudos", withUser(store, func(w http.ResponseWriter, r *http.Request, chatID int64, st *Store) {
+		handleAPIKudos(w, r, chatID, st, notifier)
+	}))
 	mux.HandleFunc("/api/review/next", withUser(store, handleAPIReviewNext))
 	mux.HandleFunc("/api/review/answer", withUser(store, handleAPIReviewAnswer))
 	mux.HandleFunc("/api/review/summary", withUser(store, handleAPIReviewSummary))
@@ -342,6 +348,110 @@ func handleAPILeaderboardName(w http.ResponseWriter, r *http.Request, chatID int
 		return
 	}
 	writeJSON(w, map[string]interface{}{"ok": true, "name": name})
+}
+
+// handleAPIProfile returns another user's public profile, addressed by an opaque
+// public id (never the chat_id), with a head-to-head comparison of the viewer's
+// stats vs theirs and the kudos state. Used by the leaderboard drill-down.
+func handleAPIProfile(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	target, ok := store.ChatIDByPublicID(strings.TrimSpace(r.URL.Query().Get("id")))
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	them, err := store.UserStats(target)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	me, err := store.UserStats(chatID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	count, gaveByMe, err := store.KudosFor(chatID, target)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	quizPct := func(s UserStats) int {
+		if s.QuizAnswered == 0 {
+			return 0
+		}
+		return s.QuizCorrect * 100 / s.QuizAnswered
+	}
+	// better is from the viewer's perspective: 1 ahead, -1 behind, 0 tied.
+	metric := func(key, label string, mine, theirs int) map[string]interface{} {
+		better := 0
+		if mine > theirs {
+			better = 1
+		} else if mine < theirs {
+			better = -1
+		}
+		return map[string]interface{}{"key": key, "label": label, "me": mine, "them": theirs, "better": better}
+	}
+	name := store.GetDisplayName(target)
+	if name == "" {
+		name = funnyName(target)
+	}
+	writeJSON(w, map[string]interface{}{
+		"name":    name,
+		"isMe":    target == chatID,
+		"kudos":   map[string]interface{}{"count": count, "gaveByMe": gaveByMe},
+		"heatmap": them.ActivityCounts,
+		"metrics": []map[string]interface{}{
+			metric("words", "Words", me.Words, them.Words),
+			metric("mastered", "Mastered", me.Mastered, them.Mastered),
+			metric("streak", "Streak", me.CurrentStreak, them.CurrentStreak),
+			metric("quiz", "Quiz accuracy", quizPct(me), quizPct(them)),
+			metric("active", "Active days", me.ActiveDays, them.ActiveDays),
+		},
+	})
+}
+
+// handleAPIKudos toggles the caller's kudos for a target user (one per pair) and,
+// on a newly-given kudos, notifies the recipient — unless they're in self-paced
+// (paused) mode. notifier may be nil (tests); a nil notifier just skips the send.
+func handleAPIKudos(w http.ResponseWriter, r *http.Request, chatID int64, store *Store, notifier Notifier) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	target, ok := store.ChatIDByPublicID(strings.TrimSpace(body.ID))
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if target == chatID {
+		http.Error(w, "cannot kudos yourself", http.StatusBadRequest)
+		return
+	}
+	gave, count, err := store.ToggleKudos(chatID, target)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if gave && notifier != nil {
+		// Respect self-paced mode: paused users get no automatic messages. The
+		// kudos still lands; they'll see the count next time they open the app.
+		if prefs, perr := store.GetPrefs(target); perr == nil && !prefs.Paused {
+			giver := store.GetDisplayName(chatID)
+			if giver == "" {
+				giver = funnyName(chatID)
+			}
+			// giver is sanitised on save (no angle brackets) / funnyName is safe.
+			_ = notifier.Send(target, fmt.Sprintf("👏 <b>%s</b> gave you kudos on the leaderboard!", giver))
+		}
+	}
+	writeJSON(w, map[string]interface{}{"count": count, "gaveByMe": gave})
 }
 
 // handleAPIReviewNext returns the user's due spaced-repetition cards.

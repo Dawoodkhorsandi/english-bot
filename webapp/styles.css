@@ -200,6 +200,29 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
   background: var(--accent); padding: 1px 6px; border-radius: 8px; vertical-align: middle;
 }
 
+/* ---- Profile (leaderboard drill-down) ---- */
+.profile-head { display: flex; align-items: center; gap: 12px; margin: 6px 0 14px; }
+.avatar-fallback.lg { width: 52px; height: 52px; font-size: 22px; }
+.profile-name { flex: 1; min-width: 0; font-size: 18px; font-weight: 700; }
+.kudos-btn {
+  border: 1px solid var(--accent); background: var(--bg); color: var(--fg);
+  border-radius: 999px; padding: 8px 14px; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.kudos-btn.on { background: var(--accent); color: var(--accent-text); }
+.cmp-row { margin-top: 12px; }
+.cmp-row:first-child { margin-top: 6px; }
+.cmp-head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+.cmp-up { color: var(--success); }
+.cmp-down { color: var(--danger); }
+.cmp-tie { color: var(--hint); }
+.cmp-line { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.cmp-tag { width: 38px; font-size: 11px; color: var(--hint); }
+.cmp-track { flex: 1; background: var(--border); border-radius: 6px; height: 9px; overflow: hidden; }
+.cmp-fill { height: 100%; border-radius: 6px; transition: width .4s ease; }
+.cmp-fill.me { background: var(--accent); }
+.cmp-fill.them { background: var(--hint); }
+.cmp-val { width: 38px; text-align: right; font-size: 13px; font-weight: 700; }
+
 /* ---- Decks ---- */
 .deck { cursor: pointer; }
 .deck-head { display: flex; align-items: baseline; justify-content: space-between; }

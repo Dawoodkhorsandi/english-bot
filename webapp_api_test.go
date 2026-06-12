@@ -980,3 +980,143 @@ func TestPracticeSeedsReview(t *testing.T) {
 		t.Fatalf("practised word not scheduled for review: ok=%v err=%v", ok, err)
 	}
 }
+
+// TestPublicIDRoundTrip verifies the opaque public id is deterministic, stored,
+// reversible to the chat_id server-side, and never equal to the chat_id.
+func TestPublicIDRoundTrip(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const chatID = int64(4242)
+
+	pid := store.PublicID(chatID)
+	if pid == "" {
+		t.Fatal("PublicID returned empty")
+	}
+	if pid == strconv.FormatInt(chatID, 10) {
+		t.Fatal("public id must not be the chat_id")
+	}
+	if again := store.PublicID(chatID); again != pid {
+		t.Errorf("PublicID not deterministic: %q vs %q", pid, again)
+	}
+	got, ok := store.ChatIDByPublicID(pid)
+	if !ok || got != chatID {
+		t.Errorf("ChatIDByPublicID = %d, %v; want %d, true", got, ok, chatID)
+	}
+	if _, ok := store.ChatIDByPublicID("deadbeefdeadbeef"); ok {
+		t.Error("unknown public id resolved unexpectedly")
+	}
+}
+
+// TestKudosToggle verifies one-toggle-per-pair semantics and the received count.
+func TestKudosToggle(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const a, b = int64(1), int64(2)
+
+	gave, count, err := store.ToggleKudos(a, b)
+	if err != nil || !gave || count != 1 {
+		t.Fatalf("first toggle: gave=%v count=%d err=%v, want true/1", gave, count, err)
+	}
+	// A second giver adds to the count.
+	if _, count, _ = store.ToggleKudos(3, b); count != 2 {
+		t.Fatalf("second giver count = %d, want 2", count)
+	}
+	// a toggles off.
+	gave, count, err = store.ToggleKudos(a, b)
+	if err != nil || gave || count != 1 {
+		t.Fatalf("toggle off: gave=%v count=%d err=%v, want false/1", gave, count, err)
+	}
+	if c, mine, _ := store.KudosFor(a, b); c != 1 || mine {
+		t.Errorf("KudosFor after toggle-off = %d, gaveByMe=%v; want 1/false", c, mine)
+	}
+}
+
+// TestAPIProfileComparison checks the head-to-head payload, the better signs,
+// the 404 for unknown ids, and that no chat_id leaks into the response.
+func TestAPIProfileComparison(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const me, them = int64(100), int64(200)
+
+	// me: 2 words; them: 1 word → I'm ahead on words.
+	store.RecordSentVocab(me, "alpha")
+	store.RecordSentVocab(me, "beta")
+	store.RecordSentVocab(them, "gamma")
+	pid := store.PublicID(them)
+
+	w := apiCall(store, handleAPIProfile, http.MethodGet, "/api/profile?id="+pid, me, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("profile code = %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), strconv.FormatInt(them, 10)) {
+		t.Fatalf("profile payload leaked a chat_id: %s", w.Body.String())
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	metrics, _ := raw["metrics"].([]interface{})
+	if len(metrics) != 5 {
+		t.Fatalf("metrics = %d, want 5", len(metrics))
+	}
+	words := metrics[0].(map[string]interface{})
+	if words["key"] != "words" || words["me"].(float64) != 2 || words["them"].(float64) != 1 || words["better"].(float64) != 1 {
+		t.Errorf("words metric = %+v, want me=2 them=1 better=1", words)
+	}
+
+	// Unknown id → 404.
+	if uw := apiCall(store, handleAPIProfile, http.MethodGet, "/api/profile?id=nope", me, ""); uw.Code != http.StatusNotFound {
+		t.Errorf("unknown profile code = %d, want 404", uw.Code)
+	}
+}
+
+// kudosCall invokes the notifier-wrapped kudos handler with a mock notifier.
+func kudosCall(store *Store, notifier Notifier, chatID int64, body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, "/api/kudos", strings.NewReader(body))
+	r.Header.Set("X-Init-Data", signInitData(chatID, time.Now()))
+	w := httptest.NewRecorder()
+	withUser(store, func(w http.ResponseWriter, r *http.Request, id int64, st *Store) {
+		handleAPIKudos(w, r, id, st, notifier)
+	})(w, r)
+	return w
+}
+
+// TestAPIKudosNotify verifies self-kudos is rejected, a non-paused recipient is
+// notified once, and a paused (self-paced) recipient is not.
+func TestAPIKudosNotify(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const me, active, paused = int64(100), int64(200), int64(300)
+
+	mePid := store.PublicID(me)
+	activePid := store.PublicID(active)
+	pausedPid := store.PublicID(paused)
+	if err := store.SetPaused(paused, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// Self-kudos rejected.
+	if w := kudosCall(store, &mockNotifier{}, me, `{"id":"`+mePid+`"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("self-kudos code = %d, want 400", w.Code)
+	}
+
+	// Non-paused recipient → notified once.
+	n1 := &mockNotifier{}
+	w := kudosCall(store, n1, me, `{"id":"`+activePid+`"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("kudos code = %d", w.Code)
+	}
+	if len(n1.sent) != 1 || n1.sent[0].chatID != active {
+		t.Errorf("active recipient notifications = %+v, want one to %d", n1.sent, active)
+	}
+
+	// Paused recipient → not notified, but kudos still recorded.
+	n2 := &mockNotifier{}
+	kudosCall(store, n2, me, `{"id":"`+pausedPid+`"}`)
+	if len(n2.sent) != 0 {
+		t.Errorf("paused recipient should not be notified, got %+v", n2.sent)
+	}
+	if c, _, _ := store.KudosFor(me, paused); c != 1 {
+		t.Errorf("paused recipient kudos count = %d, want 1", c)
+	}
+}

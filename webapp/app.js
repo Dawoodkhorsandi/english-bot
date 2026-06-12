@@ -556,7 +556,7 @@ function medal(rank) {
 
 function boardRow(r) {
   const el = document.createElement('div');
-  el.className = 'word' + (r.isMe ? ' me' : '');
+  el.className = 'word expandable' + (r.isMe ? ' me' : '');
   // Privacy: we never show user profile photos — just an initial-letter badge.
   const initial = (r.name || '?').trim().charAt(0).toUpperCase();
   const avatar = '<div class="avatar-fallback">' + esc(initial) + '</div>';
@@ -564,10 +564,100 @@ function boardRow(r) {
     '<span class="rank">' + medal(r.rank) + '</span>' + avatar +
     '<div class="word-main"><div class="word-term">' + esc(r.name) + (r.isMe ? ' <span class="you">you</span>' : '') + '</div></div>' +
     '<span class="word-term">' + r.value + '</span>';
+  // Tap a row to open that user's profile (opaque id — never a chat_id).
+  if (r.id) el.addEventListener('click', () => openProfile(r.id));
   return el;
 }
 
+// ---------------------------------------------------------------------------
+// Profile drill-down (Ranks tab): head-to-head comparison + kudos.
+// ---------------------------------------------------------------------------
+const BOARD_SUBVIEWS = ['board-home', 'board-profile'];
+let boardBack = null;
+
+function showBoardSub(id, onBack) {
+  BOARD_SUBVIEWS.forEach(s => { const el = document.getElementById(s); if (el) el.hidden = (s !== id); });
+  if (boardBack) { try { tg.BackButton.offClick(boardBack); } catch (e) { /* ignore */ } boardBack = null; }
+  if (id === 'board-home') {
+    try { tg.BackButton.hide(); } catch (e) { /* ignore */ }
+  } else {
+    boardBack = onBack || backToBoard;
+    try { tg.BackButton.onClick(boardBack); tg.BackButton.show(); } catch (e) { /* ignore */ }
+  }
+}
+function backToBoard() { showBoardSub('board-home'); }
+
+const CMP_VERDICT = { 1: '<span class="cmp-up">▲ you lead</span>', '-1': '<span class="cmp-down">▼ behind</span>', 0: '<span class="cmp-tie">= tied</span>' };
+
+// compareRow draws one metric as a dual bar (you vs them) + a verdict.
+function compareRow(m) {
+  const max = Math.max(1, m.me, m.them);
+  return '<div class="cmp-row"><div class="cmp-head"><span>' + esc(m.label) + '</span>' +
+    CMP_VERDICT[m.better] + '</div>' +
+    '<div class="cmp-bars">' +
+    '<div class="cmp-line"><span class="cmp-tag">You</span>' +
+    '<div class="cmp-track"><div class="cmp-fill me" style="width:' + (m.me * 100 / max) + '%"></div></div>' +
+    '<span class="cmp-val">' + m.me + '</span></div>' +
+    '<div class="cmp-line"><span class="cmp-tag">Them</span>' +
+    '<div class="cmp-track"><div class="cmp-fill them" style="width:' + (m.them * 100 / max) + '%"></div></div>' +
+    '<span class="cmp-val">' + m.them + '</span></div>' +
+    '</div></div>';
+}
+
+async function openProfile(id) {
+  showBoardSub('board-profile', backToBoard);
+  haptic('light');
+  const body = document.getElementById('profile-body');
+  body.innerHTML = skeletonCards(2);
+  let p;
+  try { p = await api('/api/profile?id=' + encodeURIComponent(id)); }
+  catch (e) { body.innerHTML = '<p class="empty">Could not load this profile.</p>'; return; }
+  renderProfile(id, p);
+}
+
+function renderProfile(id, p) {
+  const body = document.getElementById('profile-body');
+  const initial = (p.name || '?').trim().charAt(0).toUpperCase();
+  const kudosBtn = p.isMe ? '' :
+    '<button class="kudos-btn' + (p.kudos.gaveByMe ? ' on' : '') + '" id="kudos-btn">' +
+    '👏 <span id="kudos-count">' + p.kudos.count + '</span></button>';
+  let html = '<div class="profile-head">' +
+    '<div class="avatar-fallback lg">' + esc(initial) + '</div>' +
+    '<div class="profile-name">' + esc(p.name) + (p.isMe ? ' <span class="you">you</span>' : '') +
+    '<div class="sub">' + (p.isMe ? 'This is you' : p.kudos.count + ' kudos') + '</div></div>' +
+    kudosBtn + '</div>';
+  html += '<div class="card"><h2>You vs ' + (p.isMe ? 'you' : esc(p.name)) + '</h2>' +
+    (p.metrics || []).map(compareRow).join('') + '</div>';
+  html += '<div class="card"><h2>Their activity · last 4 months</h2>' +
+    heatmapHTML(p.heatmap || {}) +
+    '<div class="heat-legend"><span>Less</span>' +
+    '<i class="heat-cell"></i><i class="heat-cell l1"></i><i class="heat-cell l2"></i>' +
+    '<i class="heat-cell l3"></i><i class="heat-cell l4"></i><span>More</span></div></div>';
+  body.innerHTML = html;
+
+  const btn = document.getElementById('kudos-btn');
+  if (btn) btn.addEventListener('click', async () => {
+    haptic('light');
+    const countEl = document.getElementById('kudos-count');
+    const wasOn = btn.classList.contains('on');
+    // Optimistic toggle.
+    btn.classList.toggle('on');
+    countEl.textContent = Math.max(0, parseInt(countEl.textContent, 10) + (wasOn ? -1 : 1));
+    try {
+      const res = await api('/api/kudos', { method: 'POST', body: JSON.stringify({ id }) });
+      btn.classList.toggle('on', res.gaveByMe);
+      countEl.textContent = res.count;
+      hapticNotify('success');
+    } catch (e) {
+      btn.classList.toggle('on', wasOn);
+      countEl.textContent = Math.max(0, parseInt(countEl.textContent, 10) + (wasOn ? 1 : -1));
+      hapticNotify('error');
+    }
+  });
+}
+
 async function loadBoard() {
+  showBoardSub('board-home'); // reset the drill-down when (re)entering the tab
   if (!boardListEl.children.length) boardListEl.innerHTML = skeletonRows(6);
   let data;
   try { data = await api('/api/leaderboard?metric=' + boardState.metric); }

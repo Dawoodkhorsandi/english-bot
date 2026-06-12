@@ -391,6 +391,11 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Mini App fix: the Grammar section no longer shows its heading twice (the static wrapper title duplicated the one rendered by the list/lesson view).",
 	},
+	{
+		Version: "1.32.0",
+		Silent:  true,
+		Text:    "Mini App: leaderboard rows are now tappable and open a user profile — a head-to-head comparison of your stats vs theirs (words, mastered, streak, quiz accuracy, active days) plus their activity heatmap. You can also give 👏 kudos to other learners; recipients are notified unless they're in self-paced mode. Profiles use an opaque public id, never a Telegram identity.",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -490,7 +495,7 @@ func main() {
 		if !strings.HasPrefix(webAppURL, "https://") {
 			log.Printf("⚠️  [WEBAPP] WEB_APP_URL=%q is not https:// — Telegram rejects non-HTTPS Mini App buttons, so /stats will fail to send.", webAppURL)
 		}
-		startWebServer(store)
+		startWebServer(store, notifier)
 		// Make the Mini App the chat's persistent menu button (the "sticky"
 		// button next to the message input), so it's always one tap away.
 		setChatMenuButton()
@@ -3569,8 +3574,16 @@ func openStore(path string) (*Store, error) {
 		first_name           TEXT    NOT NULL DEFAULT '',
 		display_name         TEXT    NOT NULL DEFAULT '',
 		streak_celebrated    INTEGER NOT NULL DEFAULT 0,
+		public_id            TEXT    NOT NULL DEFAULT '',
 		updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+	CREATE TABLE IF NOT EXISTS kudos (
+		from_chat_id INTEGER NOT NULL,
+		to_chat_id   INTEGER NOT NULL,
+		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (from_chat_id, to_chat_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_kudos_to ON kudos(to_chat_id);
 	CREATE TABLE IF NOT EXISTS review_schedule (
 		chat_id       INTEGER NOT NULL,
 		word          TEXT    NOT NULL,
@@ -3901,12 +3914,14 @@ func (s *Store) migrate() error {
 		}
 	}
 	// user_prefs UI-enhancement columns added in v1.18.0; display_name (Mini App
-	// leaderboard) added in v1.24.0; photo_url (leaderboard avatars) in v1.28.0.
+	// leaderboard) added in v1.24.0; photo_url (leaderboard avatars) in v1.28.0;
+	// public_id (opaque id for the Mini App profile pages, never the chat_id) in v1.32.0.
 	for col, def := range map[string]string{
 		"first_name":        "TEXT NOT NULL DEFAULT ''",
 		"display_name":      "TEXT NOT NULL DEFAULT ''",
 		"streak_celebrated": "INTEGER NOT NULL DEFAULT 0",
 		"photo_url":         "TEXT NOT NULL DEFAULT ''",
+		"public_id":         "TEXT NOT NULL DEFAULT ''",
 	} {
 		if !s.columnExists("user_prefs", col) {
 			log.Printf("💾 [DB_MIGRATE] Adding user_prefs.%s column...", col)
@@ -3914,6 +3929,11 @@ func (s *Store) migrate() error {
 				return err
 			}
 		}
+	}
+	// Index public_id here (not in the always-run schema block) so it's created
+	// only after the column exists on migrated legacy DBs (v1.32.0).
+	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_user_public ON user_prefs(public_id)"); err != nil {
+		return err
 	}
 	// bookmarks table added in v1.21.0; CREATE IF NOT EXISTS is safe for existing DBs.
 	if _, err := s.db.Exec(`
