@@ -32,16 +32,22 @@
   </section>
 
   <section class="view" id="view-board" hidden>
-    <h1>🏆 Leaderboard</h1>
-    <div class="chips">
-      <button class="chip chip-on" data-metric="words">All-time</button>
-      <button class="chip" data-metric="weekly">📅 This week</button>
-      <button class="chip" data-metric="today">☀️ Today</button>
-      <button class="chip" data-metric="mastered">Mastered</button>
+    <div id="board-home">
+      <h1>🏆 Leaderboard</h1>
+      <div class="chips">
+        <button class="chip chip-on" data-metric="words">All-time</button>
+        <button class="chip" data-metric="weekly">📅 This week</button>
+        <button class="chip" data-metric="today">☀️ Today</button>
+        <button class="chip" data-metric="mastered">Mastered</button>
+      </div>
+      <div id="board-me" class="card" hidden></div>
+      <div id="board-list" class="list"></div>
+      <p id="board-empty" class="empty" hidden></p>
     </div>
-    <div id="board-me" class="card" hidden></div>
-    <div id="board-list" class="list"></div>
-    <p id="board-empty" class="empty" hidden></p>
+    <!-- Profile drill-down (opened by tapping a row; BackButton returns). -->
+    <div id="board-profile" hidden>
+      <div id="profile-body"></div>
+    </div>
   </section>
 
   <section class="view" id="view-review" hidden>

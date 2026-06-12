@@ -383,6 +383,19 @@ counters halve past `reviewPerfWindowCap`). `LevelSuggestion` reads it to nudge 
 harder/easier level only past `reviewPerfMinSample` answers + a
 `reviewSuggestCooldown` gap, then resets the window. Managed by `srs.go`.
 
+#### `kudos` (v1.32.0)
+| Column | Type | Description |
+|---|---|---|
+| `from_chat_id` | `INTEGER` | The giver |
+| `to_chat_id` | `INTEGER` | The recipient |
+| `created_at` | `DATETIME` | When the kudos was given |
+
+Primary key `(from_chat_id, to_chat_id)` — one toggle per pair; index
+`idx_kudos_to on (to_chat_id)` drives the received-count query. Managed by
+`ToggleKudos`/`KudosFor` (`leaderboard.go`). `user_prefs.public_id` (v1.32.0) is
+an opaque, bot-token-derived id (`PublicID`/`ChatIDByPublicID`) so the Mini App
+can address a profile without ever exposing a `chat_id`.
+
 #### `quiz_results` (v1.9.0)
 | Column | Type | Description |
 |---|---|---|
@@ -746,8 +759,10 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/vocab?offset&limit&bookmarks&q` | GET | Page of learned words (`LearnedWordsFiltered`), with mastery + bookmark flags and a term/meaning search. |
 | `/api/bookmark` | POST | `{term, on}` → toggle a bookmark. |
 | `/api/config` | GET | **Public** (no auth): `{botUsername, webAppURL}` for the Mini App's share/invite link. (v1.30.0) |
-| `/api/leaderboard?metric=words\|mastered\|weekly\|today` | GET | Ranked rows + the caller's own rank + `hasName`. `weekly`/`today` count words learned since Monday/local-midnight (`weekStartUTC`/`dayStartUTC`). **No profile photos exposed** (privacy, v1.30.0). |
+| `/api/leaderboard?metric=words\|mastered\|weekly\|today` | GET | Ranked rows + the caller's own rank + `hasName`. Each row carries an opaque `id` (`public_id`, never `chat_id`) for the profile drill-down. `weekly`/`today` count words learned since Monday/local-midnight (`weekStartUTC`/`dayStartUTC`). **No profile photos exposed** (privacy, v1.30.0). |
 | `/api/leaderboard/name` | POST | `{name}` → set the caller's display name (sanitised, ≤24 chars). |
+| `/api/profile?id=<publicId>` | GET | Another user's public profile, addressed by opaque `public_id` (never `chat_id`; 404 if unknown). Returns `{name, isMe, kudos:{count,gaveByMe}, heatmap, metrics:[{key,label,me,them,better}]}` — a head-to-head comparison (words/mastered/streak/quiz/active-days) from the viewer's perspective. (v1.32.0) |
+| `/api/kudos` | POST | `{id}` (opaque public id) → toggle the caller's 👏 for that user (one per pair; rejects self-kudos). Returns `{count, gaveByMe}`. On a newly-given kudos, notifies the recipient via the `Notifier` **unless they're paused (self-paced)**. (v1.32.0) |
 | `/api/review/next?limit` | GET | Due SRS cards (`DueReviews`, deduped per word). Each item carries `{term, meaning, pronunciation, persian, example}` parsed from the pooled card. (v1.30.0) |
 | `/api/review/answer` | POST | `{term, known}` → `ApplyReviewKnown`/`ApplyReviewForgot`. Also records a streak activity day (`RecordActivity`) and feeds the level-suggestion window (`RecordReviewOutcome`). |
 | `/api/review/summary` | POST | End-of-session check. Reads the rolling review-perf window (not the single batch) and, past `reviewPerfMinSample` answers + a `reviewSuggestCooldown` gap, returns `{suggest, direction, targetLevel, targetLabel, accuracy, message}` to nudge a harder/easier level (one-tap switch reuses the `/api/settings` level POST). Throttled — fires after a sustained run, never every batch. (v1.31.0) |

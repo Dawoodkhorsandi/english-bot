@@ -42,7 +42,10 @@ kept in sync with the code and **CI enforces it** (see Testing).
   header (server also accepts `?initData=`). Reuse `withUser` for any new endpoint.
 - API: `/api/config` (public: bot handle + web app URL), `/api/stats`,
   `/api/vocab`, `/api/bookmark`, `/api/leaderboard`(+`/name`; metrics
-  words/mastered/weekly/today; **no profile photos** — privacy),
+  words/mastered/weekly/today; **no profile photos** — privacy; rows carry an
+  opaque `id`), `/api/profile?id=` (head-to-head stat comparison + their heatmap)
+  and `/api/kudos` (toggle 👏; notifies the recipient unless self-paced) — both
+  address users by the opaque `public_id`, **never the `chat_id`**,
   `/api/review/next`+`/answer`+`/summary` (cards carry pronunciation/persian/example;
   `/summary` proposes a harder/easier level from the rolling review-perf window —
   throttled, fires after a sustained run, never every batch),

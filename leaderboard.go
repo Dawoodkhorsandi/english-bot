@@ -1,6 +1,12 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -20,9 +26,12 @@ const (
 	leaderboardSize = 50
 )
 
-// LeaderRow is one ranked entry.
+// LeaderRow is one ranked entry. ID is an opaque, stable public id (never the
+// raw chat_id) so the Mini App can open the user's profile without exposing
+// Telegram identities.
 type LeaderRow struct {
 	Rank  int    `json:"rank"`
+	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Value int    `json:"value"`
 	IsMe  bool   `json:"isMe"`
@@ -156,8 +165,94 @@ func (s *Store) Leaderboard(metric string, me int64) (rows []LeaderRow, myRank, 
 			name = funnyName(chatID)
 		}
 		if rank <= leaderboardSize {
-			rows = append(rows, LeaderRow{Rank: rank, Name: name, Value: value, IsMe: isMe})
+			rows = append(rows, LeaderRow{Rank: rank, ID: s.PublicID(chatID), Name: name, Value: value, IsMe: isMe})
 		}
 	}
 	return rows, myRank, myValue, qrows.Err()
+}
+
+// ---------------------------------------------------------------------------
+// Opaque public ids — addressing a user's profile without exposing chat_id.
+// ---------------------------------------------------------------------------
+
+// publicIDFor derives a stable, opaque public id for a chat from the bot token
+// (same keyed-HMAC pattern as quizTokenMAC). 16 hex chars (64 bits) — enough to
+// avoid collisions, and never reversible to the chat_id.
+func publicIDFor(chatID int64) string {
+	h1 := hmac.New(sha256.New, []byte("UserPublicId"))
+	h1.Write([]byte(TelegramBotToken))
+	key := h1.Sum(nil)
+	h2 := hmac.New(sha256.New, key)
+	fmt.Fprintf(h2, "%d", chatID)
+	return hex.EncodeToString(h2.Sum(nil))[:16]
+}
+
+// PublicID returns the chat's opaque public id, persisting it (idempotently) so
+// reverse lookups hit the indexed user_prefs.public_id column.
+func (s *Store) PublicID(chatID int64) string {
+	pid := publicIDFor(chatID)
+	_, _ = s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, public_id) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET public_id = excluded.public_id`,
+		chatID, pid,
+	)
+	return pid
+}
+
+// ChatIDByPublicID resolves an opaque public id back to its chat_id (ok=false
+// when unknown).
+func (s *Store) ChatIDByPublicID(pid string) (int64, bool) {
+	if pid == "" {
+		return 0, false
+	}
+	var chatID int64
+	if err := s.db.QueryRow("SELECT chat_id FROM user_prefs WHERE public_id = ?", pid).Scan(&chatID); err != nil {
+		return 0, false
+	}
+	return chatID, true
+}
+
+// ---------------------------------------------------------------------------
+// Kudos — one toggle per (giver, recipient) pair; profile shows total received.
+// ---------------------------------------------------------------------------
+
+// kudosCount returns how many distinct users have given kudos to a user.
+func (s *Store) kudosCount(to int64) (int, error) {
+	var n int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM kudos WHERE to_chat_id = ?", to).Scan(&n)
+	return n, err
+}
+
+// ToggleKudos flips the viewer's kudos for a target: gives one if absent, takes
+// it back if present. Returns whether kudos is now given and the new total.
+func (s *Store) ToggleKudos(from, to int64) (gave bool, count int, err error) {
+	if from == to {
+		return false, 0, nil
+	}
+	var x int
+	err = s.db.QueryRow("SELECT 1 FROM kudos WHERE from_chat_id = ? AND to_chat_id = ?", from, to).Scan(&x)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		_, err = s.db.Exec("INSERT INTO kudos (from_chat_id, to_chat_id) VALUES (?, ?)", from, to)
+		gave = true
+	case err == nil:
+		_, err = s.db.Exec("DELETE FROM kudos WHERE from_chat_id = ? AND to_chat_id = ?", from, to)
+		gave = false
+	}
+	if err != nil {
+		return gave, 0, err
+	}
+	count, err = s.kudosCount(to)
+	return gave, count, err
+}
+
+// KudosFor returns the target's total kudos and whether the viewer has given one.
+func (s *Store) KudosFor(viewer, target int64) (count int, gaveByMe bool, err error) {
+	count, err = s.kudosCount(target)
+	if err != nil {
+		return 0, false, err
+	}
+	var x int
+	gaveByMe = s.db.QueryRow("SELECT 1 FROM kudos WHERE from_chat_id = ? AND to_chat_id = ?", viewer, target).Scan(&x) == nil
+	return count, gaveByMe, nil
 }
