@@ -386,6 +386,11 @@ var Changelogs = []ChangelogEntry{
 			"After a sustained run of reviews — not every batch — the Review tab may suggest a harder/easier level with a " +
 			"one-tap switch. The Stats activity section gains headline numbers and a per-week bar plot.",
 	},
+	{
+		Version: "1.31.1",
+		Silent:  true,
+		Text:    "Mini App fix: the Grammar section no longer shows its heading twice (the static wrapper title duplicated the one rendered by the list/lesson view).",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
