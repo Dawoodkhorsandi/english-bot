@@ -144,6 +144,15 @@ func (s *Store) Leaderboard(metric string, me int64) (rows []LeaderRow, myRank, 
 	}
 	defer qrows.Close()
 
+	// Collect raw rows first. We must NOT write to the DB (PublicID persists the
+	// public_id) while this read cursor is open — SQLite rejects a write mid-read,
+	// which silently left public_id empty and broke every profile lookup.
+	type rawRow struct {
+		chatID int64
+		value  int
+		name   string
+	}
+	var raw []rawRow
 	rank := 0
 	for qrows.Next() {
 		var (
@@ -155,8 +164,7 @@ func (s *Store) Leaderboard(metric string, me int64) (rows []LeaderRow, myRank, 
 			return nil, 0, 0, err
 		}
 		rank++
-		isMe := chatID == me
-		if isMe {
+		if chatID == me {
 			myRank = rank
 			myValue = value
 		}
@@ -165,10 +173,24 @@ func (s *Store) Leaderboard(metric string, me int64) (rows []LeaderRow, myRank, 
 			name = funnyName(chatID)
 		}
 		if rank <= leaderboardSize {
-			rows = append(rows, LeaderRow{Rank: rank, ID: s.PublicID(chatID), Name: name, Value: value, IsMe: isMe})
+			raw = append(raw, rawRow{chatID: chatID, value: value, name: name})
 		}
 	}
-	return rows, myRank, myValue, qrows.Err()
+	if err := qrows.Err(); err != nil {
+		return nil, 0, 0, err
+	}
+	qrows.Close() // close the read cursor before any writes (PublicID persists)
+
+	for i, rr := range raw {
+		rows = append(rows, LeaderRow{
+			Rank:  i + 1,
+			ID:    s.PublicID(rr.chatID),
+			Name:  rr.name,
+			Value: rr.value,
+			IsMe:  rr.chatID == me,
+		})
+	}
+	return rows, myRank, myValue, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -187,29 +209,47 @@ func publicIDFor(chatID int64) string {
 	return hex.EncodeToString(h2.Sum(nil))[:16]
 }
 
-// PublicID returns the chat's opaque public id, persisting it (idempotently) so
-// reverse lookups hit the indexed user_prefs.public_id column.
-func (s *Store) PublicID(chatID int64) string {
-	pid := publicIDFor(chatID)
+// storePublicID persists a chat's public_id (idempotent) so reverse lookups hit
+// the indexed column. Must not be called while a read cursor is open.
+func (s *Store) storePublicID(chatID int64, pid string) {
 	_, _ = s.db.Exec(`
 		INSERT INTO user_prefs (chat_id, public_id) VALUES (?, ?)
 		ON CONFLICT(chat_id) DO UPDATE SET public_id = excluded.public_id`,
 		chatID, pid,
 	)
+}
+
+// PublicID returns the chat's opaque public id, persisting it (idempotently) so
+// reverse lookups hit the indexed user_prefs.public_id column.
+func (s *Store) PublicID(chatID int64) string {
+	pid := publicIDFor(chatID)
+	s.storePublicID(chatID, pid)
 	return pid
 }
 
 // ChatIDByPublicID resolves an opaque public id back to its chat_id (ok=false
-// when unknown).
+// when unknown). Public ids are deterministic, so if the indexed column hasn't
+// been backfilled yet (legacy rows) we recompute over known chats and self-heal.
 func (s *Store) ChatIDByPublicID(pid string) (int64, bool) {
 	if pid == "" {
 		return 0, false
 	}
 	var chatID int64
-	if err := s.db.QueryRow("SELECT chat_id FROM user_prefs WHERE public_id = ?", pid).Scan(&chatID); err != nil {
+	if err := s.db.QueryRow("SELECT chat_id FROM user_prefs WHERE public_id = ?", pid).Scan(&chatID); err == nil {
+		return chatID, true
+	}
+	// Fallback: recompute the deterministic id for each known subscriber.
+	ids, err := s.Subscribers()
+	if err != nil {
 		return 0, false
 	}
-	return chatID, true
+	for _, id := range ids {
+		if publicIDFor(id) == pid {
+			s.storePublicID(id, pid) // backfill so next time the index hits
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 // ---------------------------------------------------------------------------

@@ -396,6 +396,11 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Mini App: leaderboard rows are now tappable and open a user profile — a head-to-head comparison of your stats vs theirs (words, mastered, streak, quiz accuracy, active days) plus their activity heatmap. You can also give 👏 kudos to other learners; recipients are notified unless they're in self-paced mode. Profiles use an opaque public id, never a Telegram identity.",
 	},
+	{
+		Version: "1.32.1",
+		Silent:  true,
+		Text:    "Fix: profile pages failed to load (\"Could not load this profile\") because each user's opaque public id was never persisted — the leaderboard tried to write it while its own result cursor was still open, which SQLite rejects. Public ids are now stored after the read completes, with a deterministic self-healing fallback for already-affected users.",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
