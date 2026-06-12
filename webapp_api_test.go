@@ -1120,3 +1120,30 @@ func TestAPIKudosNotify(t *testing.T) {
 		t.Errorf("paused recipient kudos count = %d, want 1", c)
 	}
 }
+
+// TestLeaderboardIDsResolve is a regression test for the "Could not load this
+// profile" bug: every leaderboard row's opaque id must resolve back to a chat_id
+// (previously PublicID's write was swallowed mid-read so public_id stayed empty).
+func TestLeaderboardIDsResolve(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	for _, id := range []int64{11, 22, 33} {
+		store.RecordSentVocab(id, "alpha")
+		store.RecordSentVocab(id, "beta")
+	}
+	rows, _, _, err := store.Leaderboard("words", 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no leaderboard rows")
+	}
+	for _, r := range rows {
+		if r.ID == "" {
+			t.Fatalf("row %q has empty id", r.Name)
+		}
+		if _, ok := store.ChatIDByPublicID(r.ID); !ok {
+			t.Errorf("row id %q did not resolve back to a chat_id", r.ID)
+		}
+	}
+}
