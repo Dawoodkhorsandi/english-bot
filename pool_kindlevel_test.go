@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // TestConfigCallbackPerKindLevelPool exercises setting and clearing a per-(kind,level)
@@ -19,10 +20,10 @@ func TestConfigCallbackPerKindLevelPool(t *testing.T) {
 	config.PoolTarget, config.PoolMin = 300, 100
 
 	set := func(data string) {
-		handleCallback(store, mock, &TelegramCallbackQuery{
+		handleCallback(store, mock, &telegram.CallbackQuery{
 			ID:      "cb",
-			From:    &TelegramUser{ID: 300},
-			Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+			From:    &telegram.User{ID: 300},
+			Message: &telegram.Message{MessageID: 10, Chat: telegram.Chat{ID: 300}},
 			Data:    data,
 		})
 	}
@@ -137,8 +138,8 @@ func TestHandleMessageAdminHelpGated(t *testing.T) {
 	config.MaintainerChatID = "999"
 
 	// Non-maintainer is refused.
-	handleMessage(context.Background(), emptyProviderChain(), store, mock, &TelegramMessage{
-		MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/admin", From: &TelegramUser{ID: 100},
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, &telegram.Message{
+		MessageID: 1, Chat: telegram.Chat{ID: 100}, Text: "/admin", From: &telegram.User{ID: 100},
 	})
 	if len(mock.sentTexts()) == 0 || !strings.Contains(mock.sentTexts()[0], "maintainer") {
 		t.Fatalf("expected maintainer-only refusal, got %v", mock.sentTexts())

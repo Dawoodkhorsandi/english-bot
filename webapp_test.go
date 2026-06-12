@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // saveWebAppURL snapshots the WEB_APP_URL global and restores it after the test
@@ -22,12 +23,12 @@ func saveWebAppURL(t *testing.T) {
 func TestStatsButtonRequiresWebAppURL(t *testing.T) {
 	saveWebAppURL(t)
 
-	newStatsMsg := func() *TelegramMessage {
-		return &TelegramMessage{
+	newStatsMsg := func() *telegram.Message {
+		return &telegram.Message{
 			MessageID: 1,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 			Text:      "/stats",
-			From:      &TelegramUser{ID: 100, Username: "testuser"},
+			From:      &telegram.User{ID: 100, Username: "testuser"},
 		}
 	}
 

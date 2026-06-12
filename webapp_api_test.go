@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // ---------------------------------------------------------------------------
@@ -1073,7 +1074,7 @@ func TestAPIProfileComparison(t *testing.T) {
 }
 
 // kudosCall invokes the notifier-wrapped kudos handler with a mock notifier.
-func kudosCall(store *Store, notifier Notifier, chatID int64, body string) *httptest.ResponseRecorder {
+func kudosCall(store *Store, notifier telegram.Notifier, chatID int64, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, "/api/kudos", strings.NewReader(body))
 	r.Header.Set("X-Init-Data", signInitData(chatID, time.Now()))
 	w := httptest.NewRecorder()

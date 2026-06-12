@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // ---------------------------------------------------------------------------
@@ -352,14 +353,14 @@ func makeQuiz(store *Store, chatID int64, now time.Time, rng *rand.Rand) (quizQu
 // quizKeyboard renders one option per row; the correct option carries a "c" tag
 // in its callback data, wrong ones an "x". All buttons record against the same
 // subject word so a tap always grades that word.
-func quizKeyboard(q quizQuestion) [][]inlineButton {
-	rows := make([][]inlineButton, 0, len(q.options))
+func quizKeyboard(q quizQuestion) [][]telegram.InlineButton {
+	rows := make([][]telegram.InlineButton, 0, len(q.options))
 	for i, opt := range q.options {
 		cx := "x"
 		if i == q.correctIdx {
 			cx = "c"
 		}
-		rows = append(rows, []inlineButton{{Text: opt, CallbackData: "quiz:" + cx + ":" + q.word}})
+		rows = append(rows, []telegram.InlineButton{{Text: opt, CallbackData: "quiz:" + cx + ":" + q.word}})
 	}
 	return rows
 }
@@ -502,7 +503,7 @@ func popPendingPoll(pollID string) (pendingQuizPoll, bool) {
 
 // sendQuizAsPoll delivers q using Telegram's native quiz poll UI.
 // Falls back to inline keyboard if SendPoll fails.
-func sendQuizAsPoll(store *Store, notifier Notifier, chatID int64, q quizQuestion) {
+func sendQuizAsPoll(store *Store, notifier telegram.Notifier, chatID int64, q quizQuestion) {
 	meaning := store.MeaningForWord(q.word)
 	explanation := q.word
 	if meaning != "" {
@@ -519,7 +520,7 @@ func sendQuizAsPoll(store *Store, notifier Notifier, chatID int64, q quizQuestio
 }
 
 // handleQuizPollAnswer grades a poll_answer update from Telegram.
-func handleQuizPollAnswer(store *Store, pa *TelegramPollAnswer) {
+func handleQuizPollAnswer(store *Store, pa *telegram.PollAnswer) {
 	p, ok := popPendingPoll(pa.PollID)
 	if !ok {
 		return
@@ -538,7 +539,7 @@ func handleQuizPollAnswer(store *Store, pa *TelegramPollAnswer) {
 }
 
 // handleQuiz sends one quiz question on demand (/quiz).
-func handleQuiz(store *Store, notifier Notifier, chatID int64) {
+func handleQuiz(store *Store, notifier telegram.Notifier, chatID int64) {
 	q, ok, err := makeQuiz(store, chatID, time.Now(), newRand())
 	if err != nil {
 		log.Printf("❌ [QUIZ] Could not build quiz for chat %d: %v", chatID, err)
@@ -555,7 +556,7 @@ func handleQuiz(store *Store, notifier Notifier, chatID int64) {
 // handleQuizCallback grades a quiz answer tap (Change E). Callback data is of the
 // form "quiz:c:<word>" (correct) or "quiz:x:<word>" (wrong); the result is
 // recorded and fed into the spaced-repetition schedule.
-func handleQuizCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+func handleQuizCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery, chatID int64) {
 	rest := strings.TrimPrefix(cb.Data, "quiz:")
 	cx, word, found := strings.Cut(rest, ":")
 	if !found || word == "" {
@@ -593,7 +594,7 @@ func handleQuizCallback(store *Store, notifier Notifier, cb *TelegramCallbackQue
 
 	_ = notifier.AnswerCallback(cb.ID, toast)
 	if cb.Message != nil {
-		_ = notifier.EditMessage(chatID, cb.Message.MessageID, reveal, [][]inlineButton{})
+		_ = notifier.EditMessage(chatID, cb.Message.MessageID, reveal, [][]telegram.InlineButton{})
 	}
 }
 
@@ -626,7 +627,7 @@ func quizDueForUser(t time.Time, intervalHours int) bool {
 // runQuizScheduler ticks once per hour (wall-clock aligned) and delivers a quiz
 // to each eligible user whose per-user quiz interval is due this hour.
 // Disabled globally when QUIZ_INTERVAL <= 0 (admin kill-switch).
-func runQuizScheduler(ctx context.Context, store *Store, notifier Notifier) {
+func runQuizScheduler(ctx context.Context, store *Store, notifier telegram.Notifier) {
 	if config.QuizInterval <= 0 {
 		log.Println("🧩 [QUIZ] Quiz scheduler disabled (QUIZ_INTERVAL <= 0).")
 		return
@@ -650,7 +651,7 @@ func runQuizScheduler(ctx context.Context, store *Store, notifier Notifier) {
 
 // runQuizSweep sends a quiz to every eligible subscriber whose per-user quiz
 // interval aligns with the current hour.
-func runQuizSweep(store *Store, notifier Notifier, now time.Time) {
+func runQuizSweep(store *Store, notifier telegram.Notifier, now time.Time) {
 	if isQuietHours(now) {
 		return
 	}

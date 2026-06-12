@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // truncate shortens s to at most n bytes, appending an ellipsis when cut. Used
@@ -36,7 +37,7 @@ var ttsHTTPClient = &http.Client{Timeout: 45 * time.Second}
 // (best-effort) a pronunciation voice note as a reply to that card.
 // term is the known vocabulary term; when non-empty it is used for the bookmark
 // button so the button still appears even on legacy cards where parseWord fails.
-func sendWordCardWithTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card, term string) error {
+func sendWordCardWithTTS(ctx context.Context, store *Store, notifier telegram.Notifier, chatID int64, card, term string) error {
 	msgID, err := notifier.SendWithMessageID(chatID, card)
 	if err != nil {
 		return err
@@ -56,7 +57,7 @@ func sendWordCardWithTTS(ctx context.Context, store *Store, notifier Notifier, c
 
 // sendCardWithTTS sends a phrase card (idiom or collocation) and then
 // (best-effort) a pronunciation voice note as a reply to that card.
-func sendCardWithTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string) error {
+func sendCardWithTTS(ctx context.Context, store *Store, notifier telegram.Notifier, chatID int64, card string) error {
 	msgID, err := notifier.SendWithMessageID(chatID, card)
 	if err != nil {
 		return err
@@ -81,7 +82,7 @@ func extractTTSTerm(card string) string {
 // Any error is logged and swallowed so card delivery is never blocked.
 // Generated audio is cached by word in audio_cache so subsequent sends for the
 // same word reuse the Telegram file_id (zero-cost re-send).
-func maybeSendTTS(ctx context.Context, store *Store, notifier Notifier, chatID int64, card string, replyToMessageID int64) {
+func maybeSendTTS(ctx context.Context, store *Store, notifier telegram.Notifier, chatID int64, card string, replyToMessageID int64) {
 	if !config.TTSEnabled || isQuietHours(time.Now()) || store.IsPaused(chatID) || !store.GetTTSEnabled(chatID) {
 		return
 	}

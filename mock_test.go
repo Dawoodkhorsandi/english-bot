@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
-// mockNotifier implements the Notifier interface for tests, capturing all calls
+// mockNotifier implements the telegram.Notifier interface for tests, capturing all calls
 // so assertions can inspect what was sent.
 type mockNotifier struct {
 	mu       sync.Mutex
@@ -29,7 +30,7 @@ type sentMsg struct {
 type sentKeyboard struct {
 	chatID   int64
 	text     string
-	keyboard [][]inlineButton
+	keyboard [][]telegram.InlineButton
 }
 
 type sentVoice struct {
@@ -50,7 +51,7 @@ type sentEdit struct {
 	chatID    int64
 	messageID int64
 	text      string
-	keyboard  [][]inlineButton
+	keyboard  [][]telegram.InlineButton
 }
 
 type sentAnswer struct {
@@ -106,14 +107,14 @@ func (m *mockNotifier) SendDocument(chatID int64, doc []byte, filename, caption 
 	return nil
 }
 
-func (m *mockNotifier) SendKeyboard(chatID int64, text string, kb [][]inlineButton) error {
+func (m *mockNotifier) SendKeyboard(chatID int64, text string, kb [][]telegram.InlineButton) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.keyboard = append(m.keyboard, sentKeyboard{chatID, text, kb})
 	return nil
 }
 
-func (m *mockNotifier) EditMessage(chatID, messageID int64, text string, kb [][]inlineButton) error {
+func (m *mockNotifier) EditMessage(chatID, messageID int64, text string, kb [][]telegram.InlineButton) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.edits = append(m.edits, sentEdit{chatID, messageID, text, kb})

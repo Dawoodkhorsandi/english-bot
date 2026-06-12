@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@ func TestHandleMessageCollocation(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddToPool(config.KindCollocation, config.DefaultLevel, "make a decision", "to choose", "collocation card text")
 
-	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/collocation"}
+	msg := &telegram.Message{MessageID: 1, Chat: telegram.Chat{ID: 100}, Text: "/collocation"}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
 
 	texts := mock.sentTexts()
@@ -113,7 +114,7 @@ func TestHandleMessageStory(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddToPool(config.KindStory, config.DefaultLevel, "the lost ticket", "", "mini story text")
 
-	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/story"}
+	msg := &telegram.Message{MessageID: 1, Chat: telegram.Chat{ID: 100}, Text: "/story"}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
 
 	texts := mock.sentTexts()
@@ -377,10 +378,10 @@ func TestSettingsToggleCollocationAndStoryCallbacks(t *testing.T) {
 	mock := &mockNotifier{}
 
 	for _, key := range []string{"collocation", "story"} {
-		cb := &TelegramCallbackQuery{
+		cb := &telegram.CallbackQuery{
 			ID:      "cb-" + key,
 			Data:    "settings:toggle:" + key,
-			Message: &TelegramMessage{MessageID: 7, Chat: TelegramChat{ID: 100}},
+			Message: &telegram.Message{MessageID: 7, Chat: telegram.Chat{ID: 100}},
 		}
 		handleCallback(store, mock, cb)
 	}

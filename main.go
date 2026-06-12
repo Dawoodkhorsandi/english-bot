@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,10 +19,9 @@ import (
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 	_ "modernc.org/sqlite"
 )
-
-var telegramHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 const (
 	dbFile       = "subscribers.db"
@@ -414,56 +411,6 @@ type Store struct {
 	db *sql.DB
 }
 
-type TelegramUpdate struct {
-	UpdateID      int64                  `json:"update_id"`
-	Message       *TelegramMessage       `json:"message"`
-	CallbackQuery *TelegramCallbackQuery `json:"callback_query"`
-	PollAnswer    *TelegramPollAnswer    `json:"poll_answer"`
-}
-
-type TelegramMessage struct {
-	MessageID int64         `json:"message_id"`
-	Chat      TelegramChat  `json:"chat"`
-	Text      string        `json:"text"`
-	From      *TelegramUser `json:"from"`
-}
-
-// TelegramCallbackQuery represents a tap on an inline-keyboard button.
-type TelegramCallbackQuery struct {
-	ID      string           `json:"id"`
-	From    *TelegramUser    `json:"from"`
-	Message *TelegramMessage `json:"message"`
-	Data    string           `json:"data"`
-}
-
-type TelegramChat struct {
-	ID int64 `json:"id"`
-}
-
-type TelegramUser struct {
-	ID        int64  `json:"id"`
-	Username  string `json:"username"`
-	FirstName string `json:"first_name"`
-}
-
-// TelegramPollAnswer is sent when a user answers a native Telegram poll.
-type TelegramPollAnswer struct {
-	PollID    string        `json:"poll_id"`
-	User      *TelegramUser `json:"user"`
-	OptionIDs []int         `json:"option_ids"`
-}
-
-// inlineButton is one button in an inline keyboard.
-type inlineButton struct {
-	Text         string      `json:"text"`
-	CallbackData string      `json:"callback_data,omitempty"`
-	WebApp       *webAppInfo `json:"web_app,omitempty"`
-}
-
-type webAppInfo struct {
-	URL string `json:"url"`
-}
-
 func main() {
 	log.Println("⚙️  [INIT] Initializing Telegram English Muscle Memory Bot...")
 
@@ -495,7 +442,7 @@ func main() {
 		log.Printf("⚠️  [DECKS] Seeding failed: %v", err)
 	}
 
-	notifier := &telegramNotifier{}
+	notifier := telegram.NewNotifier()
 
 	// Start the optional Mini App web server (requires WEB_APP_URL to be set).
 	// When WEB_APP_URL is empty the server never starts, so nothing listens on
@@ -554,7 +501,7 @@ func main() {
 	log.Printf("🛑 [SYSTEM] Shutdown intercept caught OS Signal: %v. Cleaning tasks...", sig)
 }
 
-func pollTelegramUpdates(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier) {
+func pollTelegramUpdates(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier) {
 	var offset int64 = 0
 	client := &http.Client{Timeout: 35 * time.Second}
 
@@ -586,9 +533,9 @@ func pollTelegramUpdates(ctx context.Context, chain *ai.ProviderChain, store *St
 			resp.Body.Close()
 
 			var updateResp struct {
-				Ok          bool             `json:"ok"`
-				Description string           `json:"description"`
-				Result      []TelegramUpdate `json:"result"`
+				Ok          bool              `json:"ok"`
+				Description string            `json:"description"`
+				Result      []telegram.Update `json:"result"`
 			}
 
 			if err := json.Unmarshal(body, &updateResp); err != nil {
@@ -628,7 +575,7 @@ func pollTelegramUpdates(ctx context.Context, chain *ai.ProviderChain, store *St
 	}
 }
 
-func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, msg *TelegramMessage) {
+func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, msg *telegram.Message) {
 	if msg.Text == "" {
 		log.Printf("ℹ️  [ROUTER] Ignoring empty message ID %d.", msg.MessageID)
 		return
@@ -885,9 +832,9 @@ func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, n
 			return
 		}
 		if config.WebAppURL != "" {
-			kb := [][]inlineButton{{{
+			kb := [][]telegram.InlineButton{{{
 				Text:   "📊 Full Dashboard",
-				WebApp: &webAppInfo{URL: config.WebAppURL + "/stats"},
+				WebApp: &telegram.WebAppInfo{URL: config.WebAppURL + "/stats"},
 			}}}
 			_ = notifier.SendKeyboard(chatID, formatStats(stats, firstName), kb)
 		} else {
@@ -899,9 +846,9 @@ func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, n
 			_ = notifier.Send(chatID, "📱 The in-app experience isn't available right now. You can still use all features here in the chat.")
 			return
 		}
-		kb := [][]inlineButton{{{
+		kb := [][]telegram.InlineButton{{{
 			Text:   "📱 Open the app",
-			WebApp: &webAppInfo{URL: config.WebAppURL},
+			WebApp: &telegram.WebAppInfo{URL: config.WebAppURL},
 		}}}
 		_ = notifier.SendKeyboard(chatID,
 			"📱 <b>Your English hub</b>\n\nProgress, your word list and more — all in one place. Tap below to open it.",
@@ -1039,7 +986,7 @@ func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, n
 
 // handleLevel handles the /level command. With a valid argument it sets the
 // level directly; otherwise it shows the current level with inline buttons.
-func handleLevel(store *Store, notifier Notifier, chatID int64, args []string) {
+func handleLevel(store *Store, notifier telegram.Notifier, chatID int64, args []string) {
 	current := store.GetLevel(chatID)
 
 	if len(args) > 0 {
@@ -1071,7 +1018,7 @@ func handleLevel(store *Store, notifier Notifier, chatID int64, args []string) {
 // handleWordLookup treats a plain (non-command) message as a vocabulary lookup
 // (Change M): it generates a /word-style card for the user-supplied term at their
 // level, translating from another language when needed, then pools and records it.
-func handleWordLookup(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, chatID int64, text string) {
+func handleWordLookup(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, chatID int64, text string) {
 	term := strings.TrimSpace(text)
 	fields := strings.Fields(term)
 	if len(fields) == 0 {
@@ -1132,7 +1079,7 @@ func maintainerID() (int64, bool) {
 }
 
 // handleMetrics sends an operational summary to the maintainer (/metrics).
-func handleMetrics(store *Store, chain *ai.ProviderChain, notifier Notifier, chatID int64) {
+func handleMetrics(store *Store, chain *ai.ProviderChain, notifier telegram.Notifier, chatID int64) {
 	log.Printf("📊 [ADMIN] /metrics requested by ChatID %d.", chatID)
 
 	var b strings.Builder
@@ -1183,7 +1130,7 @@ func handleMetrics(store *Store, chain *ai.ProviderChain, notifier Notifier, cha
 // right now, the target is the configured size (raised via /config). When depth is
 // below target the background filler is still generating, so a high percentage of a
 // not-yet-full pool is expected and self-resolves as the pool grows.
-func handlePoolUsage(store *Store, notifier Notifier, chatID int64) {
+func handlePoolUsage(store *Store, notifier telegram.Notifier, chatID int64) {
 	log.Printf("📈 [ADMIN] /poolusage requested by ChatID %d.", chatID)
 
 	var b strings.Builder
@@ -1230,7 +1177,7 @@ func handlePoolUsage(store *Store, notifier Notifier, chatID int64) {
 // handleAdminHelp lists every maintainer-only command so the admin doesn't have to
 // remember them (they're intentionally hidden from the public /help and the Telegram
 // command menu). Sent only to the maintainer.
-func handleAdminHelp(notifier Notifier, chatID int64) {
+func handleAdminHelp(notifier telegram.Notifier, chatID int64) {
 	log.Printf("🛠️  [ADMIN] /admin help requested by ChatID %d.", chatID)
 
 	var b strings.Builder
@@ -1249,7 +1196,7 @@ func handleAdminHelp(notifier Notifier, chatID int64) {
 }
 
 // handleAnnounce broadcasts an HTML message to all non-paused subscribers (/announce).
-func handleAnnounce(store *Store, notifier Notifier, chatID int64, text string) {
+func handleAnnounce(store *Store, notifier telegram.Notifier, chatID int64, text string) {
 	if text == "" {
 		_ = notifier.Send(chatID, "Usage: <code>/announce &lt;HTML message&gt;</code>")
 		return
@@ -1279,7 +1226,7 @@ func handleAnnounce(store *Store, notifier Notifier, chatID int64, text string) 
 }
 
 // handleHealth sends a quick system health check to the maintainer (/health).
-func handleHealth(store *Store, chain *ai.ProviderChain, notifier Notifier, chatID int64) {
+func handleHealth(store *Store, chain *ai.ProviderChain, notifier telegram.Notifier, chatID int64) {
 	log.Printf("🏥 [ADMIN] /health requested by ChatID %d.", chatID)
 
 	var b strings.Builder
@@ -1309,7 +1256,7 @@ func handleHealth(store *Store, chain *ai.ProviderChain, notifier Notifier, chat
 }
 
 // handleBackup creates a point-in-time SQLite backup and sends it to the maintainer.
-func handleBackup(store *Store, notifier Notifier, chatID int64) {
+func handleBackup(store *Store, notifier telegram.Notifier, chatID int64) {
 	log.Printf("🗄️  [ADMIN] /backup requested by ChatID %d.", chatID)
 	if err := sendMaintainerDBBackup(store, notifier, "manual /backup"); err != nil {
 		log.Printf("❌ [BACKUP] Manual backup failed: %v", err)
@@ -1321,7 +1268,7 @@ func handleBackup(store *Store, notifier Notifier, chatID int64) {
 // handleAdminConfig lets the maintainer tweak selected runtime settings via an
 // interactive inline-keyboard panel. All changes are persisted in bot_config
 // and survive restarts.
-func handleAdminConfig(store *Store, notifier Notifier, chatID int64) {
+func handleAdminConfig(store *Store, notifier telegram.Notifier, chatID int64) {
 	log.Printf("⚙️  [ADMIN] /config requested by ChatID %d.", chatID)
 	if err := notifier.SendKeyboard(chatID, configText(), configKeyboard()); err != nil {
 		log.Printf("❌ [CONFIG] Could not send config panel to ChatID %d: %v", chatID, err)
@@ -1354,12 +1301,12 @@ func configText() string {
 }
 
 // configKeyboard builds the admin config panel inline keyboard.
-func configKeyboard() [][]inlineButton {
+func configKeyboard() [][]telegram.InlineButton {
 	ttsLabel := "🔊 Global TTS: ON"
 	if !config.TTSEnabled {
 		ttsLabel = "🔊 Global TTS: OFF"
 	}
-	return [][]inlineButton{
+	return [][]telegram.InlineButton{
 		{
 			{Text: fmt.Sprintf("📦 Pool target: %d", config.PoolTarget), CallbackData: "cfg:goto:pool_target"},
 			{Text: fmt.Sprintf("📦 Pool min: %d", config.PoolMin), CallbackData: "cfg:goto:pool_min"},
@@ -1386,16 +1333,16 @@ func configKeyboard() [][]inlineButton {
 }
 
 // configPoolTargetKeyboard builds the pool target selection sub-keyboard.
-func configPoolTargetKeyboard() [][]inlineButton {
+func configPoolTargetKeyboard() [][]telegram.InlineButton {
 	presets := []int{200, 300, 400, 500, 600, 800, 1000, 1500}
-	var rows [][]inlineButton
-	var row []inlineButton
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, v := range presets {
 		label := fmt.Sprintf("%d", v)
 		if v == config.PoolTarget {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:pool_target:%d", v)})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:pool_target:%d", v)})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -1404,21 +1351,21 @@ func configPoolTargetKeyboard() [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
 	return rows
 }
 
 // configPoolMinKeyboard builds the pool min selection sub-keyboard.
-func configPoolMinKeyboard() [][]inlineButton {
+func configPoolMinKeyboard() [][]telegram.InlineButton {
 	presets := []int{100, 150, 200, 300, 400, 500}
-	var rows [][]inlineButton
-	var row []inlineButton
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, v := range presets {
 		label := fmt.Sprintf("%d", v)
 		if v == config.PoolMin {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:pool_min:%d", v)})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:pool_min:%d", v)})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -1427,21 +1374,21 @@ func configPoolMinKeyboard() [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
 	return rows
 }
 
 // configQuietStartKeyboard builds the quiet-hours start time sub-keyboard.
-func configQuietStartKeyboard() [][]inlineButton {
+func configQuietStartKeyboard() [][]telegram.InlineButton {
 	presets := []string{"21:00", "22:00", "23:00", "00:00", "01:00", "02:00"}
-	var rows [][]inlineButton
-	var row []inlineButton
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, v := range presets {
 		label := v
 		if v == config.QuietStart {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: "cfg:quiet_start:" + v})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: "cfg:quiet_start:" + v})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -1450,21 +1397,21 @@ func configQuietStartKeyboard() [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
 	return rows
 }
 
 // configQuietEndKeyboard builds the quiet-hours end time sub-keyboard.
-func configQuietEndKeyboard() [][]inlineButton {
+func configQuietEndKeyboard() [][]telegram.InlineButton {
 	presets := []string{"06:00", "07:00", "08:00", "09:00", "10:00", "11:00"}
-	var rows [][]inlineButton
-	var row []inlineButton
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, v := range presets {
 		label := v
 		if v == config.QuietEnd {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: "cfg:quiet_end:" + v})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: "cfg:quiet_end:" + v})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -1473,24 +1420,24 @@ func configQuietEndKeyboard() [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
 	return rows
 }
 
 // configGenSpacingKeyboard builds the generation spacing sub-keyboard.
-func configGenSpacingKeyboard() [][]inlineButton {
+func configGenSpacingKeyboard() [][]telegram.InlineButton {
 	presets := []time.Duration{
 		1 * time.Second, 2 * time.Second, 3 * time.Second,
 		5 * time.Second, 8 * time.Second, 10 * time.Second,
 	}
-	var rows [][]inlineButton
-	var row []inlineButton
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, v := range presets {
 		label := v.String()
 		if v == config.GenSpacing {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: "cfg:gen_spacing:" + v.String()})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: "cfg:gen_spacing:" + v.String()})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -1499,22 +1446,22 @@ func configGenSpacingKeyboard() [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
 	return rows
 }
 
 // configReviewBatchKeyboard builds the review batch max sub-keyboard.
-func configReviewBatchKeyboard() [][]inlineButton {
+func configReviewBatchKeyboard() [][]telegram.InlineButton {
 	presets := []int{1, 2, 3, 5}
-	var row []inlineButton
+	var row []telegram.InlineButton
 	for _, v := range presets {
 		label := fmt.Sprintf("%d", v)
 		if v == config.ReviewBatchMax {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:review_batch:%d", v)})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:review_batch:%d", v)})
 	}
-	return [][]inlineButton{
+	return [][]telegram.InlineButton{
 		row,
 		{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}},
 	}
@@ -1531,12 +1478,12 @@ func poolOverrideLabel(v int, ok bool) string {
 
 // configPoolKindsKeyboard lists every configurable content kind with its current
 // per-kind pool override (or "default"), each opening a value picker.
-func configPoolKindsKeyboard() [][]inlineButton {
-	var rows [][]inlineButton
-	var row []inlineButton
+func configPoolKindsKeyboard() [][]telegram.InlineButton {
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, k := range config.ConfigurableKinds {
 		v, ok := config.PoolKindOverride(k)
-		row = append(row, inlineButton{
+		row = append(row, telegram.InlineButton{
 			Text:         fmt.Sprintf("%s: %s", k, poolOverrideLabel(v, ok)),
 			CallbackData: "cfg:goto:pk:" + k,
 		})
@@ -1548,18 +1495,18 @@ func configPoolKindsKeyboard() [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
 	return rows
 }
 
 // configPoolLevelsKeyboard lists every difficulty level with its current per-level
 // pool override (or "default"), each opening a value picker.
-func configPoolLevelsKeyboard() [][]inlineButton {
-	var rows [][]inlineButton
-	var row []inlineButton
+func configPoolLevelsKeyboard() [][]telegram.InlineButton {
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, l := range config.AllLevels {
 		v, ok := config.PoolLevelOverride(l)
-		row = append(row, inlineButton{
+		row = append(row, telegram.InlineButton{
 			Text:         fmt.Sprintf("%s: %s", levelLabel(l), poolOverrideLabel(v, ok)),
 			CallbackData: "cfg:goto:pl:" + l,
 		})
@@ -1571,21 +1518,21 @@ func configPoolLevelsKeyboard() [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
 	return rows
 }
 
 // configPoolKLKindsKeyboard lists the level-aware content kinds for the per
 // kind+level override flow (tips are excluded — they aren't level-partitioned).
 // Tapping a kind opens its per-level picker.
-func configPoolKLKindsKeyboard() [][]inlineButton {
-	var rows [][]inlineButton
-	var row []inlineButton
+func configPoolKLKindsKeyboard() [][]telegram.InlineButton {
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, k := range config.ConfigurableKinds {
 		if k == config.KindTip {
 			continue // tips have a single, level-independent pool
 		}
-		row = append(row, inlineButton{
+		row = append(row, telegram.InlineButton{
 			Text:         k,
 			CallbackData: "cfg:goto:klk:" + k,
 		})
@@ -1597,19 +1544,19 @@ func configPoolKLKindsKeyboard() [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back to Config", CallbackData: "cfg:show"}})
 	return rows
 }
 
 // configPoolKLLevelsKeyboard lists every difficulty level for a chosen kind, each
 // showing its current per-(kind,level) override (or "default"), and opening a value
 // picker for that exact pool (e.g. "upper-intermediate words").
-func configPoolKLLevelsKeyboard(kind string) [][]inlineButton {
-	var rows [][]inlineButton
-	var row []inlineButton
+func configPoolKLLevelsKeyboard(kind string) [][]telegram.InlineButton {
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, l := range config.AllLevels {
 		v, ok := config.PoolKindLevelOverride(kind, l)
-		row = append(row, inlineButton{
+		row = append(row, telegram.InlineButton{
 			Text:         fmt.Sprintf("%s: %s", levelLabel(l), poolOverrideLabel(v, ok)),
 			CallbackData: "cfg:goto:klv:" + kind + ":" + l,
 		})
@@ -1621,30 +1568,30 @@ func configPoolKLLevelsKeyboard(kind string) [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back", CallbackData: "cfg:goto:pool_kl"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back", CallbackData: "cfg:goto:pool_kl"}})
 	return rows
 }
 
 // configPoolKLValueKeyboard builds the value picker for a specific (kind, level)
 // pool. The first button clears the override; the rest are preset targets. Back
 // returns to that kind's level picker.
-func configPoolKLValueKeyboard(kind, level string, current int, hasOverride bool) [][]inlineButton {
+func configPoolKLValueKeyboard(kind, level string, current int, hasOverride bool) [][]telegram.InlineButton {
 	presets := []int{50, 100, 150, 200, 300, 500, 800}
-	var rows [][]inlineButton
+	var rows [][]telegram.InlineButton
 
 	defLabel := "♻️ Default"
 	if !hasOverride {
 		defLabel = "✅ ♻️ Default"
 	}
-	rows = append(rows, []inlineButton{{Text: defLabel, CallbackData: fmt.Sprintf("cfg:kl:%s:%s:0", kind, level)}})
+	rows = append(rows, []telegram.InlineButton{{Text: defLabel, CallbackData: fmt.Sprintf("cfg:kl:%s:%s:0", kind, level)}})
 
-	var row []inlineButton
+	var row []telegram.InlineButton
 	for _, v := range presets {
 		label := fmt.Sprintf("%d", v)
 		if hasOverride && v == current {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:kl:%s:%s:%d", kind, level, v)})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:kl:%s:%s:%d", kind, level, v)})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -1653,7 +1600,7 @@ func configPoolKLValueKeyboard(kind, level string, current int, hasOverride bool
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back", CallbackData: "cfg:goto:klk:" + kind}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back", CallbackData: "cfg:goto:klk:" + kind}})
 	return rows
 }
 
@@ -1661,23 +1608,23 @@ func configPoolKLValueKeyboard(kind, level string, current int, hasOverride bool
 // ("pl") override. The first button clears the override (back to the global rule);
 // the rest are preset targets. current/hasOverride drive the ✅ marker. The Back
 // button returns to the matching kinds/levels submenu.
-func configPoolValueKeyboard(prefix, item string, current int, hasOverride bool) [][]inlineButton {
+func configPoolValueKeyboard(prefix, item string, current int, hasOverride bool) [][]telegram.InlineButton {
 	presets := []int{50, 100, 150, 200, 300, 500, 800}
-	var rows [][]inlineButton
+	var rows [][]telegram.InlineButton
 
 	defLabel := "♻️ Default"
 	if !hasOverride {
 		defLabel = "✅ ♻️ Default"
 	}
-	rows = append(rows, []inlineButton{{Text: defLabel, CallbackData: fmt.Sprintf("cfg:%s:%s:0", prefix, item)}})
+	rows = append(rows, []telegram.InlineButton{{Text: defLabel, CallbackData: fmt.Sprintf("cfg:%s:%s:0", prefix, item)}})
 
-	var row []inlineButton
+	var row []telegram.InlineButton
 	for _, v := range presets {
 		label := fmt.Sprintf("%d", v)
 		if hasOverride && v == current {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:%s:%s:%d", prefix, item, v)})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: fmt.Sprintf("cfg:%s:%s:%d", prefix, item, v)})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -1690,14 +1637,14 @@ func configPoolValueKeyboard(prefix, item string, current int, hasOverride bool)
 	if prefix == "pl" {
 		back = "cfg:goto:pool_levels"
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back", CallbackData: back}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back", CallbackData: back}})
 	return rows
 }
 
 // handleConfigCallback processes all "cfg:*" inline button taps from the admin
 // config panel. It handles show, goto (sub-keyboard), set, and toggle operations,
 // then edits the message in place.
-func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+func handleConfigCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery, chatID int64) {
 	rest := strings.TrimPrefix(cb.Data, "cfg:")
 
 	// Helper: refresh back to the main config panel.
@@ -2019,27 +1966,27 @@ func handleConfigCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 
 // levelKeyboard builds a two-row inline keyboard of the four levels, marking the
 // current one with a check.
-func levelKeyboard(current string) [][]inlineButton {
-	var row1, row2 []inlineButton
+func levelKeyboard(current string) [][]telegram.InlineButton {
+	var row1, row2 []telegram.InlineButton
 	for i, l := range config.AllLevels {
 		label := levelLabel(l)
 		if l == current {
 			label = "✅ " + label
 		}
-		btn := inlineButton{Text: label, CallbackData: "level:" + l}
+		btn := telegram.InlineButton{Text: label, CallbackData: "level:" + l}
 		if i < 2 {
 			row1 = append(row1, btn)
 		} else {
 			row2 = append(row2, btn)
 		}
 	}
-	return [][]inlineButton{row1, row2}
+	return [][]telegram.InlineButton{row1, row2}
 }
 
 // handleInterval handles the /interval command. With a valid numeric argument it
 // sets the send interval directly; otherwise it shows the current interval with
 // an inline keyboard of the allowed options.
-func handleInterval(store *Store, notifier Notifier, chatID int64, args []string) {
+func handleInterval(store *Store, notifier telegram.Notifier, chatID int64, args []string) {
 	current := store.GetInterval(chatID)
 
 	if len(args) > 0 {
@@ -2073,7 +2020,7 @@ func handleInterval(store *Store, notifier Notifier, chatID int64, args []string
 }
 
 // handleTTS handles /tts on|off, controlling pronunciation voice messages per user.
-func handleTTS(store *Store, notifier Notifier, chatID int64, args []string) {
+func handleTTS(store *Store, notifier telegram.Notifier, chatID int64, args []string) {
 	current := store.GetTTSEnabled(chatID)
 
 	if len(args) > 0 {
@@ -2123,7 +2070,7 @@ func handleTTS(store *Store, notifier Notifier, chatID int64, args []string) {
 //	/tip       => on-demand tip
 //	/tip on    => enable scheduled daily tips
 //	/tip off   => disable scheduled daily tips
-func handleTip(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, chatID int64, args []string) {
+func handleTip(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, chatID int64, args []string) {
 	if len(args) > 0 {
 		switch strings.ToLower(strings.TrimSpace(args[0])) {
 		case "on":
@@ -2259,11 +2206,11 @@ func applyTimeBudgetPreset(store *Store, chatID int64, p timeBudgetPreset) error
 }
 
 // setupKeyboard builds the time-budget selection keyboard.
-func setupKeyboard() [][]inlineButton {
-	var rows [][]inlineButton
-	var row []inlineButton
+func setupKeyboard() [][]telegram.InlineButton {
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, p := range timeBudgetPresets {
-		row = append(row, inlineButton{
+		row = append(row, telegram.InlineButton{
 			Text:         p.label,
 			CallbackData: fmt.Sprintf("setup:%d", p.minutesPerDay),
 		})
@@ -2279,7 +2226,7 @@ func setupKeyboard() [][]inlineButton {
 }
 
 // handleSetup sends the daily-time-budget quick-setup keyboard.
-func handleSetup(store *Store, notifier Notifier, chatID int64) {
+func handleSetup(store *Store, notifier telegram.Notifier, chatID int64) {
 	text := "⏱ <b>Quick Setup — How much time can you spend per day?</b>\n\n" +
 		"I'll tune your settings to fit your schedule:\n\n" +
 		"⚡ <b>5 min</b> — light touch: drill or word every 4 hours + SRS reviews\n" +
@@ -2294,7 +2241,7 @@ func handleSetup(store *Store, notifier Notifier, chatID int64) {
 }
 
 // handleSetupCallback applies the chosen time-budget preset and shows the result.
-func handleSetupCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+func handleSetupCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery, chatID int64) {
 	minutes, err := strconv.Atoi(strings.TrimPrefix(cb.Data, "setup:"))
 	if err != nil {
 		_ = notifier.AnswerCallback(cb.ID, "Unknown option")
@@ -2337,7 +2284,7 @@ func handleSetupCallback(store *Store, notifier Notifier, cb *TelegramCallbackQu
 // ---------------------------------------------------------------------------
 
 // handleSettings sends (or refreshes) the settings hub for the user.
-func handleSettings(store *Store, notifier Notifier, chatID int64) {
+func handleSettings(store *Store, notifier telegram.Notifier, chatID int64) {
 	prefs, err := store.GetPrefs(chatID)
 	if err != nil {
 		log.Printf("❌ [SETTINGS] Could not load prefs for ChatID %d: %v", chatID, err)
@@ -2401,19 +2348,19 @@ func settingsText(prefs UserPrefs) string {
 }
 
 // settingsKeyboard builds the settings hub inline keyboard.
-func settingsKeyboard(prefs UserPrefs) [][]inlineButton {
-	tog := func(label string, key string, on bool) inlineButton {
+func settingsKeyboard(prefs UserPrefs) [][]telegram.InlineButton {
+	tog := func(label string, key string, on bool) telegram.InlineButton {
 		icon := "✅"
 		if !on {
 			icon = "❌"
 		}
-		return inlineButton{Text: fmt.Sprintf("%s %s: %s", icon, label, map[bool]string{true: "ON", false: "OFF"}[on]), CallbackData: "settings:toggle:" + key}
+		return telegram.InlineButton{Text: fmt.Sprintf("%s %s: %s", icon, label, map[bool]string{true: "ON", false: "OFF"}[on]), CallbackData: "settings:toggle:" + key}
 	}
-	pauseBtn := inlineButton{Text: "⏸ Pause broadcasts", CallbackData: "settings:toggle:pause"}
+	pauseBtn := telegram.InlineButton{Text: "⏸ Pause broadcasts", CallbackData: "settings:toggle:pause"}
 	if prefs.Paused {
-		pauseBtn = inlineButton{Text: "▶️ Resume broadcasts", CallbackData: "settings:toggle:pause"}
+		pauseBtn = telegram.InlineButton{Text: "▶️ Resume broadcasts", CallbackData: "settings:toggle:pause"}
 	}
-	return [][]inlineButton{
+	return [][]telegram.InlineButton{
 		{
 			{Text: "📚 Level: " + levelLabel(prefs.Level), CallbackData: "settings:goto:level"},
 			{Text: "⏱ Every " + intervalLabel(prefs.Interval), CallbackData: "settings:goto:interval"},
@@ -2446,36 +2393,36 @@ func settingsKeyboard(prefs UserPrefs) [][]inlineButton {
 
 // settingsLevelKeyboard builds the level selection keyboard for use within the
 // settings hub, using settings-namespaced callback data and a Back button.
-func settingsLevelKeyboard(current string) [][]inlineButton {
-	var row1, row2 []inlineButton
+func settingsLevelKeyboard(current string) [][]telegram.InlineButton {
+	var row1, row2 []telegram.InlineButton
 	for i, l := range config.AllLevels {
 		label := levelLabel(l)
 		if l == current {
 			label = "✅ " + label
 		}
-		btn := inlineButton{Text: label, CallbackData: "settings:level:" + l}
+		btn := telegram.InlineButton{Text: label, CallbackData: "settings:level:" + l}
 		if i < 2 {
 			row1 = append(row1, btn)
 		} else {
 			row2 = append(row2, btn)
 		}
 	}
-	return [][]inlineButton{
+	return [][]telegram.InlineButton{
 		row1, row2,
 		{{Text: "⬅️ Back to Settings", CallbackData: "settings:show"}},
 	}
 }
 
 // settingsIntervalKeyboard builds the interval keyboard for use within settings.
-func settingsIntervalKeyboard(current int) [][]inlineButton {
-	var rows [][]inlineButton
-	var row []inlineButton
+func settingsIntervalKeyboard(current int) [][]telegram.InlineButton {
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, iv := range allIntervals {
 		label := intervalLabel(iv)
 		if iv == current {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("settings:interval:%d", iv)})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: fmt.Sprintf("settings:interval:%d", iv)})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -2484,21 +2431,21 @@ func settingsIntervalKeyboard(current int) [][]inlineButton {
 	if len(row) > 0 {
 		rows = append(rows, row)
 	}
-	rows = append(rows, []inlineButton{{Text: "⬅️ Back to Settings", CallbackData: "settings:show"}})
+	rows = append(rows, []telegram.InlineButton{{Text: "⬅️ Back to Settings", CallbackData: "settings:show"}})
 	return rows
 }
 
 // settingsQuizIntervalKeyboard builds the quiz-interval keyboard within settings.
-func settingsQuizIntervalKeyboard(current int) [][]inlineButton {
-	var row []inlineButton
+func settingsQuizIntervalKeyboard(current int) [][]telegram.InlineButton {
+	var row []telegram.InlineButton
 	for _, h := range allQuizIntervalHours {
 		label := quizIntervalLabel(h)
 		if h == current {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("settings:quiz_interval:%d", h)})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: fmt.Sprintf("settings:quiz_interval:%d", h)})
 	}
-	return [][]inlineButton{
+	return [][]telegram.InlineButton{
 		row,
 		{{Text: "⬅️ Back to Settings", CallbackData: "settings:show"}},
 	}
@@ -2506,15 +2453,15 @@ func settingsQuizIntervalKeyboard(current int) [][]inlineButton {
 
 // intervalKeyboard builds an inline keyboard (rows of two) of the allowed send
 // intervals, marking the current one with a check.
-func intervalKeyboard(current int) [][]inlineButton {
-	var rows [][]inlineButton
-	var row []inlineButton
+func intervalKeyboard(current int) [][]telegram.InlineButton {
+	var rows [][]telegram.InlineButton
+	var row []telegram.InlineButton
 	for _, iv := range allIntervals {
 		label := intervalLabel(iv)
 		if iv == current {
 			label = "✅ " + label
 		}
-		row = append(row, inlineButton{Text: label, CallbackData: fmt.Sprintf("interval:%d", iv)})
+		row = append(row, telegram.InlineButton{Text: label, CallbackData: fmt.Sprintf("interval:%d", iv)})
 		if len(row) == 2 {
 			rows = append(rows, row)
 			row = nil
@@ -2536,7 +2483,7 @@ func intervalOptionsText() string {
 }
 
 // handleCallback processes inline-keyboard taps (currently level selection).
-func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) {
+func handleCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery) {
 	if cb.Message == nil {
 		_ = notifier.AnswerCallback(cb.ID, "")
 		return
@@ -2648,7 +2595,7 @@ func handleCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery) 
 // handleSettingsCallback processes all "settings:*" inline button taps from the
 // settings hub. It handles toggle, goto (sub-keyboard), and set operations,
 // then edits the message in place so the hub stays up-to-date.
-func handleSettingsCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+func handleSettingsCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery, chatID int64) {
 	rest := strings.TrimPrefix(cb.Data, "settings:")
 
 	// Helper: reload prefs and refresh the settings message in-place.
@@ -2828,7 +2775,7 @@ func handleSettingsCallback(store *Store, notifier Notifier, cb *TelegramCallbac
 // handleReviewCallback applies a spaced-repetition self-grade ("Knew it" /
 // "Forgot") from a memory-check card tap (Change D). Callback data is of the
 // form "srs:known:<word>" or "srs:forgot:<word>".
-func handleReviewCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+func handleReviewCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery, chatID int64) {
 	rest := strings.TrimPrefix(cb.Data, "srs:")
 	action, word, found := strings.Cut(rest, ":")
 	if !found || word == "" {
@@ -2898,14 +2845,14 @@ func handleReviewCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 	}
 	_ = notifier.AnswerCallback(cb.ID, toast)
 	if cb.Message != nil {
-		_ = notifier.EditMessage(chatID, cb.Message.MessageID, confirm, [][]inlineButton{})
+		_ = notifier.EditMessage(chatID, cb.Message.MessageID, confirm, [][]telegram.InlineButton{})
 	}
 }
 
 // sendDrill delivers a drill as page 1 of a paged message with prev/next
 // navigation buttons (Change N). When the drill is a single page (e.g. legacy
 // content that can't be parsed into forms) it falls back to a plain send.
-func sendDrill(notifier Notifier, chatID int64, fullText string) error {
+func sendDrill(notifier telegram.Notifier, chatID int64, fullText string) error {
 	verb := parseVerb(fullText)
 	if verb == "" {
 		// Cannot paginate without a verb — the callback handler needs it to
@@ -2925,7 +2872,7 @@ func sendDrill(notifier Notifier, chatID int64, fullText string) error {
 // "drill:<page>:<verb>"; the full drill is reloaded from the pool by verb and the
 // requested page is re-rendered via editMessageText. "drill:noop" (the page
 // indicator button) is acknowledged silently.
-func handleDrillCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+func handleDrillCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery, chatID int64) {
 	rest := strings.TrimPrefix(cb.Data, "drill:")
 	if rest == "noop" {
 		_ = notifier.AnswerCallback(cb.ID, "")
@@ -2966,7 +2913,7 @@ var streakMilestones = []int{3, 7, 14, 30, 60}
 
 // checkStreakCelebration fires a one-time congratulatory message when the user
 // reaches a new streak milestone. Best-effort; errors are silently dropped.
-func checkStreakCelebration(store *Store, notifier Notifier, chatID int64, firstName string) {
+func checkStreakCelebration(store *Store, notifier telegram.Notifier, chatID int64, firstName string) {
 	stats, err := store.UserStats(chatID)
 	if err != nil || stats.CurrentStreak == 0 {
 		return
@@ -3015,204 +2962,6 @@ func checkStreakCelebration(store *Store, notifier Notifier, chatID int64, first
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Notifier interface (strategy pattern for Telegram sends — testable via DI)
-// ---------------------------------------------------------------------------
-
-// Notifier abstracts the four Telegram Bot API send operations so handlers and
-// schedulers can be tested without HTTP calls. The production implementation is
-// telegramNotifier; tests inject a mockNotifier.
-type Notifier interface {
-	Send(chatID int64, text string) error
-	SendWithMessageID(chatID int64, text string) (int64, error)
-	SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (fileID string, err error)
-	SendVoiceByFileID(chatID int64, fileID string, replyToMessageID int64) error
-	SendDocument(chatID int64, doc []byte, filename, caption string) error
-	SendKeyboard(chatID int64, text string, keyboard [][]inlineButton) error
-	EditMessage(chatID, messageID int64, text string, keyboard [][]inlineButton) error
-	AnswerCallback(callbackID, text string) error
-	// SendTyping fires a "typing..." chat action — best-effort, errors ignored.
-	SendTyping(chatID int64)
-	// SendPoll sends a native Telegram quiz poll and returns its poll_id.
-	SendPoll(chatID int64, question string, options []string, correctIdx int, explanation string) (pollID string, err error)
-	// SendWithReplyKeyboard sends a text message with a persistent bottom keyboard.
-	SendWithReplyKeyboard(chatID int64, text string, rows [][]string) error
-}
-
-// telegramNotifier is the real Notifier that talks to the Telegram Bot API.
-type telegramNotifier struct{}
-
-func (n *telegramNotifier) Send(chatID int64, text string) error {
-	_, err := n.SendWithMessageID(chatID, text)
-	return err
-}
-
-func (n *telegramNotifier) SendWithMessageID(chatID int64, text string) (int64, error) {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", config.TelegramBotToken)
-	payload := map[string]interface{}{
-		"chat_id":    chatID,
-		"text":       text,
-		"parse_mode": "HTML",
-	}
-
-	jsonPayload, _ := json.Marshal(payload)
-
-	log.Printf("➔ [HTTP_POST] sendMessage to ChatID %d | payload %d bytes", chatID, len(jsonPayload))
-	resp, err := telegramHTTPClient.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, fmt.Errorf("telegram sendMessage read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("telegram returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var parsed struct {
-		Result struct {
-			MessageID int64 `json:"message_id"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return 0, fmt.Errorf("telegram sendMessage parse error: %w", err)
-	}
-	return parsed.Result.MessageID, nil
-}
-
-func (n *telegramNotifier) SendVoice(chatID int64, voice []byte, filename string, replyToMessageID int64) (string, error) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendVoice", config.TelegramBotToken)
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-
-	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
-		return "", err
-	}
-	if replyToMessageID > 0 {
-		if err := writer.WriteField("reply_to_message_id", strconv.FormatInt(replyToMessageID, 10)); err != nil {
-			return "", err
-		}
-	}
-
-	part, err := writer.CreateFormFile("voice", filename)
-	if err != nil {
-		return "", err
-	}
-	if _, err := part.Write(voice); err != nil {
-		return "", err
-	}
-	if err := writer.Close(); err != nil {
-		return "", err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, apiURL, &body)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	resp, err := telegramHTTPClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("telegram sendVoice returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	// Extract file_id from the response for caching.
-	var parsed struct {
-		Result struct {
-			Voice *struct {
-				FileID string `json:"file_id"`
-			} `json:"voice"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(respBody, &parsed); err == nil && parsed.Result.Voice != nil {
-		return parsed.Result.Voice.FileID, nil
-	}
-	return "", nil
-}
-
-func (n *telegramNotifier) SendVoiceByFileID(chatID int64, fileID string, replyToMessageID int64) error {
-	payload := map[string]interface{}{
-		"chat_id": chatID,
-		"voice":   fileID,
-	}
-	if replyToMessageID > 0 {
-		payload["reply_to_message_id"] = replyToMessageID
-	}
-	return telegramPost("sendVoice", payload)
-}
-
-func (n *telegramNotifier) SendDocument(chatID int64, doc []byte, filename, caption string) error {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendDocument", config.TelegramBotToken)
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-
-	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
-		return err
-	}
-	if strings.TrimSpace(caption) != "" {
-		if err := writer.WriteField("caption", caption); err != nil {
-			return err
-		}
-		if err := writer.WriteField("parse_mode", "HTML"); err != nil {
-			return err
-		}
-	}
-
-	part, err := writer.CreateFormFile("document", filename)
-	if err != nil {
-		return err
-	}
-	if _, err := part.Write(doc); err != nil {
-		return err
-	}
-	if err := writer.Close(); err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, apiURL, &body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	resp, err := telegramHTTPClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("telegram sendDocument returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-	return nil
-}
-
-// telegramPost marshals payload and POSTs it to the given Bot API method.
-func telegramPost(method string, payload map[string]interface{}) error {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/%s", config.TelegramBotToken, method)
-	jsonPayload, _ := json.Marshal(payload)
-
-	resp, err := telegramHTTPClient.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("telegram %s returned status %d: %s", method, resp.StatusCode, string(respBody))
-	}
-	return nil
-}
-
 // SQLiteBackup creates a point-in-time SQLite snapshot at destPath.
 func (s *Store) SQLiteBackup(destPath string) error {
 	if strings.TrimSpace(destPath) == "" {
@@ -3227,7 +2976,7 @@ func (s *Store) SQLiteBackup(destPath string) error {
 }
 
 // sendMaintainerDBBackup snapshots the SQLite DB and sends it privately to the maintainer.
-func sendMaintainerDBBackup(store *Store, notifier Notifier, trigger string) error {
+func sendMaintainerDBBackup(store *Store, notifier telegram.Notifier, trigger string) error {
 	mID, ok := maintainerID()
 	if !ok {
 		return fmt.Errorf("invalid MAINTAINER_CHAT_ID")
@@ -3290,7 +3039,7 @@ func registerBotCommands() {
 		{"command": "help", "description": "How it works"},
 	}
 	payload := map[string]interface{}{"commands": commands}
-	if err := telegramPost("setMyCommands", payload); err != nil {
+	if err := telegram.Post("setMyCommands", payload); err != nil {
 		log.Printf("⚠️  [INIT] Could not register bot commands: %v", err)
 	} else {
 		log.Printf("✅ [INIT] Registered %d bot commands with Telegram.", len(commands))
@@ -3308,114 +3057,18 @@ func setChatMenuButton() {
 			"web_app": map[string]interface{}{"url": config.WebAppURL},
 		},
 	}
-	if err := telegramPost("setChatMenuButton", payload); err != nil {
+	if err := telegram.Post("setChatMenuButton", payload); err != nil {
 		log.Printf("⚠️  [WEBAPP] Could not set chat menu button: %v", err)
 	} else {
 		log.Printf("✅ [WEBAPP] Mini App set as the persistent chat menu button.")
 	}
 }
 
-func (n *telegramNotifier) SendKeyboard(chatID int64, text string, keyboard [][]inlineButton) error {
-	log.Printf("➔ [HTTP_POST] sendMessage(+keyboard) to ChatID %d", chatID)
-	return telegramPost("sendMessage", map[string]interface{}{
-		"chat_id":      chatID,
-		"text":         text,
-		"parse_mode":   "HTML",
-		"reply_markup": map[string]interface{}{"inline_keyboard": keyboard},
-	})
-}
-
-func (n *telegramNotifier) EditMessage(chatID, messageID int64, text string, keyboard [][]inlineButton) error {
-	return telegramPost("editMessageText", map[string]interface{}{
-		"chat_id":      chatID,
-		"message_id":   messageID,
-		"text":         text,
-		"parse_mode":   "HTML",
-		"reply_markup": map[string]interface{}{"inline_keyboard": keyboard},
-	})
-}
-
-func (n *telegramNotifier) AnswerCallback(callbackID, text string) error {
-	payload := map[string]interface{}{"callback_query_id": callbackID}
-	if text != "" {
-		payload["text"] = text
-	}
-	return telegramPost("answerCallbackQuery", payload)
-}
-
-func (n *telegramNotifier) SendTyping(chatID int64) {
-	_ = telegramPost("sendChatAction", map[string]interface{}{
-		"chat_id": chatID,
-		"action":  "typing",
-	})
-}
-
-func (n *telegramNotifier) SendPoll(chatID int64, question string, options []string, correctIdx int, explanation string) (string, error) {
-	opts := make([]map[string]string, len(options))
-	for i, o := range options {
-		opts[i] = map[string]string{"text": o}
-	}
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendPoll", config.TelegramBotToken)
-	payload := map[string]interface{}{
-		"chat_id":           chatID,
-		"question":          question,
-		"options":           opts,
-		"type":              "quiz",
-		"correct_option_id": correctIdx,
-		"is_anonymous":      false,
-	}
-	if explanation != "" {
-		payload["explanation"] = explanation
-	}
-	jsonPayload, _ := json.Marshal(payload)
-	resp, err := telegramHTTPClient.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("sendPoll status %d: %s", resp.StatusCode, string(respBody))
-	}
-	var parsed struct {
-		Result struct {
-			Poll struct {
-				ID string `json:"id"`
-			} `json:"poll"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", fmt.Errorf("sendPoll parse: %w", err)
-	}
-	return parsed.Result.Poll.ID, nil
-}
-
-func (n *telegramNotifier) SendWithReplyKeyboard(chatID int64, text string, rows [][]string) error {
-	keyboard := make([][][]map[string]string, 1)
-	keyboard[0] = make([][]map[string]string, len(rows))
-	btns := make([][]map[string]string, len(rows))
-	for i, row := range rows {
-		btns[i] = make([]map[string]string, len(row))
-		for j, label := range row {
-			btns[i][j] = map[string]string{"text": label}
-		}
-	}
-	return telegramPost("sendMessage", map[string]interface{}{
-		"chat_id":    chatID,
-		"text":       text,
-		"parse_mode": "HTML",
-		"reply_markup": map[string]interface{}{
-			"keyboard":        btns,
-			"resize_keyboard": true,
-		},
-	})
-}
-
 // sendPendingChangelogs delivers any changelog entries the user has not yet
 // seen and marks them as delivered immediately after each successful send.
 // Silent entries are marked as seen without sending a message to regular users,
 // but the maintainer still receives them with an internal-deploy indicator.
-func sendPendingChangelogs(store *Store, notifier Notifier, chatID int64) {
+func sendPendingChangelogs(store *Store, notifier telegram.Notifier, chatID int64) {
 	unseen, err := store.UnseenChangelogs(chatID)
 	if err != nil {
 		log.Printf("⚠️  [CHANGELOG] Could not fetch unseen changelogs for ChatID %d: %v", chatID, err)

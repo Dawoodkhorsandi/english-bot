@@ -6,6 +6,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // ---------------------------------------------------------------------------
@@ -237,7 +239,7 @@ func formatMyWordsPage(words []LearnedWord, page, totalPages, totalWords int, bo
 }
 
 // myWordsKeyboard builds the pagination inline keyboard for /mywords.
-func myWordsKeyboard(page, totalPages int, bookmarksOnly bool) [][]inlineButton {
+func myWordsKeyboard(page, totalPages int, bookmarksOnly bool) [][]telegram.InlineButton {
 	if totalPages <= 1 {
 		return nil
 	}
@@ -247,26 +249,26 @@ func myWordsKeyboard(page, totalPages int, bookmarksOnly bool) [][]inlineButton 
 		prefix = "mybm:"
 	}
 
-	var row []inlineButton
+	var row []telegram.InlineButton
 	if page > 1 {
-		row = append(row, inlineButton{Text: "◀️ Prev", CallbackData: prefix + strconv.Itoa(page-1)})
+		row = append(row, telegram.InlineButton{Text: "◀️ Prev", CallbackData: prefix + strconv.Itoa(page-1)})
 	}
-	row = append(row, inlineButton{Text: fmt.Sprintf("· %d/%d ·", page, totalPages), CallbackData: prefix + "nop"})
+	row = append(row, telegram.InlineButton{Text: fmt.Sprintf("· %d/%d ·", page, totalPages), CallbackData: prefix + "nop"})
 	if page < totalPages {
-		row = append(row, inlineButton{Text: "Next ▶️", CallbackData: prefix + strconv.Itoa(page+1)})
+		row = append(row, telegram.InlineButton{Text: "Next ▶️", CallbackData: prefix + strconv.Itoa(page+1)})
 	}
 
-	return [][]inlineButton{row}
+	return [][]telegram.InlineButton{row}
 }
 
 // bookmarkButton returns a single-button inline keyboard row for toggling a bookmark.
-func bookmarkButton(word string, isBookmarked bool) [][]inlineButton {
+func bookmarkButton(word string, isBookmarked bool) [][]telegram.InlineButton {
 	if isBookmarked {
-		return [][]inlineButton{{
+		return [][]telegram.InlineButton{{
 			{Text: "💫 Bookmarked", CallbackData: "bookmark:rm:" + word},
 		}}
 	}
-	return [][]inlineButton{{
+	return [][]telegram.InlineButton{{
 		{Text: "⭐ Bookmark", CallbackData: "bookmark:add:" + word},
 	}}
 }
@@ -276,7 +278,7 @@ func bookmarkButton(word string, isBookmarked bool) [][]inlineButton {
 // ---------------------------------------------------------------------------
 
 // handleMyWords handles /mywords [bookmarks]. Sends a paginated list.
-func handleMyWords(store *Store, notifier Notifier, chatID int64, args []string) {
+func handleMyWords(store *Store, notifier telegram.Notifier, chatID int64, args []string) {
 	bookmarksOnly := len(args) > 0 && strings.EqualFold(args[0], "bookmarks")
 
 	total := store.LearnedWordsCount(chatID, bookmarksOnly)
@@ -302,7 +304,7 @@ func handleMyWords(store *Store, notifier Notifier, chatID int64, args []string)
 }
 
 // handleMyWordsCallback handles pagination callbacks for mywords:<page> and mybm:<page>.
-func handleMyWordsCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+func handleMyWordsCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery, chatID int64) {
 	var rest string
 	var bookmarksOnly bool
 	if strings.HasPrefix(cb.Data, "mybm:") {
@@ -348,7 +350,7 @@ func handleMyWordsCallback(store *Store, notifier Notifier, cb *TelegramCallback
 }
 
 // handleBookmarkCommand handles /bookmark <word>.
-func handleBookmarkCommand(store *Store, notifier Notifier, chatID int64, args []string) {
+func handleBookmarkCommand(store *Store, notifier telegram.Notifier, chatID int64, args []string) {
 	if len(args) == 0 {
 		// No argument: show bookmarks (alias for /mywords bookmarks)
 		handleMyWords(store, notifier, chatID, []string{"bookmarks"})
@@ -390,7 +392,7 @@ func handleBookmarkCommand(store *Store, notifier Notifier, chatID int64, args [
 }
 
 // handleBookmarkCallback handles bookmark:add:<word> and bookmark:rm:<word> taps.
-func handleBookmarkCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+func handleBookmarkCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery, chatID int64) {
 	rest := strings.TrimPrefix(cb.Data, "bookmark:")
 	action, word, found := strings.Cut(rest, ":")
 	if !found || word == "" {

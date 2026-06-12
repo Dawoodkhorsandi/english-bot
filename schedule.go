@@ -10,6 +10,7 @@ import (
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ func nextMidnight(t time.Time) time.Time {
 // runBroadcastScheduler fires every half hour (the base slot), skipping quiet
 // hours, and runs a per-user delivery sweep: each subscriber receives content
 // only on slots aligned to their chosen interval, alternating drill/word.
-func runBroadcastScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier) {
+func runBroadcastScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier) {
 	log.Println("⏰ [SCHED] Broadcast scheduler started (half-hourly base, per-user interval, quiet-hour aware).")
 	for {
 		next := nextHalfHour(time.Now())
@@ -179,7 +180,7 @@ func runBroadcastScheduler(ctx context.Context, chain *ai.ProviderChain, store *
 // subscriber who is (a) not paused and (b) due this slot per their interval. The
 // content kind is chosen per user (drill/word alternation by interval-slot). It
 // never triggers inline generation (pool-only); the poolFiller keeps the pool stocked.
-func broadcastSweep(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, now time.Time) {
+func broadcastSweep(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, now time.Time) {
 	chats, err := store.Subscribers()
 	if err != nil {
 		log.Printf("❌ [BROADCAST] Could not read subscribers: %v", err)
@@ -245,7 +246,7 @@ func broadcastSweep(ctx context.Context, chain *ai.ProviderChain, store *Store, 
 // subscriber immediately on boot. This ensures that when a new version is
 // deployed (with a new entry in the Changelogs slice), all users receive the
 // release notes right away rather than waiting for their next broadcast slot.
-func broadcastChangelogsOnStartup(store *Store, notifier Notifier) {
+func broadcastChangelogsOnStartup(store *Store, notifier telegram.Notifier) {
 	chats, err := store.Subscribers()
 	if err != nil {
 		log.Printf("❌ [CHANGELOG-BOOT] Could not read subscribers: %v", err)
@@ -297,7 +298,7 @@ func broadcastChangelogsOnStartup(store *Store, notifier Notifier) {
 
 // runDailyReviewScheduler fires at local midnight and sends each subscriber a
 // review of the vocabulary words they received during the day that just ended.
-func runDailyReviewScheduler(ctx context.Context, store *Store, notifier Notifier) {
+func runDailyReviewScheduler(ctx context.Context, store *Store, notifier telegram.Notifier) {
 	log.Println("🌙 [REVIEW] Daily review scheduler started (fires at local midnight).")
 	for {
 		next := nextMidnight(time.Now())
@@ -317,7 +318,7 @@ func runDailyReviewScheduler(ctx context.Context, store *Store, notifier Notifie
 
 // sendDailyReview computes the just-ended local day window and sends each
 // subscriber the words they saw that day. Idempotent per (chat, day).
-func sendDailyReview(store *Store, notifier Notifier, now time.Time) {
+func sendDailyReview(store *Store, notifier telegram.Notifier, now time.Time) {
 	local := now.In(config.AppLocation)
 	// The day that just ended is "yesterday" relative to the midnight boundary.
 	endLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, config.AppLocation)
@@ -411,7 +412,7 @@ func nextDailyTime(t time.Time, hh, mm int) time.Time {
 
 // runIdiomScheduler fires once a day at config.IdiomTime (local) and broadcasts one
 // idiom of the day to every active subscriber. Set IDIOM_TIME=off to disable.
-func runIdiomScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier) {
+func runIdiomScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier) {
 	if strings.EqualFold(strings.TrimSpace(config.IdiomTime), "off") {
 		log.Println("🗣️  [IDIOM] Idiom-of-the-day scheduler disabled (IDIOM_TIME=off).")
 		return
@@ -437,7 +438,7 @@ func runIdiomScheduler(ctx context.Context, chain *ai.ProviderChain, store *Stor
 // sendIdiomOfDay sends each non-paused subscriber one pooled idiom, idempotent
 // per (chat, local date). Pool-only (never generates inline) so the daily
 // fan-out never hammers the AI; the pool filler keeps idioms stocked.
-func sendIdiomOfDay(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, now time.Time) {
+func sendIdiomOfDay(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, now time.Time) {
 	idiomDate := now.In(config.AppLocation).Format("2006-01-02")
 	chats, err := store.Subscribers()
 	if err != nil {
@@ -491,7 +492,7 @@ func sendIdiomOfDay(ctx context.Context, chain *ai.ProviderChain, store *Store, 
 
 // runDailyTipScheduler fires once per local day at config.TipTime and sends one grammar
 // tip to each non-paused subscriber who has tips enabled.
-func runDailyTipScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier) {
+func runDailyTipScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier) {
 	if strings.EqualFold(strings.TrimSpace(config.TipTime), "off") {
 		log.Println("💡 [TIP] Daily tip scheduler disabled (TIP_TIME=off).")
 		return
@@ -516,7 +517,7 @@ func runDailyTipScheduler(ctx context.Context, chain *ai.ProviderChain, store *S
 
 // sendDailyTip sends one pooled grammar tip to each eligible subscriber. It is
 // idempotent per (chat, local date), quiet-hour aware, and best-effort.
-func sendDailyTip(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, now time.Time) {
+func sendDailyTip(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, now time.Time) {
 	if isQuietHours(now) {
 		log.Printf("🌙 [TIP] %s is within quiet hours (%s–%s); skipping tip sweep.", now.In(config.AppLocation).Format("15:04"), config.QuietStart, config.QuietEnd)
 		return
@@ -579,7 +580,7 @@ func sendDailyTip(ctx context.Context, chain *ai.ProviderChain, store *Store, no
 // runCollocationScheduler fires once per local day at config.CollocationTime and sends
 // one collocation card to each non-paused subscriber who has collocations
 // enabled. Set COLLOCATION_TIME=off to disable.
-func runCollocationScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier) {
+func runCollocationScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier) {
 	if strings.EqualFold(strings.TrimSpace(config.CollocationTime), "off") {
 		log.Println("🔗 [COLLOCATION] Collocation-of-the-day scheduler disabled (COLLOCATION_TIME=off).")
 		return
@@ -605,7 +606,7 @@ func runCollocationScheduler(ctx context.Context, chain *ai.ProviderChain, store
 // sendCollocationOfDay sends each eligible subscriber one pooled collocation,
 // idempotent per (chat, local date), quiet-hour aware. Pool-only (never
 // generates inline) so the daily fan-out never hammers the AI.
-func sendCollocationOfDay(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, now time.Time) {
+func sendCollocationOfDay(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, now time.Time) {
 	if isQuietHours(now) {
 		log.Printf("🌙 [COLLOCATION] %s is within quiet hours (%s–%s); skipping collocation sweep.", now.In(config.AppLocation).Format("15:04"), config.QuietStart, config.QuietEnd)
 		return
@@ -665,7 +666,7 @@ func sendCollocationOfDay(ctx context.Context, chain *ai.ProviderChain, store *S
 // runStoryScheduler fires once per local day at config.StoryTime and sends one mini
 // story to each non-paused subscriber who has stories enabled. Set
 // STORY_TIME=off to disable.
-func runStoryScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier) {
+func runStoryScheduler(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier) {
 	if strings.EqualFold(strings.TrimSpace(config.StoryTime), "off") {
 		log.Println("📖 [STORY] Daily mini story scheduler disabled (STORY_TIME=off).")
 		return
@@ -691,7 +692,7 @@ func runStoryScheduler(ctx context.Context, chain *ai.ProviderChain, store *Stor
 // sendMiniStory sends each eligible subscriber one pooled mini story at their
 // level, idempotent per (chat, local date), quiet-hour aware. Pool-only (never
 // generates inline) so the daily fan-out never hammers the AI.
-func sendMiniStory(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, now time.Time) {
+func sendMiniStory(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, now time.Time) {
 	if isQuietHours(now) {
 		log.Printf("🌙 [STORY] %s is within quiet hours (%s–%s); skipping story sweep.", now.In(config.AppLocation).Format("15:04"), config.QuietStart, config.QuietEnd)
 		return
@@ -751,7 +752,7 @@ func sendMiniStory(ctx context.Context, chain *ai.ProviderChain, store *Store, n
 // runWeeklyDigestScheduler fires once a week at the configured day+time and
 // sends each subscriber a recap of the week's words, quiz accuracy, streak,
 // and a "word of the week" highlight.
-func runWeeklyDigestScheduler(ctx context.Context, store *Store, notifier Notifier) {
+func runWeeklyDigestScheduler(ctx context.Context, store *Store, notifier telegram.Notifier) {
 	if config.DigestDay < 0 {
 		log.Println("📅 [DIGEST] Weekly digest scheduler disabled.")
 		return
@@ -780,7 +781,7 @@ func runWeeklyDigestScheduler(ctx context.Context, store *Store, notifier Notifi
 
 // runDBBackupScheduler sends one SQLite backup per day to the maintainer at
 // BACKUP_TIME (local). Set BACKUP_TIME=off to disable.
-func runDBBackupScheduler(ctx context.Context, store *Store, notifier Notifier) {
+func runDBBackupScheduler(ctx context.Context, store *Store, notifier telegram.Notifier) {
 	if strings.EqualFold(strings.TrimSpace(config.BackupTime), "off") {
 		log.Println("🗄️  [BACKUP] Nightly backup scheduler disabled (BACKUP_TIME=off).")
 		return
@@ -804,7 +805,7 @@ func runDBBackupScheduler(ctx context.Context, store *Store, notifier Notifier) 
 }
 
 // runNightlyDBBackup executes one scheduled backup attempt.
-func runNightlyDBBackup(store *Store, notifier Notifier) {
+func runNightlyDBBackup(store *Store, notifier telegram.Notifier) {
 	if err := sendMaintainerDBBackup(store, notifier, "nightly schedule"); err != nil {
 		log.Printf("❌ [BACKUP] Nightly backup failed: %v", err)
 	}
@@ -828,7 +829,7 @@ func nextWeekdayTime(t time.Time, weekday time.Weekday, timeStr string) time.Tim
 // sendWeeklyDigest computes the past-7-day window and sends each subscriber a
 // recap of the week's vocabulary, quiz accuracy, streak and a word highlight.
 // Idempotent per (chat, week_start) via weekly_digest_delivery.
-func sendWeeklyDigest(store *Store, notifier Notifier, now time.Time) {
+func sendWeeklyDigest(store *Store, notifier telegram.Notifier, now time.Time) {
 	local := now.In(config.AppLocation)
 	weekStartLocal := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, config.AppLocation).AddDate(0, 0, -7)
 	weekStart := weekStartLocal.Format("2006-01-02")

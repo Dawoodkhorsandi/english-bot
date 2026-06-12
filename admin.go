@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // adminMsgTarget holds the chat ID of the user the admin wants to message.
@@ -174,14 +175,14 @@ func (s *Store) AdminUserDetail(chatID int64) (AdminUserDetail, error) {
 // ---------------------------------------------------------------------------
 
 // handleAdminUsers handles the /users command — shows a paginated user list.
-func handleAdminUsers(store *Store, notifier Notifier, chatID int64) {
+func handleAdminUsers(store *Store, notifier telegram.Notifier, chatID int64) {
 	log.Printf("👥 [ADMIN] /users requested by ChatID %d.", chatID)
 	sendAdminUserListPage(store, notifier, chatID, 0, 0)
 }
 
 // sendAdminUserListPage sends (or edits) a paginated user list message.
 // If editMessageID > 0, it edits the existing message; otherwise sends a new one.
-func sendAdminUserListPage(store *Store, notifier Notifier, chatID int64, page int, editMessageID int64) {
+func sendAdminUserListPage(store *Store, notifier telegram.Notifier, chatID int64, page int, editMessageID int64) {
 	users, total, err := store.AdminListUsers(page, adminUsersPerPage)
 	if err != nil {
 		log.Printf("❌ [ADMIN] Failed to list users: %v", err)
@@ -218,10 +219,10 @@ func sendAdminUserListPage(store *Store, notifier Notifier, chatID int64, page i
 	b.WriteString("\nTap a user below to view details:")
 
 	// Build keyboard: user buttons (2 per row) + nav row
-	var rows [][]inlineButton
+	var rows [][]telegram.InlineButton
 
 	for i := 0; i < len(users); i += 2 {
-		var row []inlineButton
+		var row []telegram.InlineButton
 		for j := i; j < i+2 && j < len(users); j++ {
 			u := users[j]
 			label := u.FirstName
@@ -231,7 +232,7 @@ func sendAdminUserListPage(store *Store, notifier Notifier, chatID int64, page i
 			if len(label) > 20 {
 				label = label[:20]
 			}
-			row = append(row, inlineButton{
+			row = append(row, telegram.InlineButton{
 				Text:         label,
 				CallbackData: fmt.Sprintf("admin:user:%d", u.ChatID),
 			})
@@ -240,19 +241,19 @@ func sendAdminUserListPage(store *Store, notifier Notifier, chatID int64, page i
 	}
 
 	// Navigation row
-	var navRow []inlineButton
+	var navRow []telegram.InlineButton
 	if page > 0 {
-		navRow = append(navRow, inlineButton{
+		navRow = append(navRow, telegram.InlineButton{
 			Text:         "◀️ Back",
 			CallbackData: fmt.Sprintf("admin:users:%d", page-1),
 		})
 	}
-	navRow = append(navRow, inlineButton{
+	navRow = append(navRow, telegram.InlineButton{
 		Text:         fmt.Sprintf("%d/%d", page+1, totalPages),
 		CallbackData: "admin:noop",
 	})
 	if page+1 < totalPages {
-		navRow = append(navRow, inlineButton{
+		navRow = append(navRow, telegram.InlineButton{
 			Text:         "Next ▶️",
 			CallbackData: fmt.Sprintf("admin:users:%d", page+1),
 		})
@@ -268,7 +269,7 @@ func sendAdminUserListPage(store *Store, notifier Notifier, chatID int64, page i
 }
 
 // sendAdminUserDetail sends (or edits) a detailed user view for the admin.
-func sendAdminUserDetail(store *Store, notifier Notifier, chatID int64, targetChatID int64, editMessageID int64) {
+func sendAdminUserDetail(store *Store, notifier telegram.Notifier, chatID int64, targetChatID int64, editMessageID int64) {
 	d, err := store.AdminUserDetail(targetChatID)
 	if err != nil {
 		log.Printf("❌ [ADMIN] Failed to load user detail for %d: %v", targetChatID, err)
@@ -341,7 +342,7 @@ func sendAdminUserDetail(store *Store, notifier Notifier, chatID int64, targetCh
 	b.WriteString(fmt.Sprintf("🗓️ Active days: <b>%d</b>\n", d.ActiveDays))
 
 	// Action buttons + back button
-	rows := [][]inlineButton{
+	rows := [][]telegram.InlineButton{
 		{
 			{Text: "✉️ Send Message", CallbackData: fmt.Sprintf("admin:msg:%d", d.ChatID)},
 		},
@@ -356,7 +357,7 @@ func sendAdminUserDetail(store *Store, notifier Notifier, chatID int64, targetCh
 }
 
 // handleAdminCallback processes all "admin:*" callback data.
-func handleAdminCallback(store *Store, notifier Notifier, cb *TelegramCallbackQuery, chatID int64) {
+func handleAdminCallback(store *Store, notifier telegram.Notifier, cb *telegram.CallbackQuery, chatID int64) {
 	data := cb.Data
 
 	// admin:noop — page indicator, just acknowledge
@@ -410,7 +411,7 @@ func handleAdminCallback(store *Store, notifier Notifier, cb *TelegramCallbackQu
 
 		_ = notifier.SendKeyboard(chatID,
 			fmt.Sprintf("✉️ <b>Send a message to %s</b>\n\nType your message below. It will be sent as-is (HTML supported).\n\nTap Cancel to abort.", targetName),
-			[][]inlineButton{
+			[][]telegram.InlineButton{
 				{{Text: "❌ Cancel", CallbackData: "admin:msgcancel"}},
 			},
 		)
@@ -440,7 +441,7 @@ func toggleIcon(enabled bool) string {
 // handleAdminMsgSend sends the admin's text to the target user and clears the
 // message-mode state. Called from the main router when isMaintainer and
 // adminMsgTarget is non-zero.
-func handleAdminMsgSend(notifier Notifier, adminChatID int64, text string) {
+func handleAdminMsgSend(notifier telegram.Notifier, adminChatID int64, text string) {
 	targetChatID := adminMsgTarget.Load()
 	adminMsgTarget.Store(0)
 

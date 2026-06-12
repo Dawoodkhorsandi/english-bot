@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // ---------------------------------------------------------------------------
@@ -139,7 +141,7 @@ func formatGrammarLesson(l GrammarLesson) string {
 
 // handleGrammar handles /grammar [number]: with no argument it sends the lesson
 // index; with a number it sends that lesson's card.
-func handleGrammar(store *Store, notifier Notifier, chatID int64, args []string) {
+func handleGrammar(store *Store, notifier telegram.Notifier, chatID int64, args []string) {
 	lessons := loadGrammarLessons()
 	if len(lessons) == 0 {
 		_ = notifier.Send(chatID, "📖 Grammar lessons are unavailable right now. Please try again later.")

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // drillPageGroups defines how a drill's numbered forms are split across paged
@@ -725,19 +726,19 @@ func renderDrillPage(fullText string, page int) (text string, total int) {
 // drillNavKeyboard builds the prev/next navigation row for a paged drill. The
 // verb is embedded in the callback data so a tap can reload the full drill from
 // the pool. Returns nil when there is only one page (no navigation needed).
-func drillNavKeyboard(term string, page, total int) [][]inlineButton {
+func drillNavKeyboard(term string, page, total int) [][]telegram.InlineButton {
 	if total <= 1 {
 		return nil
 	}
-	var row []inlineButton
+	var row []telegram.InlineButton
 	if page > 1 {
-		row = append(row, inlineButton{Text: "◀️ Back", CallbackData: fmt.Sprintf("drill:%d:%s", page-1, term)})
+		row = append(row, telegram.InlineButton{Text: "◀️ Back", CallbackData: fmt.Sprintf("drill:%d:%s", page-1, term)})
 	}
-	row = append(row, inlineButton{Text: fmt.Sprintf("%d/%d", page, total), CallbackData: "drill:noop"})
+	row = append(row, telegram.InlineButton{Text: fmt.Sprintf("%d/%d", page, total), CallbackData: "drill:noop"})
 	if page < total {
-		row = append(row, inlineButton{Text: "Next ▶️", CallbackData: fmt.Sprintf("drill:%d:%s", page+1, term)})
+		row = append(row, telegram.InlineButton{Text: "Next ▶️", CallbackData: fmt.Sprintf("drill:%d:%s", page+1, term)})
 	}
-	return [][]inlineButton{row}
+	return [][]telegram.InlineButton{row}
 }
 
 // stripHTMLTags removes everything between '<' and '>' and trims the result.

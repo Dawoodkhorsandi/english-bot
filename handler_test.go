@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // saveMaintainer saves and restores config.MaintainerChatID around a test.
@@ -99,11 +100,11 @@ func TestHandleMessageStart(t *testing.T) {
 	saveMaintainer(t)
 	config.MaintainerChatID = "999"
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/start",
-		From:      &TelegramUser{ID: 100, Username: "testuser"},
+		From:      &telegram.User{ID: 100, Username: "testuser"},
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
 
@@ -142,11 +143,11 @@ func TestHandleMessageStartReturning(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 2,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/start",
-		From:      &TelegramUser{ID: 100, Username: "testuser"},
+		From:      &telegram.User{ID: 100, Username: "testuser"},
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
 
@@ -173,9 +174,9 @@ func TestHandleMessageHelp(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/help",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -192,9 +193,9 @@ func TestHandleMessageDrill(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddToPool(config.KindDrill, config.DefaultLevel, "walk", "", "drill text for walk")
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/drill",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -218,7 +219,7 @@ func TestHandleMessageDrillPaged(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddToPool(config.KindDrill, config.DefaultLevel, "walk", "", sampleDrill(21))
 
-	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/drill"}
+	msg := &telegram.Message{MessageID: 1, Chat: telegram.Chat{ID: 100}, Text: "/drill"}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
 
 	// A multi-page drill is delivered with an inline keyboard, not a plain send.
@@ -243,10 +244,10 @@ func TestHandleDrillCallbackPaging(t *testing.T) {
 	mock := &mockNotifier{}
 	store.AddToPool(config.KindDrill, config.DefaultLevel, "walk", "", sampleDrill(21))
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb1",
 		Data:    "drill:3:walk",
-		Message: &TelegramMessage{MessageID: 5, Chat: TelegramChat{ID: 100}},
+		Message: &telegram.Message{MessageID: 5, Chat: telegram.Chat{ID: 100}},
 	}
 	handleCallback(store, mock, cb)
 
@@ -265,10 +266,10 @@ func TestHandleDrillCallbackUnknownVerb(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb1",
 		Data:    "drill:2:zzz",
-		Message: &TelegramMessage{MessageID: 5, Chat: TelegramChat{ID: 100}},
+		Message: &telegram.Message{MessageID: 5, Chat: telegram.Chat{ID: 100}},
 	}
 	handleCallback(store, mock, cb)
 
@@ -284,10 +285,10 @@ func TestHandleDrillCallbackNoop(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb1",
 		Data:    "drill:noop",
-		Message: &TelegramMessage{MessageID: 5, Chat: TelegramChat{ID: 100}},
+		Message: &telegram.Message{MessageID: 5, Chat: telegram.Chat{ID: 100}},
 	}
 	handleCallback(store, mock, cb)
 
@@ -306,7 +307,7 @@ func TestHandleMessageIdiom(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddToPool(config.KindIdiom, config.DefaultLevel, "break the ice", "to start a conversation", "idiom card text")
 
-	msg := &TelegramMessage{MessageID: 1, Chat: TelegramChat{ID: 100}, Text: "/idiom"}
+	msg := &telegram.Message{MessageID: 1, Chat: telegram.Chat{ID: 100}, Text: "/idiom"}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
 
 	texts := mock.sentTexts()
@@ -329,9 +330,9 @@ func TestHandleMessageWord(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddToPool(config.KindWord, config.DefaultLevel, "apple", "a fruit", "word card for apple")
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/word",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -354,9 +355,9 @@ func TestHandleMessageTTS(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/tts off",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -378,9 +379,9 @@ func TestHandleMessageTip(t *testing.T) {
 	store.AddSubscriber(100)
 	store.AddToPool(config.KindTip, config.DefaultLevel, "used to vs would", "", "tip card text")
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/tip",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -403,18 +404,18 @@ func TestHandleMessageTipToggle(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	handleMessage(context.Background(), emptyProviderChain(), store, mock, &TelegramMessage{
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/tip off",
 	})
 	if store.GetTipsEnabled(100) {
 		t.Error("expected tips disabled after /tip off")
 	}
 
-	handleMessage(context.Background(), emptyProviderChain(), store, mock, &TelegramMessage{
+	handleMessage(context.Background(), emptyProviderChain(), store, mock, &telegram.Message{
 		MessageID: 2,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/tip on",
 	})
 	if !store.GetTipsEnabled(100) {
@@ -428,9 +429,9 @@ func TestHandleMessageStats(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/stats",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -446,9 +447,9 @@ func TestHandleMessagePause(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/pause",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -468,9 +469,9 @@ func TestHandleMessageResume(t *testing.T) {
 	store.AddSubscriber(100)
 	store.SetPaused(100, true)
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/resume",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -491,9 +492,9 @@ func TestHandleMessageReset(t *testing.T) {
 	store.RecordSentWord(100, "run")
 	store.RecordSentVocab(100, "apple")
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/reset",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -507,9 +508,9 @@ func TestHandleMessageUnknownCommand(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 100},
+		Chat:      telegram.Chat{ID: 100},
 		Text:      "/foobar",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -627,12 +628,12 @@ func TestHandleCallbackLevel(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb1",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 10,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "level:beginner",
 	}
@@ -654,12 +655,12 @@ func TestHandleCallbackInterval(t *testing.T) {
 	mock := &mockNotifier{}
 
 	store.AddSubscriber(100)
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb2",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 10,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "interval:120",
 	}
@@ -683,12 +684,12 @@ func TestHandleCallbackSrsKnown(t *testing.T) {
 	store.AddSubscriber(100)
 	store.SeedReview(100, "tedious", time.Now().Add(-time.Hour))
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb3",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 10,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "srs:known:tedious",
 	}
@@ -712,12 +713,12 @@ func TestHandleCallbackSrsForgot(t *testing.T) {
 	store.AddSubscriber(100)
 	store.SeedReview(100, "tedious", time.Now().Add(-time.Hour))
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb4",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 10,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "srs:forgot:tedious",
 	}
@@ -753,10 +754,10 @@ func TestSrsKnownRevealsMeaning(t *testing.T) {
 	store.AddToPool(config.KindWord, config.DefaultLevel, "tedious", "boring or tiresome", "FULL WORD CARD for tedious")
 	store.SeedReview(100, "tedious", time.Now().Add(-time.Hour))
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb-known-reveal",
-		From:    &TelegramUser{ID: 100},
-		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 100}},
+		From:    &telegram.User{ID: 100},
+		Message: &telegram.Message{MessageID: 10, Chat: telegram.Chat{ID: 100}},
 		Data:    "srs:known:tedious",
 	}
 	handleCallback(store, mock, cb)
@@ -780,10 +781,10 @@ func TestSrsForgotRevealsFullCard(t *testing.T) {
 	store.AddToPool(config.KindWord, config.DefaultLevel, "tedious", "boring or tiresome", "FULL WORD CARD for tedious")
 	store.SeedReview(100, "tedious", time.Now().Add(-time.Hour))
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb-forgot-reveal",
-		From:    &TelegramUser{ID: 100},
-		Message: &TelegramMessage{MessageID: 11, Chat: TelegramChat{ID: 100}},
+		From:    &telegram.User{ID: 100},
+		Message: &telegram.Message{MessageID: 11, Chat: telegram.Chat{ID: 100}},
 		Data:    "srs:forgot:tedious",
 	}
 	handleCallback(store, mock, cb)
@@ -805,12 +806,12 @@ func TestHandleCallbackQuizCorrect(t *testing.T) {
 	store.AddToPool(config.KindWord, config.DefaultLevel, "tedious", "boring", "card")
 	store.recordSentFor(config.KindWord, 100, "tedious")
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb5",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 10,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "quiz:c:tedious",
 	}
@@ -832,12 +833,12 @@ func TestHandleCallbackQuizWrong(t *testing.T) {
 	store.AddToPool(config.KindWord, config.DefaultLevel, "tedious", "boring", "card")
 	store.recordSentFor(config.KindWord, 100, "tedious")
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb6",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 10,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "quiz:x:tedious",
 	}
@@ -953,9 +954,9 @@ func TestHandleMetricsNotMaintainer(t *testing.T) {
 	saveMaintainer(t)
 	config.MaintainerChatID = "999"
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 1},
+		Chat:      telegram.Chat{ID: 1},
 		Text:      "/metrics",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -971,9 +972,9 @@ func TestHandleBackupNotMaintainer(t *testing.T) {
 	saveMaintainer(t)
 	config.MaintainerChatID = "999"
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 1},
+		Chat:      telegram.Chat{ID: 1},
 		Text:      "/backup",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -992,9 +993,9 @@ func TestHandleBackupMaintainer(t *testing.T) {
 	saveMaintainer(t)
 	config.MaintainerChatID = "300"
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 300},
+		Chat:      telegram.Chat{ID: 300},
 		Text:      "/backup",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -1020,9 +1021,9 @@ func TestHandleConfigNotMaintainer(t *testing.T) {
 	saveMaintainer(t)
 	config.MaintainerChatID = "999"
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 1},
+		Chat:      telegram.Chat{ID: 1},
 		Text:      "/config",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -1039,9 +1040,9 @@ func TestHandleConfigShowsPanel(t *testing.T) {
 	saveBotConfig(t)
 	config.MaintainerChatID = "300"
 
-	msg := &TelegramMessage{
+	msg := &telegram.Message{
 		MessageID: 1,
-		Chat:      TelegramChat{ID: 300},
+		Chat:      telegram.Chat{ID: 300},
 		Text:      "/config",
 	}
 	handleMessage(context.Background(), emptyProviderChain(), store, mock, msg)
@@ -1066,10 +1067,10 @@ func TestConfigCallbackPoolTarget(t *testing.T) {
 	config.MaintainerChatID = "300"
 	config.PoolTarget = 300
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb-cfg-1",
-		From:    &TelegramUser{ID: 300},
-		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		From:    &telegram.User{ID: 300},
+		Message: &telegram.Message{MessageID: 10, Chat: telegram.Chat{ID: 300}},
 		Data:    "cfg:pool_target:500",
 	}
 	handleCallback(store, mock, cb)
@@ -1095,10 +1096,10 @@ func TestConfigCallbackPoolMin(t *testing.T) {
 	config.MaintainerChatID = "300"
 	config.PoolMin = 100
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb-cfg-2",
-		From:    &TelegramUser{ID: 300},
-		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		From:    &telegram.User{ID: 300},
+		Message: &telegram.Message{MessageID: 10, Chat: telegram.Chat{ID: 300}},
 		Data:    "cfg:pool_min:200",
 	}
 	handleCallback(store, mock, cb)
@@ -1120,10 +1121,10 @@ func TestConfigCallbackPerKindPool(t *testing.T) {
 	config.PoolTarget, config.PoolMin = 300, 100
 
 	set := func(data string) {
-		handleCallback(store, mock, &TelegramCallbackQuery{
+		handleCallback(store, mock, &telegram.CallbackQuery{
 			ID:      "cb",
-			From:    &TelegramUser{ID: 300},
-			Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+			From:    &telegram.User{ID: 300},
+			Message: &telegram.Message{MessageID: 10, Chat: telegram.Chat{ID: 300}},
 			Data:    data,
 		})
 	}
@@ -1169,10 +1170,10 @@ func TestConfigCallbackPerLevelPool(t *testing.T) {
 	config.MaintainerChatID = "300"
 	config.PoolTarget, config.PoolMin = 300, 100
 
-	handleCallback(store, mock, &TelegramCallbackQuery{
+	handleCallback(store, mock, &telegram.CallbackQuery{
 		ID:      "cb",
-		From:    &TelegramUser{ID: 300},
-		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		From:    &telegram.User{ID: 300},
+		Message: &telegram.Message{MessageID: 10, Chat: telegram.Chat{ID: 300}},
 		Data:    "cfg:pl:advanced:200",
 	})
 
@@ -1228,10 +1229,10 @@ func TestConfigCallbackToggleTTS(t *testing.T) {
 	config.MaintainerChatID = "300"
 	config.TTSEnabled = true
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb-cfg-tts",
-		From:    &TelegramUser{ID: 300},
-		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		From:    &telegram.User{ID: 300},
+		Message: &telegram.Message{MessageID: 10, Chat: telegram.Chat{ID: 300}},
 		Data:    "cfg:toggle:tts",
 	}
 	handleCallback(store, mock, cb)
@@ -1258,10 +1259,10 @@ func TestConfigCallbackQuietHours(t *testing.T) {
 	saveBotConfig(t)
 	config.MaintainerChatID = "300"
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb-cfg-qs",
-		From:    &TelegramUser{ID: 300},
-		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 300}},
+		From:    &telegram.User{ID: 300},
+		Message: &telegram.Message{MessageID: 10, Chat: telegram.Chat{ID: 300}},
 		Data:    "cfg:quiet_start:23:00",
 	}
 	handleCallback(store, mock, cb)
@@ -1283,10 +1284,10 @@ func TestConfigCallbackNotMaintainer(t *testing.T) {
 	saveMaintainer(t)
 	config.MaintainerChatID = "999"
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb-cfg-blocked",
-		From:    &TelegramUser{ID: 1},
-		Message: &TelegramMessage{MessageID: 10, Chat: TelegramChat{ID: 1}},
+		From:    &telegram.User{ID: 1},
+		Message: &telegram.Message{MessageID: 10, Chat: telegram.Chat{ID: 1}},
 		Data:    "cfg:pool_target:500",
 	}
 	handleCallback(store, mock, cb)
@@ -1888,12 +1889,12 @@ func TestHandleCallbackLevelButton(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-level-1",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 20,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "level:advanced",
 	}
@@ -1925,12 +1926,12 @@ func TestHandleCallbackLevelInvalid(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-level-bad",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 20,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "level:expert",
 	}
@@ -1950,12 +1951,12 @@ func TestHandleCallbackIntervalButton(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-int-1",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 21,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "interval:120",
 	}
@@ -1977,12 +1978,12 @@ func TestHandleCallbackIntervalInvalid(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-int-bad",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 21,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "interval:45",
 	}
@@ -2002,12 +2003,12 @@ func TestHandleCallbackIntervalNonNumeric(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-int-nan",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 21,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "interval:abc",
 	}
@@ -2029,12 +2030,12 @@ func TestHandleCallbackSrsKnownViaHandleReview(t *testing.T) {
 	now := time.Now()
 	store.SeedReview(100, "ephemeral", now.AddDate(0, 0, -2))
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-srs-1",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 30,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "srs:known:ephemeral",
 	}
@@ -2059,12 +2060,12 @@ func TestHandleCallbackSrsForgotViaHandleReview(t *testing.T) {
 	now := time.Now()
 	store.SeedReview(100, "ephemeral", now.AddDate(0, 0, -2))
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-srs-2",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 31,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "srs:forgot:ephemeral",
 	}
@@ -2084,12 +2085,12 @@ func TestHandleCallbackSrsInvalidAction(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-srs-bad",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 32,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "srs:snooze:ephemeral",
 	}
@@ -2106,12 +2107,12 @@ func TestHandleCallbackSrsExpired(t *testing.T) {
 
 	store.AddSubscriber(100)
 	// Don't seed any review -- "ghost" word should report expired.
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-srs-exp",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 33,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "srs:known:ghostword",
 	}
@@ -2131,12 +2132,12 @@ func TestHandleCallbackUnknownPrefix(t *testing.T) {
 
 	store.AddSubscriber(100)
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-unknown",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 40,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "unknown:data",
 	}
@@ -2154,9 +2155,9 @@ func TestHandleCallbackNilMessage(t *testing.T) {
 	store := testStoreHelper(t)
 	mock := &mockNotifier{}
 
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:      "cb-nil",
-		From:    &TelegramUser{ID: 100},
+		From:    &telegram.User{ID: 100},
 		Message: nil,
 		Data:    "level:beginner",
 	}
@@ -2178,12 +2179,12 @@ func TestHandleReviewCallbackMalformedData(t *testing.T) {
 	store.AddSubscriber(100)
 
 	// Missing word part (just "srs:known" with no second colon)
-	cb := &TelegramCallbackQuery{
+	cb := &telegram.CallbackQuery{
 		ID:   "cb-srs-mal",
-		From: &TelegramUser{ID: 100},
-		Message: &TelegramMessage{
+		From: &telegram.User{ID: 100},
+		Message: &telegram.Message{
 			MessageID: 50,
-			Chat:      TelegramChat{ID: 100},
+			Chat:      telegram.Chat{ID: 100},
 		},
 		Data: "srs:known",
 	}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // webappFiles holds the embedded Mini App frontend (HTML/CSS/JS and, in later
@@ -34,7 +35,7 @@ const initDataTTL = 24 * time.Hour
 
 // startWebServer starts the embedded HTTP server that serves the Telegram Mini
 // App. It is only called when WEB_APP_URL is configured.
-func startWebServer(store *Store, notifier Notifier) {
+func startWebServer(store *Store, notifier telegram.Notifier) {
 	sub, err := fs.Sub(webappFiles, "webapp")
 	if err != nil {
 		log.Printf("⚠️  [WEBAPP] Could not open embedded assets: %v", err)
@@ -415,7 +416,7 @@ func handleAPIProfile(w http.ResponseWriter, r *http.Request, chatID int64, stor
 // handleAPIKudos toggles the caller's kudos for a target user (one per pair) and,
 // on a newly-given kudos, notifies the recipient — unless they're in self-paced
 // (paused) mode. notifier may be nil (tests); a nil notifier just skips the send.
-func handleAPIKudos(w http.ResponseWriter, r *http.Request, chatID int64, store *Store, notifier Notifier) {
+func handleAPIKudos(w http.ResponseWriter, r *http.Request, chatID int64, store *Store, notifier telegram.Notifier) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return

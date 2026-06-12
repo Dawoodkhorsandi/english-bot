@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // ---------------------------------------------------------------------------
@@ -214,7 +215,7 @@ func (s *Store) MasteredCount(chatID int64) (int, error) {
 // as a "memory check" card with Knew-it/Forgot buttons. It honours quiet hours
 // and the per-user paused flag, and snoozes each reminded word so it isn't
 // re-sent before the user responds.
-func runReviewScheduler(ctx context.Context, store *Store, notifier Notifier) {
+func runReviewScheduler(ctx context.Context, store *Store, notifier telegram.Notifier) {
 	log.Printf("🧠 [SRS] Spaced-repetition scheduler started (every %s, up to %d/user).", config.ReviewCheckInterval, config.ReviewBatchMax)
 	ticker := time.NewTicker(config.ReviewCheckInterval)
 	defer ticker.Stop()
@@ -231,7 +232,7 @@ func runReviewScheduler(ctx context.Context, store *Store, notifier Notifier) {
 }
 
 // runReviewSweep delivers due review reminders for the current moment.
-func runReviewSweep(store *Store, notifier Notifier, now time.Time) {
+func runReviewSweep(store *Store, notifier telegram.Notifier, now time.Time) {
 	if isQuietHours(now) {
 		return
 	}
@@ -289,8 +290,8 @@ func formatReviewReminder(d dueReview) string {
 }
 
 // reviewKeyboard builds the Knew-it / Forgot inline keyboard for a word.
-func reviewKeyboard(term string) [][]inlineButton {
-	return [][]inlineButton{{
+func reviewKeyboard(term string) [][]telegram.InlineButton {
+	return [][]telegram.InlineButton{{
 		{Text: "✅ Knew it", CallbackData: "srs:known:" + term},
 		{Text: "❌ Forgot", CallbackData: "srs:forgot:" + term},
 	}}

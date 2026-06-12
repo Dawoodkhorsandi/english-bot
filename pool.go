@@ -12,6 +12,7 @@ import (
 
 	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
+	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
 )
 
 // reviewItem is a single word + meaning pair used by the daily review.
@@ -508,7 +509,7 @@ func (s *Store) MarkPoolExhaustionNotice(chatID int64, kind, level string, poolC
 //     adds the result to the pool, and serves it.
 //   - On a miss with allowGenerate=false (broadcasts) it falls back to the oldest
 //     pooled item so broadcasts never call the AI directly.
-func serveContent(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier Notifier, chatID int64, kind, level string, allowGenerate bool) (string, string, error) {
+func serveContent(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, chatID int64, kind, level string, allowGenerate bool) (string, string, error) {
 	term, _, text, ok, err := store.PooledUnseen(kind, level, chatID)
 	if err != nil {
 		log.Printf("⚠️  [POOL] Unseen lookup failed for kind=%s level=%s chat=%d: %v", kind, level, chatID, err)
@@ -577,7 +578,7 @@ func serveContent(ctx context.Context, chain *ai.ProviderChain, store *Store, no
 // sent only the first time, or again after the pool has grown since the last
 // notice (so a bump that the user then re-exhausts re-alerts). Best-effort:
 // any error is logged and swallowed, and a nil notifier disables it (tests).
-func maybeNotifyPoolExhausted(store *Store, notifier Notifier, chatID int64, kind, level string) {
+func maybeNotifyPoolExhausted(store *Store, notifier telegram.Notifier, chatID int64, kind, level string) {
 	if notifier == nil {
 		return
 	}
