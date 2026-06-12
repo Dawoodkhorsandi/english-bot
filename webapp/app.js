@@ -410,13 +410,14 @@ function wordRow(w) {
     '<div class="word-meaning">' + esc(w.meaning || '—') + '</div>' +
     '<div class="word-text" hidden></div></div>' +
     '<span class="word-mastery" title="' + w.mastery + '">' + (MASTERY[w.mastery] || '🆕') + '</span>' +
-    '<button class="star">' + (w.bookmarked ? '⭐' : '☆') + '</button>';
+    '<button class="star" aria-label="Bookmark word" aria-pressed="' + (w.bookmarked ? 'true' : 'false') + '">' + (w.bookmarked ? '⭐' : '☆') + '</button>';
   const star = el.querySelector('.star');
   let on = w.bookmarked;
   star.addEventListener('click', async ev => {
     ev.stopPropagation(); // the row itself toggles the detail view
     on = !on;
     star.textContent = on ? '⭐' : '☆';
+    star.setAttribute('aria-pressed', on ? 'true' : 'false');
     haptic('light');
     try { await api('/api/bookmark', { method: 'POST', body: JSON.stringify({ term: w.term, on }) }); }
     catch (e) { on = !on; star.textContent = on ? '⭐' : '☆'; hapticNotify('error'); }
@@ -587,20 +588,25 @@ function showBoardSub(id, onBack) {
 }
 function backToBoard() { showBoardSub('board-home'); }
 
-const CMP_VERDICT = { 1: '<span class="cmp-up">▲ you lead</span>', '-1': '<span class="cmp-down">▼ behind</span>', 0: '<span class="cmp-tie">= tied</span>' };
+const CMP_VERDICT = { 1: '<span class="vs-verdict up">▲ you lead</span>', '-1': '<span class="vs-verdict down">▼ they lead</span>', 0: '<span class="vs-verdict tie">= tied</span>' };
 
-// compareRow draws one metric as a dual bar (you vs them) + a verdict.
-function compareRow(m) {
-  const max = Math.max(1, m.me, m.them);
-  return '<div class="cmp-row"><div class="cmp-head"><span>' + esc(m.label) + '</span>' +
-    CMP_VERDICT[m.better] + '</div>' +
-    '<div class="cmp-bars">' +
-    '<div class="cmp-line"><span class="cmp-tag">You</span>' +
-    '<div class="cmp-track"><div class="cmp-fill me" style="width:' + (m.me * 100 / max) + '%"></div></div>' +
-    '<span class="cmp-val">' + m.me + '</span></div>' +
-    '<div class="cmp-line"><span class="cmp-tag">Them</span>' +
-    '<div class="cmp-track"><div class="cmp-fill them" style="width:' + (m.them * 100 / max) + '%"></div></div>' +
-    '<span class="cmp-val">' + m.them + '</span></div>' +
+// versusRow draws one metric as a single tug-of-war track: your share fills from
+// the left (accent), theirs from the right (muted); the divider sits where the
+// two meet, so the longer side — the winner — is read at a glance. The share is
+// of the pair total, so the bar always encodes who's ahead (a 0–0 metric sits at
+// the centre and is called out as "no data yet").
+function versusRow(m) {
+  const total = m.me + m.them;
+  const head = '<div class="vs-head"><span class="vs-metric">' + esc(m.label) + '</span>' +
+    (total > 0 ? CMP_VERDICT[m.better] : '<span class="vs-verdict tie">no data yet</span>') + '</div>';
+  if (total === 0) {
+    return '<div class="vs-row">' + head + '<div class="vs-track empty"><span class="vs-none">—</span></div></div>';
+  }
+  const mePct = Math.round((m.me * 100) / total);
+  return '<div class="vs-row">' + head +
+    '<div class="vs-track">' +
+    '<div class="vs-me" style="width:' + mePct + '%"><span class="vs-val">' + m.me + '</span></div>' +
+    '<div class="vs-them" style="width:' + (100 - mePct) + '%"><span class="vs-val">' + m.them + '</span></div>' +
     '</div></div>';
 }
 
@@ -618,16 +624,23 @@ async function openProfile(id) {
 function renderProfile(id, p) {
   const body = document.getElementById('profile-body');
   const initial = (p.name || '?').trim().charAt(0).toUpperCase();
+  // Matchup header: you on the left, a VS medallion, them on the right.
   const kudosBtn = p.isMe ? '' :
-    '<button class="kudos-btn' + (p.kudos.gaveByMe ? ' on' : '') + '" id="kudos-btn">' +
+    '<button class="kudos-btn' + (p.kudos.gaveByMe ? ' on' : '') + '" id="kudos-btn"' +
+    ' aria-pressed="' + (p.kudos.gaveByMe ? 'true' : 'false') + '" aria-label="Give kudos">' +
     '👏 <span id="kudos-count">' + p.kudos.count + '</span></button>';
-  let html = '<div class="profile-head">' +
-    '<div class="avatar-fallback lg">' + esc(initial) + '</div>' +
-    '<div class="profile-name">' + esc(p.name) + (p.isMe ? ' <span class="you">you</span>' : '') +
-    '<div class="sub">' + (p.isMe ? 'This is you' : p.kudos.count + ' kudos') + '</div></div>' +
-    kudosBtn + '</div>';
-  html += '<div class="card"><h2>You vs ' + (p.isMe ? 'you' : esc(p.name)) + '</h2>' +
-    (p.metrics || []).map(compareRow).join('') + '</div>';
+  let html = '<div class="card matchup">' +
+    '<div class="vs-side"><div class="avatar-fallback lg you-av">★</div><div class="vs-name">You</div></div>' +
+    '<div class="vs-medallion" aria-hidden="true">VS</div>' +
+    '<div class="vs-side"><div class="avatar-fallback lg">' + esc(initial) + '</div>' +
+    '<div class="vs-name">' + esc(p.name) + (p.isMe ? ' <span class="you">you</span>' : '') + '</div></div>' +
+    '</div>';
+  if (!p.isMe) {
+    html += '<div class="kudos-bar">' + kudosBtn +
+      '<span class="sub">' + p.kudos.count + (p.kudos.count === 1 ? ' learner cheered them on' : ' learners cheered them on') + '</span></div>';
+  }
+  html += '<div class="card"><h2>Head to head</h2>' +
+    (p.metrics || []).map(versusRow).join('') + '</div>';
   html += '<div class="card"><h2>Their activity · last 4 months</h2>' +
     heatmapHTML(p.heatmap || {}) +
     '<div class="heat-legend"><span>Less</span>' +
@@ -646,10 +659,12 @@ function renderProfile(id, p) {
     try {
       const res = await api('/api/kudos', { method: 'POST', body: JSON.stringify({ id }) });
       btn.classList.toggle('on', res.gaveByMe);
+      btn.setAttribute('aria-pressed', res.gaveByMe ? 'true' : 'false');
       countEl.textContent = res.count;
       hapticNotify('success');
     } catch (e) {
       btn.classList.toggle('on', wasOn);
+      btn.setAttribute('aria-pressed', wasOn ? 'true' : 'false');
       countEl.textContent = Math.max(0, parseInt(countEl.textContent, 10) + (wasOn ? 1 : -1));
       hapticNotify('error');
     }
@@ -1209,7 +1224,7 @@ async function openGrammarLesson(id) {
   catch (e) { grammarBody.innerHTML = '<p class="empty">Could not load this lesson.</p>'; return; }
 
   let html = '<h1>📖 ' + esc(l.title) + '</h1>';
-  if (l.image) html += '<div class="card"><img class="grammar-img" src="' + esc(l.image) + '" alt="" loading="lazy"></div>';
+  if (l.image) html += '<div class="card"><img class="grammar-img" src="' + esc(l.image) + '" alt="' + esc(l.title) + ' diagram" loading="lazy" decoding="async"></div>';
   html += '<div class="card"><h2>Pattern</h2><div class="grammar-pattern">' + esc(l.pattern) + '</div></div>';
   html += '<div class="card"><h2>How it works</h2><div class="grammar-text">' + esc(l.explanation) + '</div></div>';
   if ((l.examples || []).length) {
@@ -1295,7 +1310,7 @@ function renderSettings(s) {
     '<div class="sub">This is what others see next to your rank. Leave blank for a fun random name.</div></div>';
 
   html += '<div class="card"><h2>Self-paced mode</h2>' +
-    row('Silence all automatic messages', toggleHTML('paused', s.paused)) +
+    row('Silence all automatic messages', toggleHTML('paused', s.paused, 'Silence all automatic messages')) +
     '<div class="sub">Stops daily words, reviews, quizzes &amp; tips. You can still learn anytime in the app — grab a new word in Study and review here whenever you like.</div>' +
     '<div class="set-row" style="margin-top:12px"><span>Delivery every (minutes)</span>' +
     '<input class="num" id="set-interval" type="number" min="15" max="1440" value="' + s.interval + '"></div>' +
@@ -1303,7 +1318,7 @@ function renderSettings(s) {
     '</div>';
 
   html += '<div class="card"><h2>Content</h2>';
-  Object.keys(TOGGLE_LABELS).forEach(k => { html += row(TOGGLE_LABELS[k], toggleHTML(k, !!s.toggles[k])); });
+  Object.keys(TOGGLE_LABELS).forEach(k => { html += row(TOGGLE_LABELS[k], toggleHTML(k, !!s.toggles[k], TOGGLE_LABELS[k])); });
   html += '</div>';
 
   body.innerHTML = html;
@@ -1342,8 +1357,9 @@ function renderSettings(s) {
   });
 }
 
-function toggleHTML(key, on) {
-  return '<label class="switch"><input type="checkbox" data-key="' + key + '"' + (on ? ' checked' : '') + '><span class="slider"></span></label>';
+function toggleHTML(key, on, label) {
+  const lbl = label ? ' aria-label="' + esc(label) + '"' : '';
+  return '<label class="switch"><input type="checkbox" data-key="' + key + '"' + lbl + (on ? ' checked' : '') + '><span class="slider"></span></label>';
 }
 
 async function openSettings() {
