@@ -357,6 +357,32 @@ Primary key is `(chat_id, word)`; index `idx_review_due on (chat_id, due_at)`
 drives the "what's due now" query. Backs the spaced-repetition review (Change D);
 managed by `srs.go`.
 
+#### `activity_log` (v1.31.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER` | FK → subscriber chat_id |
+| `day` | `TEXT` | Local (`appLocation`) calendar date, `YYYY-MM-DD` |
+| `cnt` | `INTEGER` | Count of pull-based learning actions that day, default `0` |
+
+Primary key `(chat_id, day)`. Written by `RecordActivity` from in-app reviews,
+deck study and quiz answers — actions that leave no `sent_*` footprint — so they
+still count toward the streak. `activityDays` (`stats.go`) merges it into the
+per-day activity used for the streak + heatmap. (Content delivery is **not**
+double-recorded here; it already lands in `sent_words`/`sent_vocab`.)
+
+#### `review_perf` (v1.31.0)
+| Column | Type | Description |
+|---|---|---|
+| `chat_id` | `INTEGER PRIMARY KEY` | FK → subscriber chat_id |
+| `window_correct` | `INTEGER` | Correct answers in the rolling window, default `0` |
+| `window_total` | `INTEGER` | Total answers in the rolling window, default `0` |
+| `last_suggest_at` | `DATETIME` | When a level change was last suggested (cooldown) |
+
+A recency-weighted window over review answers (`RecordReviewOutcome`; both
+counters halve past `reviewPerfWindowCap`). `LevelSuggestion` reads it to nudge a
+harder/easier level only past `reviewPerfMinSample` answers + a
+`reviewSuggestCooldown` gap, then resets the window. Managed by `srs.go`.
+
 #### `quiz_results` (v1.9.0)
 | Column | Type | Description |
 |---|---|---|
@@ -723,7 +749,8 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/leaderboard?metric=words\|mastered\|weekly\|today` | GET | Ranked rows + the caller's own rank + `hasName`. `weekly`/`today` count words learned since Monday/local-midnight (`weekStartUTC`/`dayStartUTC`). **No profile photos exposed** (privacy, v1.30.0). |
 | `/api/leaderboard/name` | POST | `{name}` → set the caller's display name (sanitised, ≤24 chars). |
 | `/api/review/next?limit` | GET | Due SRS cards (`DueReviews`, deduped per word). Each item carries `{term, meaning, pronunciation, persian, example}` parsed from the pooled card. (v1.30.0) |
-| `/api/review/answer` | POST | `{term, known}` → `ApplyReviewKnown`/`ApplyReviewForgot`. |
+| `/api/review/answer` | POST | `{term, known}` → `ApplyReviewKnown`/`ApplyReviewForgot`. Also records a streak activity day (`RecordActivity`) and feeds the level-suggestion window (`RecordReviewOutcome`). |
+| `/api/review/summary` | POST | End-of-session check. Reads the rolling review-perf window (not the single batch) and, past `reviewPerfMinSample` answers + a `reviewSuggestCooldown` gap, returns `{suggest, direction, targetLevel, targetLabel, accuracy, message}` to nudge a harder/easier level (one-tap switch reuses the `/api/settings` level POST). Throttled — fires after a sustained run, never every batch. (v1.31.0) |
 | `/api/decks` | GET | Curated decks with per-user progress % + due/mastered counts. |
 | `/api/decks/study?deck&limit` | GET | Next cards to study (due first, then new), with `persian`/`pronunciation`/`mnemonic`. |
 | `/api/decks/detail?deck` | GET | Deck detail: Leitner box distribution, total/mastered/due/new, progress %, next-review date (`DeckDetail`). (v1.30.0) |

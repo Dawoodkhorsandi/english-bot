@@ -119,3 +119,73 @@ func TestRecordSentForSeedsReview(t *testing.T) {
 		t.Fatalf("drill verb should not be scheduled: ok=%v err=%v", ok, err)
 	}
 }
+
+// TestSuggestLevelChange covers the pure threshold logic.
+func TestSuggestLevelChange(t *testing.T) {
+	cases := []struct {
+		name           string
+		level          string
+		correct, total int
+		wantTarget     string
+		wantDir        string
+		wantOK         bool
+	}{
+		{"too small a sample", levelIntermediate, 5, 4, "", "", false},
+		{"high accuracy nudges up", levelIntermediate, 19, 20, levelUpperInt, "harder", true},
+		{"low accuracy nudges down", levelUpperInt, 8, 20, levelIntermediate, "easier", true},
+		{"middling stays put", levelIntermediate, 14, 20, "", "", false},
+		{"already hardest, no up", levelAdvanced, 20, 20, "", "", false},
+		{"already easiest, no down", levelBeginner, 2, 20, "", "", false},
+		{"unknown level", "wizard", 20, 20, "", "", false},
+	}
+	for _, c := range cases {
+		target, dir, ok := suggestLevelChange(c.level, c.correct, c.total)
+		if ok != c.wantOK || target != c.wantTarget || dir != c.wantDir {
+			t.Errorf("%s: got (%q,%q,%v), want (%q,%q,%v)",
+				c.name, target, dir, ok, c.wantTarget, c.wantDir, c.wantOK)
+		}
+	}
+}
+
+// TestLevelSuggestionWindow verifies the rolling-window gate: no suggestion
+// until enough reviews accumulate, one fires on a sustained mismatch, then the
+// cooldown + window reset suppress repeats.
+func TestLevelSuggestionWindow(t *testing.T) {
+	store, err := openStore(t.TempDir() + "/perf.db")
+	if err != nil {
+		t.Fatalf("openStore: %v", err)
+	}
+	defer store.Close()
+
+	const chatID = int64(99)
+	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
+
+	// A handful of correct reviews — below the minimum sample, so no suggestion.
+	for i := 0; i < 4; i++ {
+		if err := store.RecordReviewOutcome(chatID, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, _, ok, err := store.LevelSuggestion(chatID, now); err != nil || ok {
+		t.Fatalf("below sample: ok=%v err=%v, want false", ok, err)
+	}
+
+	// Accumulate a sustained run of correct answers at the default level.
+	for i := 0; i < reviewPerfMinSample; i++ {
+		if err := store.RecordReviewOutcome(chatID, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target, dir, acc, ok, err := store.LevelSuggestion(chatID, now)
+	if err != nil || !ok || dir != "harder" || target != levelUpperInt {
+		t.Fatalf("sustained high: target=%q dir=%q ok=%v err=%v", target, dir, ok, err)
+	}
+	if acc < levelUpAccuracy*100 {
+		t.Errorf("accuracy = %d, want high", acc)
+	}
+
+	// Immediately asking again is suppressed: window was reset + cooldown active.
+	if _, _, _, ok, err := store.LevelSuggestion(chatID, now.Add(time.Hour)); err != nil || ok {
+		t.Fatalf("within cooldown: ok=%v err=%v, want false", ok, err)
+	}
+}

@@ -376,6 +376,16 @@ var Changelogs = []ChangelogEntry{
 			"✨ <b>A fresh look</b> — a redesigned quiz, a fancier stats dashboard with a streak ring (tap ⓘ to see how streaks work), and a one-tap Share button to invite friends.\n\n" +
 			"Tap the menu button (or send /app) and explore! 🎉",
 	},
+	{
+		Version: "1.31.0",
+		Silent:  true,
+		Text: "Self-paced learning, smarter level guidance, and a streak fix. " +
+			"Self-paced mode (Settings) silences every automatic message so users can learn purely on demand in the app — " +
+			"on-demand practice still seeds reviews. The streak now counts in-app reviews, deck study and quiz answers " +
+			"(previously only delivered words/drills counted), and scheduled sends now fire milestone celebrations. " +
+			"After a sustained run of reviews — not every batch — the Review tab may suggest a harder/easier level with a " +
+			"one-tap switch. The Stats activity section gains headline numbers and a per-week bar plot.",
+	},
 }
 
 // Store wraps the SQLite connection used to persist subscribers and the
@@ -2858,6 +2868,14 @@ func handleReviewCallback(store *Store, notifier Notifier, cb *TelegramCallbackQ
 		return
 	}
 	log.Printf("🧠 [SRS] ChatID %d graded %q as %q.", chatID, word, action)
+	// Answering a review counts as a learning day for the streak (it leaves no
+	// sent_* footprint of its own) and feeds the rolling level-suggestion window.
+	if err := store.RecordActivity(chatID, now); err != nil {
+		log.Printf("⚠️  [SRS] Could not record activity for chat %d: %v", chatID, err)
+	}
+	if err := store.RecordReviewOutcome(chatID, action == "known"); err != nil {
+		log.Printf("⚠️  [SRS] Could not record review outcome for chat %d: %v", chatID, err)
+	}
 	_ = notifier.AnswerCallback(cb.ID, toast)
 	if cb.Message != nil {
 		_ = notifier.EditMessage(chatID, cb.Message.MessageID, confirm, [][]inlineButton{})
@@ -3558,6 +3576,18 @@ func openStore(path string) (*Store, error) {
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_review_due ON review_schedule(chat_id, due_at);
+	CREATE TABLE IF NOT EXISTS activity_log (
+		chat_id INTEGER NOT NULL,
+		day     TEXT    NOT NULL,
+		cnt     INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (chat_id, day)
+	);
+	CREATE TABLE IF NOT EXISTS review_perf (
+		chat_id         INTEGER NOT NULL PRIMARY KEY,
+		window_correct  INTEGER NOT NULL DEFAULT 0,
+		window_total    INTEGER NOT NULL DEFAULT 0,
+		last_suggest_at DATETIME
+	);
 	CREATE TABLE IF NOT EXISTS deck_cards (
 		deck_id       TEXT    NOT NULL,
 		term          TEXT    NOT NULL,

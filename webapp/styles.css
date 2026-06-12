@@ -114,6 +114,33 @@ h1 { font-size: 19px; font-weight: 700; margin-bottom: 16px; }
 }
 .heat-legend .heat-cell { display: inline-block; width: 10px; height: 10px; }
 .heat-legend span { margin: 0 2px; }
+/* Three-up stat tiles (Activity headline numbers). */
+.stat-tiles.t3 { grid-template-columns: repeat(3, 1fr); }
+/* Month labels aligned to the heatmap's week columns. */
+.heat-months {
+  display: grid; grid-auto-flow: column; grid-template-columns: repeat(17, 1fr);
+  gap: 3px; margin-top: 14px; font-size: 10px; color: var(--hint);
+}
+.heat-months span { overflow: visible; white-space: nowrap; }
+/* Per-week activity bar plot — the fancier companion to the heatmap. */
+.wbars {
+  display: grid; grid-auto-flow: column; grid-template-columns: repeat(17, 1fr);
+  align-items: end; gap: 3px; height: 56px; margin-top: 12px;
+  padding: 6px 0; border-bottom: 1px solid var(--border);
+}
+.wbar { height: 100%; display: flex; align-items: flex-end; }
+.wbar-fill {
+  width: 100%; min-height: 2px; border-radius: 3px 3px 0 0;
+  background: linear-gradient(var(--accent), var(--accent2, var(--accent)));
+  transition: height .4s ease;
+}
+/* Level-change suggestion card shown after a sustained run of reviews. */
+.level-suggest { text-align: center; }
+.level-suggest .ls-emoji { font-size: 34px; }
+.level-suggest .ls-msg { font-weight: 600; margin: 6px 0 2px; }
+.level-suggest .chips { justify-content: center; }
+/* Self-paced banner on the dashboard. */
+.card.self-paced { background: var(--bg); border: 1px solid var(--accent); }
 
 /* ---- Session completion ---- */
 .ring-wrap { display: flex; align-items: center; gap: 16px; margin-top: 6px; }

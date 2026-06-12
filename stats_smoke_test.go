@@ -93,6 +93,49 @@ func TestUserStatsDB(t *testing.T) {
 	}
 }
 
+// TestRecordActivityCountsTowardStreak verifies that pull-based learning (a
+// review/deck/quiz answer, recorded via RecordActivity) counts as an active day
+// for the streak even with no sent_words/sent_vocab content delivered.
+func TestRecordActivityCountsTowardStreak(t *testing.T) {
+	store, err := openStore(t.TempDir() + "/activity.db")
+	if err != nil {
+		t.Fatalf("openStore: %v", err)
+	}
+	defer store.Close()
+
+	const chat = int64(7)
+	if _, err := store.AddSubscriber(chat); err != nil {
+		t.Fatalf("AddSubscriber: %v", err)
+	}
+
+	// No content delivered — without the fix this user has a 0-day streak.
+	now := time.Now()
+	if err := store.RecordActivity(chat, now); err != nil {
+		t.Fatalf("RecordActivity: %v", err)
+	}
+	st, err := store.UserStats(chat)
+	if err != nil {
+		t.Fatalf("UserStats: %v", err)
+	}
+	if st.Words != 0 || st.Verbs != 0 {
+		t.Fatalf("expected no delivered content, got words=%d verbs=%d", st.Words, st.Verbs)
+	}
+	if st.CurrentStreak != 1 {
+		t.Errorf("CurrentStreak = %d, want 1 (pull-based activity should count)", st.CurrentStreak)
+	}
+	if st.ActiveDays != 1 {
+		t.Errorf("ActiveDays = %d, want 1", st.ActiveDays)
+	}
+	// A second activity the same day must not double the day count's day set.
+	if err := store.RecordActivity(chat, now); err != nil {
+		t.Fatalf("RecordActivity 2: %v", err)
+	}
+	st, _ = store.UserStats(chat)
+	if st.ActiveDays != 1 {
+		t.Errorf("ActiveDays after 2 same-day activities = %d, want 1", st.ActiveDays)
+	}
+}
+
 func TestParseStoredUTC(t *testing.T) {
 	cases := []struct {
 		name   string
