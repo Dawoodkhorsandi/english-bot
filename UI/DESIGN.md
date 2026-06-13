@@ -99,7 +99,7 @@ factory in `app.js` where one exists.
 | Stat grid | `.grid` | 2-column |
 | Stat tiles | `.stat-tiles` / `.stat-tile` / `.stat-emoji` / `.stat-n` | 4-up emoji+count tiles; Library breakdown on the dashboard, shown only when any kind > 0 (✅ v1.29.2) |
 | Activity section | `activitySection(s)`: 3-up `.stat-tiles.t3` headline numbers (Activities / This week / Best day) + `.wbars`/`.wbar`/`.wbar-fill` per-week bar plot + `.heat-months` labels + heatmap + legend | Richer Stats activity block (✅ v1.31.0) |
-| Activity heatmap | `.heatmap` / `.heat-cell` (+`.l1`–`.l4`, `.today`, `.future`), `.heat-legend`; `heatmapHTML(counts)`, `heatLevel(n)` | 17×7 CSS grid; GitHub-style intensity from `activity_counts` (1/3/6/10+ thresholds) with Less→More legend (✅ v1.29.0) |
+| Activity heatmap | `.heatmap` / `.heat-cell` (+`.l1`–`.l4`, `.today`, `.future`), `.heat-legend`, `.heat-tip`; `heatmapHTML(counts)`, `heatLevel(n)`, `showHeatTip(el)` | 17×7 CSS grid; GitHub-style intensity from `activity_counts` (1/3/6/10+ thresholds) with Less→More legend; custom touch tooltip via `data-tip` + floating `.heat-tip` element (native `title` doesn't fire on mobile Telegram) (✅ v1.29.0, tooltip v1.34.0) |
 | Self-paced banner | `.card.self-paced`; shown when `paused` | Replaces the old "paused → /resume in chat" warning with a positive banner + "Get a new word" / "Review now" CTAs (✅ v1.31.0) |
 | Profile drill-down | `#board-profile` via `showBoardSub`; **matchup header** `.card.matchup` (`.vs-side`/`.vs-medallion`/`.you-av`) + `.kudos-bar`/`.kudos-btn`(`.on`); **tug-of-war rows** `versusRow` → `.vs-track` with `.vs-me`(accent)/`.vs-them`(muted) meeting at a divider (longer side wins), `.vs-verdict.up/.down/.tie`, empty state `.vs-track.empty`+`.vs-none`; reuses `heatmapHTML` | Tap a leaderboard row → "VS" head-to-head: a single divider bar per metric encodes who leads, + their heatmap + 👏 kudos. Opaque `id`, never `chat_id`. Verified in light + dark (✅ v1.32.0, redesigned v1.32.2) |
 | A11y baseline | global `:focus-visible` ring, `@media (hover)` brightness, `prefers-reduced-motion` reset, `tabular-nums` on number displays, `touch-action: manipulation`; `color-scheme` + dual `theme-color`; `aria-label`/`aria-pressed` on icon-only star/kudos/toggles | Web Interface Guidelines pass (✅ v1.32.2) |
@@ -115,6 +115,8 @@ factory in `app.js` where one exists.
 | Settings row | `.set-row`, `.num`, `.switch`, `.slider`; `row()`, `toggleHTML()` | Rows divided by `--border` |
 | Modal | `.modal-back`, `.modal`, `.modal-actions`; `askDisplayName()` | Only for text input (no native equivalent) |
 | Tab bar | `#tabbar`, `.tab`, `.tab-on` | Fixed bottom, `safe-area-inset-bottom`; inactive icons grayscaled |
+| Tappable words | `.tw`; `tappableText(text)` | Wraps each English word (2+ letters) in a tappable `<span>` with a dotted underline; tap opens the word popup (✅ v1.34.0) |
+| Word popup | `.wp-overlay` / `.wp-sheet` / `.wp-head` / `.wp-title` / `.wp-x` / `.wp-body` / `.wp-entry` / `.wp-open`; `openWordPopup(word)`, `closeWordPopup()` | Bottom-sheet dictionary lookup: up to 3 senses (POS, IPA, Persian, definition, example) + "Open in Dictionary" link; capture-phase click stops ancestor handlers; lazy-created on first tap (✅ v1.34.0) |
 | States | `.loading`, `.empty` | ✅ v1.25.0: `.skeleton` shimmer (`.skel-line`/`.skel-big`/`.skel-row`, helpers `skeletonRows()`/`skeletonCards()`) on first paint |
 
 ### Swipe session (`createSwipeSession(container, opts)`)
@@ -222,7 +224,8 @@ All haptics wrapped in try/catch (see `haptic()` — older clients throw).
 ## 8. Content & accessibility
 
 - `esc()` is mandatory for every interpolated string. AI-generated text and
-  user names are untrusted.
+  user names are untrusted. For English body text that should support
+  tap-to-translate, use `tappableText()` instead (it escapes internally).
 - Emoji conventions: exactly one leading emoji per `h1` (📊 📘 📚 🧠 🏆 ⚙️);
   mastery ✅/📖/🆕; medals 🥇🥈🥉; streak flame 🔥 at ≥3 days; celebration 🎉.
 - Copy tone: short, encouraging, second person. Empty states always tell the

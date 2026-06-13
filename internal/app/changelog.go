@@ -390,4 +390,12 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Fix: release workflow built binaries from the repo root (no Go files after the v1.32.4 restructure) instead of ./cmd/english-bot. Cross-platform release binaries now build correctly.",
 	},
+	{
+		Version: "1.34.0",
+		Silent:  true,
+		Text: "Tap-to-translate: tap any English word in card backs, library details, practice cards, grammar lessons, " +
+			"or dictionary results to see an instant Persian translation popup (powered by the offline/online dictionary). " +
+			"The popup shows up to 3 senses with a link to open the full Dictionary tab. " +
+			"Also fixed heatmap dots not showing activity counts on mobile Telegram (replaced native title with a custom touch tooltip).",
+	},
 }
