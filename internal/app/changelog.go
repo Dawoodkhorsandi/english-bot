@@ -403,4 +403,9 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Fix: the tap-to-translate word popup could not be dismissed — the .wp-overlay display:flex rule overrode the hidden attribute. The X button and backdrop now close it on mobile and desktop.",
 	},
+	{
+		Version: "1.34.2",
+		Silent:  true,
+		Text:    "Fix: the word popup still couldn't be closed on Android/iOS Telegram. Routed close (X / backdrop) and Open-in-Dictionary through the single capture-phase click handler that reliably fires in the mobile webview, and toggle visibility via inline display instead of the hidden attribute.",
+	},
 }

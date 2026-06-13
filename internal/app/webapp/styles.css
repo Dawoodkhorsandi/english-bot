@@ -434,14 +434,13 @@ button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manip
 .tw:active { background: rgba(128,128,128,.12); border-radius: 3px; }
 
 /* ---- Word popup (dictionary bottom sheet) ---- */
+/* Shown/hidden via inline style.display in app.js (not the [hidden] attribute),
+   so visibility never depends on this rule loading from a cached stylesheet. */
 .wp-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.35);
   display: flex; align-items: flex-end; justify-content: center;
   z-index: 60; padding: 0;
 }
-/* The class sets display:flex (an author rule that beats the UA [hidden]
-   rule), so re-assert display:none when hidden — otherwise it never closes. */
-.wp-overlay[hidden] { display: none; }
 .wp-sheet {
   background: var(--bg); border-radius: 16px 16px 0 0;
   padding: 16px 18px calc(16px + env(safe-area-inset-bottom, 0px));
