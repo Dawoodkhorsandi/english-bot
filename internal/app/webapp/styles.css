@@ -413,3 +413,16 @@ button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manip
 .tab span { font-size: 20px; line-height: 1; filter: grayscale(1); opacity: .6; }
 .tab-on { color: var(--accent); }
 .tab-on span { filter: none; opacity: 1; }
+
+/* ---- Dictionary ---- */
+.dict-card { margin-bottom: 10px; }
+.dict-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dict-word { font-size: 17px; font-weight: 700; }
+.dict-pos { font-size: 13px; color: var(--hint); font-style: italic; }
+.dict-ipa { font-size: 13px; color: var(--subtitle); }
+.dict-persian { font-size: 22px; font-weight: 600; margin: 8px 0 2px; direction: rtl; text-align: right; }
+.dict-roman { font-size: 13px; color: var(--hint); direction: ltr; text-align: right; margin-bottom: 6px; }
+.dict-def { font-size: 14px; color: var(--text); margin-top: 4px; }
+.dict-example { font-size: 13px; color: var(--hint); font-style: italic; margin-top: 2px; }
+.dict-sense { font-size: 12px; color: var(--subtitle); margin-top: 4px; }
+.dict-tags { font-size: 12px; color: var(--accent-fg); margin-top: 2px; }

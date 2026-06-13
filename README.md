@@ -183,6 +183,7 @@ internal/content/   -- content generation & parsing (imports config/ai/telegram)
 internal/app/       -- the coupled core (package app; imports config/ai/telegram/content)
   app.go            -- Run(), schema, command router (handleMessage/handleCallback), Store
   changelog.go      -- ChangelogEntry + the append-only Changelogs release history
+  dictionary.go     -- offline English-Persian dictionary (kaikki.org bulk + fa.wiktionary.org fallback), background seeder
   pool.go           -- content_pool Store methods, serveContent, poolFiller
   schedule.go       -- quiet hours, broadcast/daily-review/weekly-digest schedulers
   prefs.go          -- user_prefs Store methods, level/interval/pause/toggle helpers
@@ -204,7 +205,7 @@ internal/docsync/   -- CI tests that keep README.md & DOCS.md in sync with the c
 The Mini App frontend lives in `webapp/` (`index.html`, `app.js`, `styles.css`)
 and bundled deck data in `webapp/decks/*.json`, all embedded via `go:embed`.
 
-### Goroutines (14 concurrent + optional web server)
+### Goroutines (15 concurrent + optional web server)
 
 1. **Pool filler** -- background content generation
 2. **Broadcast scheduler** -- half-hourly, per-user interval-aware delivery
@@ -219,12 +220,13 @@ and bundled deck data in `webapp/decks/*.json`, all embedded via `go:embed`.
 11. **Nightly backup scheduler** -- SQLite snapshot to the maintainer at `BACKUP_TIME` (default 02:00)
 12. **Telegram poller** -- long-polls for messages, callbacks, and `poll_answer` updates
 13. **Deck example backfill** -- generates missing example sentences for curated deck cards
-14. **Main goroutine** -- blocks on OS signal for graceful shutdown
-15. **Mini App web server** *(optional)* -- serves the Mini App hub when `WEB_APP_URL` is set
+14. **Dictionary seeder** -- on first deploy, downloads kaikki.org data and indexes English→Persian translations
+15. **Main goroutine** -- blocks on OS signal for graceful shutdown
+16. **Mini App web server** *(optional)* -- serves the Mini App hub when `WEB_APP_URL` is set
 
 ### Database
 
-SQLite via `modernc.org/sqlite` (pure Go, no CGO). Tables: `subscribers`, `sent_words`, `sent_vocab`, `sent_idioms`, `sent_tips`, `sent_collocations`, `sent_stories`, `changelog_delivery`, `content_pool`, `daily_review_delivery`, `idiom_delivery`, `daily_tip_delivery`, `collocation_delivery`, `story_delivery`, `user_prefs`, `review_schedule`, `quiz_results`, `weekly_digest_delivery`, `audio_cache`, `bookmarks`, `bot_config`.
+SQLite via `modernc.org/sqlite` (pure Go, no CGO). Tables: `subscribers`, `sent_words`, `sent_vocab`, `sent_idioms`, `sent_tips`, `sent_collocations`, `sent_stories`, `changelog_delivery`, `content_pool`, `daily_review_delivery`, `idiom_delivery`, `daily_tip_delivery`, `collocation_delivery`, `story_delivery`, `user_prefs`, `review_schedule`, `quiz_results`, `weekly_digest_delivery`, `audio_cache`, `bookmarks`, `bot_config`, `dictionary`.
 
 ### AI Providers
 

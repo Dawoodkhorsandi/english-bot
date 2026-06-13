@@ -155,6 +155,7 @@ deck study is a `BackButton` drill-down inside the Decks tab.
 | **Ranks** `#view-board` | `GET /api/leaderboard`, `GET /api/profile?id=`, `POST /api/kudos` | Ranked rows (tap → profile drill-down `#board-profile` with you-vs-them comparison, their heatmap, 👏 kudos) | ✅ profiles + kudos (v1.32.0) |
 | **Ranks** `#view-board` | `GET /api/leaderboard?metric`, `POST /api/leaderboard/name` | Metric chips (All-time/Weekly/**Today**/Mastered) → your-rank card → top-50 list (initial-letter badges, **no photos**); first-visit name modal | ✅ Today metric, photos removed (v1.30.0) |
 | **Settings** `#view-settings` | `GET/POST /api/settings` | Level chips → leaderboard name → pause + interval → 9 content toggles | Toggle rollback on failed POST |
+| **Dictionary** `#view-dictionary` | `GET /api/dictionary?q&prefix` | Search input (300ms debounce, prefix autocomplete) → result cards (word, POS, IPA, Persian, romanization, definition, example) | ✅ v1.33.0 |
 
 State copy conventions — every screen ships all four states:
 

@@ -45,6 +45,7 @@ internal/content/generation.go — prompt builders, GenerateContent/GenerateWord
 internal/app/           — the coupled core (package app)
   app.go                — Run(), schema, command router (handleMessage/handleCallback), Store (SQLite)
   changelog.go          — ChangelogEntry + the append-only Changelogs release history
+  dictionary.go         — offline English-Persian dictionary (kaikki.org bulk + fa.wiktionary.org fallback), background seeder, DictLookup/Search
   pool.go               — content_pool Store methods, serveContent, poolFiller goroutine
   schedule.go           — quiet hours, broadcast scheduler, daily review scheduler, daily tip scheduler, weekly digest scheduler
   prefs.go              — user_prefs Store methods, level/interval/pause/tip/feature-toggle helpers, SetFirstName, streak helpers
@@ -64,7 +65,7 @@ internal/docsync/       — CI tests that keep README.md & DOCS.md in sync with 
 
 The Mini App frontend is embedded from `internal/app/webapp/` (`index.html`, `app.js`, `styles.css`) and curated deck data from `internal/app/webapp/decks/*.json`, all via `go:embed`.
 
-The application runs fourteen concurrent goroutines (plus an optional web server goroutine when `WEB_APP_URL` is set):
+The application runs fifteen concurrent goroutines (plus an optional web server goroutine when `WEB_APP_URL` is set):
 1. **Pool filler** (`poolFiller`) — tops up the pre-generated content pool in the background
 2. **Broadcast scheduler** (`runBroadcastScheduler`) — fires every half hour, per-user interval-aware delivery sweep
 3. **Daily review scheduler** (`runDailyReviewScheduler`) — sends a bedtime word recap at local midnight
@@ -77,8 +78,9 @@ The application runs fourteen concurrent goroutines (plus an optional web server
 10. **Mini story scheduler** (`runStoryScheduler`) — sends one daily reading-practice story (default 17:00 local) (v1.23.0)
 11. **Nightly backup scheduler** (`runDBBackupScheduler`) — sends a SQLite snapshot to the maintainer (default 02:00 local)
 12. **Deck example backfill** (`runDeckBackfill`) — generates missing example sentences for curated deck cards, caching them in `deck_cards` (v1.24.0)
-13. **Telegram poller** (`pollTelegramUpdates`) — long-polls Telegram for incoming messages and callback queries
-14. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
+13. **Dictionary seeder** (`runDictionarySeeder`) — on first deploy, downloads kaikki.org English JSONL and indexes ~17k English→Persian translations into the `dictionary` table (v1.33.0)
+14. **Telegram poller** (`pollTelegramUpdates`) — long-polls Telegram for incoming messages and callback queries
+15. **Main goroutine** — blocks on `os.Signal` for graceful shutdown
 
 ---
 
@@ -800,6 +802,7 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/practice?kind` | GET | One fresh pool card at the user's level (`PracticeContent`: unseen → recycled → oldest; **never generates inline with AI**) and records it to the history tables. Kinds (`practiceKinds`): `word`, `idiom`, `collocation`. Rate-limited (`practiceAllowed`, 60/h per user). |
 | `/api/quiz/next` | GET | One multiple-choice question from `makeQuiz` (same generator as chat quizzes), HTML-stripped, with an HMAC token (`quizTokenMAC`) binding user/word/correct-index/expiry so the server stays stateless. Rate-limited. |
 | `/api/quiz/answer` | POST | `{word, correct, exp, token, answer}` → verifies the token + TTL, records to `quiz_results`, returns `{correct}`. |
+| `/api/dictionary?q&prefix` | GET | English→Persian dictionary lookup. Exact match (default) tries local dictionary then fa.wiktionary.org fallback; `prefix=1` does autocomplete (local only, limit 20). Returns `{results, seeding, total}`. |
 
 **Leaderboard** (`leaderboard.go`): cross-user ranking via `GROUP BY chat_id`
 over `sent_vocab` (words) or `review_schedule` (mastered, interval ≥ 21d). Each

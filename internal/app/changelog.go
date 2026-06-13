@@ -380,4 +380,9 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Internal: restructured the codebase from one flat package into a cmd/english-bot entrypoint plus internal/{config,ai,telegram,content,app} packages, renamed the module to its canonical path, added a golangci-lint config + Makefile, and broadened test coverage. No user-facing changes.",
 	},
+	{
+		Version: "1.33.0",
+		Silent:  true,
+		Text:    "Dictionary: added an offline English-Persian dictionary powered by kaikki.org (wiktextract) with fa.wiktionary.org live fallback. On first deploy the bot downloads and indexes ~17k English→Persian translation pairs into a local SQLite table. New Dict tab in the Mini App with search-as-you-type. Deck backfill now tries the free dictionary before spending AI calls on Persian/pronunciation/example fields.",
+	},
 }
