@@ -440,9 +440,15 @@ button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manip
   position: fixed; inset: 0; background: rgba(0,0,0,.35);
   display: flex; align-items: flex-end; justify-content: center;
   z-index: 60; padding: 0;
+  /* iOS/Telegram WebView only emits click events for elements it deems
+     "clickable" — a plain div backdrop without cursor:pointer never fires a
+     tap that reaches our delegated document handler, so it can't be dismissed
+     on mobile. cursor:pointer marks it clickable and restores the close tap. */
+  cursor: pointer;
 }
 .wp-sheet {
   background: var(--bg); border-radius: 16px 16px 0 0;
+  cursor: auto;
   padding: 16px 18px calc(16px + env(safe-area-inset-bottom, 0px));
   width: 100%; max-width: 420px;
   max-height: 55vh; overflow-y: auto;
