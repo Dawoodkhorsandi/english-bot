@@ -51,9 +51,9 @@ func TestComputeAchievements_Unlocked(t *testing.T) {
 
 	// Should be unlocked
 	for _, id := range []string{
-		"first_steps", "word_collector", "vocab_master",
-		"grammar_novice", "grammar_guru",
-		"quiz_rookie",
+		"first_steps", "first_drill", "first_quiz", "first_idiom", "first_story",
+		"word_collector", "vocab_master",
+		"grammar_guru",
 		"idiom_explorer", "collocation_king", "bookworm", "wise_owl",
 		"all_rounder",
 	} {

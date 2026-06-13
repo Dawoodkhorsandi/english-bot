@@ -159,7 +159,14 @@ function completionRing(known, total) {
 function renderDashboard(s) {
   const flame = s.current_streak >= 3 ? ' 🔥' : '';
 
-  let html = '<h1>📊 Your Progress</h1>';
+  // Sub-tab chips: Overview / Gamification
+  let html = '<h1>📊 Your Progress</h1>' +
+    '<div class="chips dash-tabs">' +
+    '<button class="chip chip-on" data-dtab="overview">Overview</button>' +
+    '<button class="chip" data-dtab="gamification">🎮 Gamification</button></div>';
+
+  // --- Overview sub-tab ---
+  html += '<div id="dtab-overview">';
   if (s.paused) {
     html += '<div class="card self-paced"><h2>🧘 Self-paced mode</h2>' +
       '<div class="sub">Automatic messages are silenced. Learn whenever you like — grab a new word or run a review right here.</div>' +
@@ -189,7 +196,6 @@ function renderDashboard(s) {
     (s.quiz_answered > 0 ? '<div class="stat-tile"><div class="stat-emoji">🧩</div><div class="stat-n">' + s.quiz_pct + '%</div><div class="sub">Quiz</div></div>' : '') +
     '</div></div>';
 
-  // Library content received, by kind. Only shown once there's anything to show.
   const lib = [
     { emoji: '💬', label: 'Idioms', n: s.idioms || 0 },
     { emoji: '🔗', label: 'Collocations', n: s.collocations || 0 },
@@ -212,16 +218,32 @@ function renderDashboard(s) {
 
   html += activitySection(s);
 
-  html += achievementsSection(s);
-
   html += analyticsSection(s);
 
   html += '<div class="card"><h2>Level</h2>' +
     '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
     '<div class="sub">' + s.active_days + ' active day' + (s.active_days === 1 ? '' : 's') + ' total' +
     (s.member_since ? ' · member since ' + esc(s.member_since) : '') + '</div></div>';
+  html += '</div>'; // end dtab-overview
+
+  // --- Gamification sub-tab ---
+  html += '<div id="dtab-gamification" hidden>';
+  html += achievementsSection(s);
+  html += '</div>'; // end dtab-gamification
 
   views.dashboard.innerHTML = html;
+
+  // Sub-tab switching
+  document.querySelectorAll('.dash-tabs .chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      hapticSelect();
+      document.querySelectorAll('.dash-tabs .chip').forEach(b => b.classList.remove('chip-on'));
+      btn.classList.add('chip-on');
+      const tab = btn.dataset.dtab;
+      document.getElementById('dtab-overview').hidden = (tab !== 'overview');
+      document.getElementById('dtab-gamification').hidden = (tab !== 'gamification');
+    });
+  });
 
   const info = document.getElementById('streak-info');
   if (info) {
@@ -404,7 +426,7 @@ function localDateKey(d) {
 }
 
 // ---------------------------------------------------------------------------
-// Achievements
+// Achievements (expandable by category)
 // ---------------------------------------------------------------------------
 function achievementsSection(s) {
   const achs = s.achievements || [];
@@ -412,23 +434,115 @@ function achievementsSection(s) {
   const unlocked = s.ach_unlocked || 0;
   const total = s.ach_total || achs.length;
 
-  let html = '<div class="card"><h2>Achievements · ' + unlocked + '/' + total + '</h2>' +
-    '<div class="ach-grid">';
+  // Group by category
+  const cats = {};
   for (const a of achs) {
-    const cls = a.unlocked ? 'badge unlocked' : 'badge locked';
-    let progress = '';
-    if (!a.unlocked && a.target > 1) {
-      progress = '<div class="badge-progress">' +
-        bar(a.progress * 100 / a.target, 'var(--accent)') +
-        '<div class="sub">' + a.progress + ' / ' + a.target + '</div></div>';
-    }
-    html += '<div class="' + cls + '">' +
-      '<span class="badge-icon">' + a.icon + '</span>' +
-      '<div class="badge-name">' + esc(a.name) + '</div>' +
-      '<div class="badge-desc">' + esc(a.description) + '</div>' +
-      progress + '</div>';
+    if (!cats[a.category]) cats[a.category] = [];
+    cats[a.category].push(a);
   }
-  html += '</div></div>';
+
+  // Sort categories: those with most unlocked first
+  const catOrder = Object.keys(cats).sort((a, b) => {
+    const aU = cats[a].filter(x => x.unlocked).length;
+    const bU = cats[b].filter(x => x.unlocked).length;
+    return bU - aU;
+  });
+
+  let html = '<div class="card"><h2>🏆 Achievements · ' + unlocked + '/' + total + '</h2>' +
+    '<div class="ach-bar">' + bar(unlocked * 100 / total, 'var(--accent)') +
+    '<div class="sub" style="margin-top:4px">' + unlocked + ' unlocked</div></div>';
+
+  for (const cat of catOrder) {
+    const items = cats[cat];
+    const catUnlocked = items.filter(x => x.unlocked).length;
+    const catTotal = items.length;
+    const allDone = catUnlocked === catTotal;
+
+    html += '<div class="ach-cat">' +
+      '<button class="ach-cat-header" data-cat="' + esc(cat) + '">' +
+      '<span class="ach-cat-title">' + esc(cat) + ' <span class="sub">(' + catUnlocked + '/' + catTotal + ')</span></span>' +
+      '<span class="ach-cat-toggle">▼</span></button>' +
+      '<div class="ach-cat-body">';
+
+    for (const a of items) {
+      const cls = a.unlocked ? 'badge unlocked' : 'badge locked';
+      let progress = '';
+      if (!a.unlocked && a.target > 1) {
+        progress = '<div class="badge-progress">' +
+          bar(a.progress * 100 / a.target, 'var(--accent)') +
+          '<div class="sub">' + a.progress + ' / ' + a.target + '</div></div>';
+      }
+      html += '<div class="' + cls + '">' +
+        '<span class="badge-icon">' + a.icon + '</span>' +
+        '<div class="badge-name">' + esc(a.name) + '</div>' +
+        '<div class="badge-desc">' + esc(a.description) + '</div>' +
+        progress + '</div>';
+    }
+    html += '</div></div>';
+  }
+
+  html += '</div>';
+
+  // Wire expand/collapse after render
+  setTimeout(() => {
+    document.querySelectorAll('.ach-cat-header').forEach(btn => {
+      btn.addEventListener('click', () => {
+        hapticSelect();
+        const body = btn.nextElementSibling;
+        const toggle = btn.querySelector('.ach-cat-toggle');
+        const open = body.style.display !== 'none';
+        body.style.display = open ? 'none' : '';
+        toggle.textContent = open ? '▶' : '▼';
+      });
+    });
+  }, 0);
+
+  return html;
+}
+
+// Render achievement badges for a profile comparison view (compact, no expand).
+function achCompareHTML(myAchs, theirAchs, myName, theirName) {
+  if (!myAchs || !theirAchs) return '';
+  // Group by category
+  const cats = {};
+  for (const a of myAchs) {
+    if (!cats[a.category]) cats[a.category] = [];
+    cats[a.category].push({ me: a, them: null });
+  }
+  for (const a of theirAchs) {
+    if (!cats[a.category]) cats[a.category] = [];
+    const existing = cats[a.category].find(x => x.me && x.me.id === a.id);
+    if (existing) {
+      existing.them = a;
+    } else {
+      cats[a.category].push({ me: null, them: a });
+    }
+  }
+
+  let html = '<div class="card"><h2>🏆 Achievements</h2>';
+  for (const cat of Object.keys(cats)) {
+    const items = cats[cat];
+    const myDone = items.filter(x => x.me && x.me.unlocked).length;
+    const theirDone = items.filter(x => x.them && x.them.unlocked).length;
+    html += '<div class="ach-compare-cat"><div class="sub" style="margin-bottom:6px;font-weight:600">' +
+      esc(cat) + ' — ' + myDone + '/' + items.length + ' vs ' + theirDone + '/' + items.length + '</div>';
+    html += '<div class="ach-grid">';
+    for (const { me, them } of items) {
+      const a = me || them;
+      const iHave = me && me.unlocked;
+      const theyHave = them && them.unlocked;
+      let ring = '';
+      if (iHave && theyHave) ring = 'ach-ring-both';
+      else if (iHave) ring = 'ach-ring-mine';
+      else if (theyHave) ring = 'ach-ring-theirs';
+      html += '<div class="badge ' + (iHave || theyHave ? 'unlocked' : 'locked') + ' ' + ring + '">' +
+        '<span class="badge-icon">' + a.icon + '</span>' +
+        '<div class="badge-name">' + esc(a.name) + '</div>' +
+        '<div class="badge-desc">' + (iHave ? '✅' : theyHave ? '🔸' : '—') + '</div></div>';
+    }
+    html += '</div></div>';
+  }
+  html += '</div>';
   return html;
 }
 
@@ -770,6 +884,12 @@ function renderProfile(id, p) {
     '<div class="heat-legend"><span>Less</span>' +
     '<i class="heat-cell"></i><i class="heat-cell l1"></i><i class="heat-cell l2"></i>' +
     '<i class="heat-cell l3"></i><i class="heat-cell l4"></i><span>More</span></div></div>';
+
+  // Achievement comparison
+  if (p.achievements && p.achievements_my && p.achievements_their) {
+    html += achCompareHTML(p.achievements_my, p.achievements_their, 'You', p.name);
+  }
+
   body.innerHTML = html;
 
   const btn = document.getElementById('kudos-btn');
