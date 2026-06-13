@@ -1534,7 +1534,12 @@ function ensureWordPopup() {
   if (wpOverlay) return;
   wpOverlay = document.createElement('div');
   wpOverlay.className = 'wp-overlay';
-  wpOverlay.hidden = true;
+  // Toggle via inline display (not the `hidden` attribute) so visibility never
+  // depends on a possibly-stale external CSS rule. All clicks — open, close,
+  // and "Open in Dictionary" — are routed through the single capture-phase
+  // document listener below, the one delivery path proven reliable in the iOS
+  // Telegram webview (per-element bubble handlers were dropped on touch).
+  wpOverlay.style.display = 'none';
   wpOverlay.innerHTML =
     '<div class="wp-sheet">' +
       '<div class="wp-head"><span class="wp-title"></span>' +
@@ -1543,19 +1548,11 @@ function ensureWordPopup() {
       '<button class="wp-open chip">📖 Open in Dictionary</button>' +
     '</div>';
   document.body.appendChild(wpOverlay);
-  wpOverlay.addEventListener('click', function (e) { if (e.target === wpOverlay) closeWordPopup(); });
-  wpOverlay.querySelector('.wp-x').addEventListener('click', closeWordPopup);
-  wpOverlay.querySelector('.wp-open').addEventListener('click', function () {
-    const word = wpOverlay.querySelector('.wp-title').textContent;
-    closeWordPopup();
-    showView('dictionary');
-    const input = document.getElementById('dict-search');
-    input.value = word;
-    dictSearch(word, true);
-  });
 }
 
-function closeWordPopup() { if (wpOverlay) wpOverlay.hidden = true; }
+function closeWordPopup() { if (wpOverlay) wpOverlay.style.display = 'none'; }
+
+function wordPopupOpen() { return wpOverlay && wpOverlay.style.display !== 'none'; }
 
 async function openWordPopup(raw) {
   const word = raw.trim().replace(/^[^A-Za-z]+/, '').replace(/[^A-Za-z]+$/, '').toLowerCase();
@@ -1566,7 +1563,7 @@ async function openWordPopup(raw) {
   const body = wpOverlay.querySelector('.wp-body');
   title.textContent = word;
   body.innerHTML = '<div class="sub">Looking up\u2026</div>';
-  wpOverlay.hidden = false;
+  wpOverlay.style.display = 'flex';
   haptic('light');
 
   try {
@@ -1595,9 +1592,32 @@ async function openWordPopup(raw) {
   }
 }
 
-// Capture-phase handler: fires before ancestor bubble-phase handlers (swipe
-// card flip, expandable-row toggle) so they don't also activate.
+// Single capture-phase handler for the whole word-popup lifecycle. Capture
+// fires before ancestor bubble-phase handlers (swipe card flip, expandable-row
+// toggle) and is the one click path that's reliable in the iOS Telegram webview
+// — so close (X / backdrop) and "Open in Dictionary" go through it too, not
+// per-element bubble listeners (which the popup couldn't be dismissed with on
+// Android/iOS).
 document.addEventListener('click', function (e) {
+  // Popup is open: handle its own controls first.
+  if (wordPopupOpen()) {
+    if (e.target.closest('.wp-x') || e.target === wpOverlay) {
+      e.stopPropagation();
+      closeWordPopup();
+      return;
+    }
+    if (e.target.closest('.wp-open')) {
+      e.stopPropagation();
+      const word = wpOverlay.querySelector('.wp-title').textContent;
+      closeWordPopup();
+      showView('dictionary');
+      const input = document.getElementById('dict-search');
+      input.value = word;
+      dictSearch(word, true);
+      return;
+    }
+  }
+  // Otherwise: tap a tappable word to open the popup.
   const tw = e.target.closest('.tw');
   if (tw && !tw.closest('.wp-sheet')) {
     e.stopPropagation();
