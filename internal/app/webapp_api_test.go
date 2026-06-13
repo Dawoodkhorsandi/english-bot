@@ -1150,3 +1150,87 @@ func TestLeaderboardIDsResolve(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Achievements + Analytics API
+// ---------------------------------------------------------------------------
+
+func TestAPIStatsIncludesAchievements(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	chatID := int64(5001)
+
+	// Seed some data so achievements unlock.
+	for i := 0; i < 12; i++ {
+		store.RecordSentVocab(chatID, "w"+string(rune('a'+i)))
+	}
+
+	w := apiCall(store, handleAPIStats, http.MethodGet, "/api/stats", chatID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("stats code = %d, want 200", w.Code)
+	}
+
+	var resp struct {
+		Achievements []Achievement `json:"achievements"`
+		AchUnlocked  int           `json:"ach_unlocked"`
+		AchTotal     int           `json:"ach_total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Achievements) == 0 {
+		t.Fatal("expected achievements in stats response")
+	}
+	if resp.AchTotal != len(resp.Achievements) {
+		t.Errorf("ach_total=%d but len(achievements)=%d", resp.AchTotal, len(resp.Achievements))
+	}
+	if resp.AchUnlocked < 1 {
+		t.Error("expected at least 1 unlocked achievement (first_steps)")
+	}
+
+	// Verify first_steps is unlocked.
+	for _, a := range resp.Achievements {
+		if a.ID == "first_steps" && !a.Unlocked {
+			t.Error("first_steps should be unlocked with 12 words")
+		}
+	}
+}
+
+func TestAPIAnalytics(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	chatID := int64(5002)
+
+	// Seed some data.
+	store.RecordSentVocab(chatID, "apple")
+	store.RecordSentVocab(chatID, "banana")
+	_, _ = store.db.Exec("INSERT INTO quiz_results (chat_id, word, correct) VALUES (?, 'apple', 1)", chatID)
+
+	w := apiCall(store, handleAPIAnalytics, http.MethodGet, "/api/analytics", chatID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("analytics code = %d, want 200 (body=%s)", w.Code, w.Body.String())
+	}
+
+	var resp LearningAnalytics
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v (body=%s)", err, w.Body.String())
+	}
+	if len(resp.ContentDiversity) < 1 {
+		t.Error("expected content diversity data")
+	}
+	if len(resp.ActivityByHour) != 24 {
+		t.Errorf("expected 24 hour buckets, got %d", len(resp.ActivityByHour))
+	}
+}
+
+func TestAPIAnalyticsRequiresAuth(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/analytics", nil)
+	w := httptest.NewRecorder()
+	withUser(store, handleAPIAnalytics)(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("analytics without auth: code = %d, want 401", w.Code)
+	}
+}

@@ -59,6 +59,8 @@ internal/app/           — the coupled core (package app)
   leitner.go            — curated Leitner decks (deck_cards/leitner_progress), 5-box scheduler, field backfill worker (example/Persian/pronunciation)
   grammar.go            — static grammar-lesson curriculum loaded from webapp/grammar/lessons.json (/grammar + /api/grammar)
   vocab.go              — /mywords (browse learned vocabulary) and /bookmark (save favourite words) features
+  achievements.go       — badge achievements computed from existing user data (26 badges across 7 categories)
+  analytics.go          — detailed learning analytics: vocabulary breakdown, quiz accuracy trends, activity by hour, weekly velocity, content diversity
 
 internal/docsync/       — CI tests that keep README.md & DOCS.md in sync with the code (doc_test.go)
 ```
@@ -803,6 +805,7 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/quiz/next` | GET | One multiple-choice question from `makeQuiz` (same generator as chat quizzes), HTML-stripped, with an HMAC token (`quizTokenMAC`) binding user/word/correct-index/expiry so the server stays stateless. Rate-limited. |
 | `/api/quiz/answer` | POST | `{word, correct, exp, token, answer}` → verifies the token + TTL, records to `quiz_results`, returns `{correct}`. |
 | `/api/dictionary?q&prefix` | GET | English→Persian dictionary lookup. Exact match (default) tries local dictionary then fa.wiktionary.org fallback; `prefix=1` does autocomplete (local only, limit 20). Returns `{results, seeding, total}`. |
+| `/api/analytics` | GET | Detailed learning analytics: vocabulary breakdown by level, quiz accuracy trend (last 30 days), activity by hour of day, weekly velocity (words per week, last 8 weeks), and content diversity. Returns `LearningAnalytics` struct. |
 
 **Leaderboard** (`leaderboard.go`): cross-user ranking via `GROUP BY chat_id`
 over `sent_vocab` (words) or `review_schedule` (mastered, interval ≥ 21d). Each

@@ -418,4 +418,9 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Fix: the word popup still couldn't be closed on mobile (× and backdrop both unresponsive) — click events don't reliably reach the popup controls in the Telegram webview even though opening works. Added a touchend fallback (the same path the swipe cards use) scoped to the open popup so close and Open-in-Dictionary fire on the first tap.",
 	},
+	{
+		Version: "1.35.0",
+		Silent:  true,
+		Text:    "Achievements and learning analytics. New /api/stats payload includes 26 unlockable badges across 8 categories (Vocabulary, Grammar, Streaks, Quiz, SRS, Library, Social, Dedication, Mastery) — all computed from existing user data with no new DB tables. New /api/analytics endpoint serves vocabulary breakdown by level, quiz accuracy trend (30-day sparkline), activity-by-hour heatmap, weekly learning velocity, and content diversity. Dashboard shows badge grid with progress bars and analytics cards below the activity heatmap.",
+	},
 }

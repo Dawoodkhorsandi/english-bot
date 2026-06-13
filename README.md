@@ -22,6 +22,8 @@ A Telegram bot that sends subscribers AI-generated English practice on a configu
 - **Streak Celebrations** -- personalised congratulations at 3, 7, 14, 30, and 60-day streaks
 - **Reply Keyboard** -- four persistent shortcut buttons (Word / Drill / Quiz / Stats) always visible at the bottom of the chat
 - **Progress Dashboard** -- `/stats` shows Unicode progress bars for streak and quiz accuracy; optional Telegram Mini App with a 30-day activity chart (set `WEB_APP_URL`)
+- **Achievements** -- 26 unlockable badges across 7 categories (Vocabulary, Grammar, Streaks, Quiz, SRS, Library, Social, Dedication, Mastery) computed from existing learning data; displayed in the Mini App dashboard with progress bars for locked badges
+- **Learning Analytics** -- detailed charts in the Mini App: vocabulary breakdown by level, quiz accuracy trends (30-day sparkline), activity-by-hour heatmap, weekly learning velocity, and content diversity breakdown
 - **Mini App hub** -- a multi-tab Telegram Mini App (opened from the persistent menu button or `/app`): progress dashboard, searchable vocabulary list, swipe-to-review (SRS), curated **Leitner word decks** (504 Essential Words + Barron's GRE), a cross-user **leaderboard**, and an in-app settings panel
 - **Typing Indicator** -- "typing…" chat action fires before every AI generation call
 - **Multi-Provider AI** -- Gemini, Groq, Cerebras, OpenRouter, GitHub Models, Cloudflare, Mistral, Gemini2, SambaNova, Cohere with automatic fallback
@@ -197,6 +199,8 @@ internal/app/       -- the coupled core (package app; imports config/ai/telegram
   leitner.go        -- curated Leitner decks (deck_cards/leitner_progress), box scheduler, field backfill
   grammar.go        -- static grammar lessons curriculum (/grammar + Mini App)
   vocab.go          -- /mywords (browse learned words) and /bookmark (favourites) features
+  achievements.go   -- badge achievements computed from existing user data
+  analytics.go      -- detailed learning analytics (breakdown, trends, activity by hour)
   webapp/           -- embedded Mini App SPA (index.html, app.js, styles.css, decks/, grammar/)
 
 internal/docsync/   -- CI tests that keep README.md & DOCS.md in sync with the code
