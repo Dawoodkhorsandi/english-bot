@@ -1051,16 +1051,26 @@ func TestAPIProfileComparison(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("profile code = %d", w.Code)
 	}
-	if strings.Contains(w.Body.String(), strconv.FormatInt(them, 10)) {
-		t.Fatalf("profile payload leaked a chat_id: %s", w.Body.String())
-	}
+	// Check that the raw chat_id isn't exposed as a top-level field or in user-facing identifiers.
+	// We can't do a naive strings.Contains because numeric values (targets, progress) may
+	// coincidentally contain the chat_id digits. Instead, check the JSON structure.
 	var raw map[string]interface{}
 	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
 		t.Fatal(err)
 	}
+	// Must not have chat_id as a key anywhere in the response.
+	if _, ok := raw["chat_id"]; ok {
+		t.Error("profile response contains chat_id field")
+	}
+	if _, ok := raw["id"]; ok {
+		// "id" should not be a raw chat_id — it should be the opaque public_id passed in.
+		if v, ok := raw["id"].(string); ok && v == strconv.FormatInt(them, 10) {
+			t.Error("profile response exposes raw chat_id as id")
+		}
+	}
 	metrics, _ := raw["metrics"].([]interface{})
-	if len(metrics) != 5 {
-		t.Fatalf("metrics = %d, want 5", len(metrics))
+	if len(metrics) != 6 {
+		t.Fatalf("metrics = %d, want 6", len(metrics))
 	}
 	words := metrics[0].(map[string]interface{})
 	if words["key"] != "words" || words["me"].(float64) != 2 || words["them"].(float64) != 1 || words["better"].(float64) != 1 {

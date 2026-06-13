@@ -482,6 +482,19 @@ button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manip
 .dict-tags { font-size: 12px; color: var(--accent-fg); margin-top: 2px; }
 
 /* ---- Achievements ---- */
+.ach-bar { margin-bottom: 12px; }
+.ach-bar .bar-wrap { height: 6px; }
+.ach-cat { margin-bottom: 8px; }
+.ach-cat-header {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; border: none; background: var(--bg); border-radius: 10px;
+  padding: 10px 14px; font-size: 14px; font-weight: 600; color: var(--text);
+  cursor: pointer; text-align: left;
+}
+.ach-cat-header:active { opacity: .7; }
+.ach-cat-title { flex: 1; }
+.ach-cat-toggle { font-size: 12px; color: var(--hint); transition: transform .2s; }
+.ach-cat-body { padding: 6px 0; }
 .ach-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 6px; }
 .badge {
   text-align: center; background: var(--bg); border-radius: 12px; padding: 12px 6px;
@@ -497,6 +510,13 @@ button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manip
 .badge-progress .bar-wrap { height: 5px; }
 .badge-progress .sub { font-size: 10px; margin-top: 3px; }
 .ach-summary { font-size: 13px; color: var(--hint); margin-top: 8px; text-align: center; }
+/* Achievement comparison rings (profile view) */
+.ach-ring-both { border-color: var(--success) !important; }
+.ach-ring-mine { border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent); }
+.ach-ring-theirs { border-color: var(--hint) !important; }
+.ach-compare-cat { margin-bottom: 12px; }
+/* Dashboard sub-tabs */
+.dash-tabs { margin-bottom: 12px; }
 
 /* ---- Analytics ---- */
 .analytics-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }

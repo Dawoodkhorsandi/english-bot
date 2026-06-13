@@ -423,4 +423,9 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Achievements and learning analytics. New /api/stats payload includes 26 unlockable badges across 8 categories (Vocabulary, Grammar, Streaks, Quiz, SRS, Library, Social, Dedication, Mastery) — all computed from existing user data with no new DB tables. New /api/analytics endpoint serves vocabulary breakdown by level, quiz accuracy trend (30-day sparkline), activity-by-hour heatmap, weekly learning velocity, and content diversity. Dashboard shows badge grid with progress bars and analytics cards below the activity heatmap.",
 	},
+	{
+		Version: "1.35.1",
+		Silent:  true,
+		Text:    "Achievements redesign: Stats dashboard split into Overview and Gamification sub-tabs. 39 achievements (up from 26) with expandable category sections. New badges: First Drill, First Quiz, First Idiom, First Story, Vocabulary Legend (1000 words), Century Streak (100 days), Quiz Warrior (100 answers), Quiz Perfectionist (100% at 50+), Idiom Collector (20), Prolific Reader (20 stories), Popular (5 kudos), Century Active (100 days), Speed Learner (10+ in one day), Bookworm Supreme (25 bookmarks), Deck Explorer (50 cards). Leaderboard profile view now shows head-to-head achievement comparison.",
+	},
 }

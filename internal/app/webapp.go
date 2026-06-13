@@ -407,6 +407,37 @@ func handleAPIProfile(w http.ResponseWriter, r *http.Request, chatID int64, stor
 	if name == "" {
 		name = funnyName(target)
 	}
+
+	// Compute achievements for both users.
+	myAchs := store.ComputeAchievements(chatID, me)
+	theirAchs := store.ComputeAchievements(target, them)
+	myUnlocked, _ := AchievementStats(myAchs)
+	theirUnlocked, _ := AchievementStats(theirAchs)
+
+	// Build achievement comparison: group by category, show which each user has.
+	achCategories := map[string]map[string][2]bool{} // cat -> id -> [me, them]
+	for _, a := range myAchs {
+		if _, ok := achCategories[a.Category]; !ok {
+			achCategories[a.Category] = map[string][2]bool{}
+		}
+		achCategories[a.Category][a.ID] = [2]bool{a.Unlocked, false}
+	}
+	for _, a := range theirAchs {
+		if _, ok := achCategories[a.Category]; !ok {
+			achCategories[a.Category] = map[string][2]bool{}
+		}
+		prev := achCategories[a.Category][a.ID]
+		prev[1] = a.Unlocked
+		achCategories[a.Category][a.ID] = prev
+	}
+
+	achCompare := map[string]interface{}{
+		"my_total":    len(myAchs),
+		"my_unlocked": myUnlocked,
+		"their_total": len(theirAchs),
+		"unlocked":    theirUnlocked,
+	}
+
 	writeJSON(w, map[string]interface{}{
 		"name":    name,
 		"isMe":    target == chatID,
@@ -418,7 +449,11 @@ func handleAPIProfile(w http.ResponseWriter, r *http.Request, chatID int64, stor
 			metric("streak", "Streak", me.CurrentStreak, them.CurrentStreak),
 			metric("quiz", "Quiz accuracy", quizPct(me), quizPct(them)),
 			metric("active", "Active days", me.ActiveDays, them.ActiveDays),
+			metric("achievements", "Achievements", myUnlocked, theirUnlocked),
 		},
+		"achievements":       achCompare,
+		"achievements_my":    myAchs,
+		"achievements_their": theirAchs,
 	})
 }
 
