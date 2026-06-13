@@ -413,4 +413,9 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Fix: tapping the dimmed backdrop now closes the word popup on Android/iOS. iOS/Telegram WebView only emits click events for elements it considers clickable, so the plain backdrop div never fired a tap — added cursor:pointer to mark it clickable.",
 	},
+	{
+		Version: "1.34.4",
+		Silent:  true,
+		Text:    "Fix: the word popup still couldn't be closed on mobile (× and backdrop both unresponsive) — click events don't reliably reach the popup controls in the Telegram webview even though opening works. Added a touchend fallback (the same path the swipe cards use) scoped to the open popup so close and Open-in-Dictionary fire on the first tap.",
+	},
 }
