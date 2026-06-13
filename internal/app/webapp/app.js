@@ -79,6 +79,24 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Wrap English words (2+ letters) in tappable spans for dictionary lookup.
+// Operates on raw text, escaping each segment individually.
+function tappableText(text) {
+  if (!text) return '';
+  var s = String(text);
+  var result = '';
+  var i = 0;
+  var re = /[A-Za-z]{2,}(?:['\u2019-][A-Za-z]+)*/g;
+  var m;
+  while ((m = re.exec(s)) !== null) {
+    result += esc(s.slice(i, m.index));
+    result += '<span class="tw">' + esc(m[0]) + '</span>';
+    i = re.lastIndex;
+  }
+  result += esc(s.slice(i));
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Tab navigation
 // ---------------------------------------------------------------------------
@@ -352,7 +370,7 @@ function weeklyBarsHTML(counts) {
     weeks.push({ sum, label });
   }
   const bars = weeks.map(wk =>
-    '<div class="wbar" title="' + wk.sum + ' in week of ' + wk.label + '">' +
+    '<div class="wbar" data-tip="' + wk.sum + ' in week of ' + wk.label + '">' +
     '<div class="wbar-fill" style="height:' + Math.round(wk.sum * 100 / max) + '%"></div></div>'
   ).join('');
   return '<div class="wbars">' + bars + '</div>';
@@ -370,7 +388,7 @@ function heatmapHTML(counts) {
     else if (n > 0) cls += ' l' + heatLevel(n);
     if (key === todayKey) cls += ' today';
     const tip = n > 0 ? n + ' item' + (n === 1 ? '' : 's') + ' on ' + key : key;
-    cells += '<div class="' + cls + '" title="' + tip + '"></div>';
+    cells += '<div class="' + cls + '" data-tip="' + tip + '"></div>';
     d.setDate(d.getDate() + 1);
   }
   return '<div class="heatmap">' + cells + '</div>';
@@ -434,7 +452,8 @@ function wordRow(w) {
     body.textContent = 'Loading…';
     try {
       const card = await api('/api/vocab/card?term=' + encodeURIComponent(w.term));
-      body.textContent = card.text || card.meaning || 'No saved card for this word yet.';
+      var txt = card.text || card.meaning || '';
+      body.innerHTML = txt ? tappableText(txt) : 'No saved card for this word yet.';
     } catch (e) {
       loaded = false;
       body.textContent = 'Could not load the card. Tap to retry.';
@@ -462,7 +481,7 @@ function contentRow(it) {
   el.innerHTML =
     '<div class="word-main"><div class="word-term">' + esc(it.term) + '</div>' +
     '<div class="word-meaning">' + esc(preview) + '</div>' +
-    '<div class="word-text" hidden>' + esc(detail) + '</div>' +
+    '<div class="word-text" hidden>' + tappableText(detail) + '</div>' +
     '</div>' +
     '<span class="word-date">' + esc(it.sent_at || '') + '</span>';
   const body = el.querySelector('.word-text');
@@ -753,9 +772,9 @@ function askDisplayName() {
 function cardBack(it) {
   const meaning = it.meaning || it.definition || '';
   let html = meaning
-    ? '<div class="rev-meaning">' + esc(meaning) + '</div>'
+    ? '<div class="rev-meaning">' + tappableText(meaning) + '</div>'
     : '<div class="rev-meaning">(no definition saved)</div>';
-  if (it.example) html += '<div class="ex">“' + esc(it.example) + '”</div>';
+  if (it.example) html += '<div class="ex">“' + tappableText(it.example) + '”</div>';
   if (it.persian) html += '<div class="rev-fa" dir="rtl">🇮🇷 ' + esc(it.persian) + '</div>';
   if (it.mnemonic) html += '<div class="rev-mnem">💡 ' + esc(it.mnemonic) + '</div>';
   return html;
@@ -1099,7 +1118,7 @@ async function loadPracticeCard(kind) {
   }
   practiceBody.innerHTML =
     '<div class="card"><div class="word-term" style="font-size:22px">' + esc(data.term) + '</div>' +
-    '<div class="practice-text" style="margin-top:10px">' + esc(data.text) + '</div></div>' +
+    '<div class="practice-text" style="margin-top:10px">' + tappableText(data.text) + '</div></div>' +
     '<div class="chips"><button class="chip chip-on" id="practice-more">🔄 Another one</button></div>';
   document.getElementById('practice-more').addEventListener('click', () => {
     hapticSelect();
@@ -1225,13 +1244,13 @@ async function openGrammarLesson(id) {
 
   let html = '<h1>📖 ' + esc(l.title) + '</h1>';
   if (l.image) html += '<div class="card"><img class="grammar-img" src="' + esc(l.image) + '" alt="' + esc(l.title) + ' diagram" loading="lazy" decoding="async"></div>';
-  html += '<div class="card"><h2>Pattern</h2><div class="grammar-pattern">' + esc(l.pattern) + '</div></div>';
-  html += '<div class="card"><h2>How it works</h2><div class="grammar-text">' + esc(l.explanation) + '</div></div>';
+  html += '<div class="card"><h2>Pattern</h2><div class="grammar-pattern">' + tappableText(l.pattern) + '</div></div>';
+  html += '<div class="card"><h2>How it works</h2><div class="grammar-text">' + tappableText(l.explanation) + '</div></div>';
   if ((l.examples || []).length) {
     html += '<div class="card"><h2>Examples</h2>' +
-      l.examples.map(e => '<div class="grammar-ex">• ' + esc(e) + '</div>').join('') + '</div>';
+      l.examples.map(e => '<div class="grammar-ex">\u2022 ' + tappableText(e) + '</div>').join('') + '</div>';
   }
-  if (l.tip) html += '<div class="card"><div class="grammar-tip">💡 ' + esc(l.tip) + '</div></div>';
+  if (l.tip) html += '<div class="card"><div class="grammar-tip">💡 ' + tappableText(l.tip) + '</div></div>';
   if ((l.practice || []).length) html += '<div class="card"><h2>Practice</h2><div id="grammar-practice"></div></div>';
   grammarBody.innerHTML = html;
 
@@ -1396,8 +1415,8 @@ function renderDictEntry(e) {
   html += '</div>';
   html += '<div class="dict-persian">' + esc(e.persian) + '</div>';
   if (e.romanization) html += '<div class="dict-roman">' + esc(e.romanization) + '</div>';
-  if (e.definition) html += '<div class="dict-def">' + esc(e.definition) + '</div>';
-  if (e.example) html += '<div class="dict-example">' + esc(e.example) + '</div>';
+  if (e.definition) html += '<div class="dict-def">' + tappableText(e.definition) + '</div>';
+  if (e.example) html += '<div class="dict-example">' + tappableText(e.example) + '</div>';
   if (e.sense) html += '<div class="dict-sense">Sense: ' + esc(e.sense) + '</div>';
   if (e.tags) html += '<div class="dict-tags">' + esc(e.tags) + '</div>';
   html += '</div>';
@@ -1478,6 +1497,113 @@ async function dictSearch(q, exact) {
     emptyEl.textContent = 'Could not look up this word. Try again later.';
   }
 }
+
+// ---------------------------------------------------------------------------
+// Heatmap touch tooltip (replaces native title — works on mobile)
+// ---------------------------------------------------------------------------
+const heatTip = document.createElement('div');
+heatTip.className = 'heat-tip';
+heatTip.hidden = true;
+document.body.appendChild(heatTip);
+
+function showHeatTip(el) {
+  const tip = el.getAttribute('data-tip');
+  if (!tip) return;
+  heatTip.textContent = tip;
+  heatTip.hidden = false;
+  const r = el.getBoundingClientRect();
+  // Centre above the element; CSS transform: translate(-50%, -100%) does the rest.
+  heatTip.style.left = (r.left + r.width / 2) + 'px';
+  heatTip.style.top = (r.top - 4) + 'px';
+}
+
+function hideHeatTip() { heatTip.hidden = true; }
+
+document.addEventListener('click', function (e) {
+  const cell = e.target.closest('.heat-cell[data-tip], .wbar[data-tip]');
+  if (cell) { haptic('light'); showHeatTip(cell); return; }
+  hideHeatTip();
+});
+
+// ---------------------------------------------------------------------------
+// Word popup — tap any tappable word (.tw) for an inline dictionary lookup
+// ---------------------------------------------------------------------------
+let wpOverlay = null;
+
+function ensureWordPopup() {
+  if (wpOverlay) return;
+  wpOverlay = document.createElement('div');
+  wpOverlay.className = 'wp-overlay';
+  wpOverlay.hidden = true;
+  wpOverlay.innerHTML =
+    '<div class="wp-sheet">' +
+      '<div class="wp-head"><span class="wp-title"></span>' +
+      '<button class="wp-x">\u00d7</button></div>' +
+      '<div class="wp-body"></div>' +
+      '<button class="wp-open chip">📖 Open in Dictionary</button>' +
+    '</div>';
+  document.body.appendChild(wpOverlay);
+  wpOverlay.addEventListener('click', function (e) { if (e.target === wpOverlay) closeWordPopup(); });
+  wpOverlay.querySelector('.wp-x').addEventListener('click', closeWordPopup);
+  wpOverlay.querySelector('.wp-open').addEventListener('click', function () {
+    const word = wpOverlay.querySelector('.wp-title').textContent;
+    closeWordPopup();
+    showView('dictionary');
+    const input = document.getElementById('dict-search');
+    input.value = word;
+    dictSearch(word, true);
+  });
+}
+
+function closeWordPopup() { if (wpOverlay) wpOverlay.hidden = true; }
+
+async function openWordPopup(raw) {
+  const word = raw.trim().replace(/^[^A-Za-z]+/, '').replace(/[^A-Za-z]+$/, '').toLowerCase();
+  if (!word || word.length < 2) return;
+  ensureWordPopup();
+  hideHeatTip();
+  const title = wpOverlay.querySelector('.wp-title');
+  const body = wpOverlay.querySelector('.wp-body');
+  title.textContent = word;
+  body.innerHTML = '<div class="sub">Looking up\u2026</div>';
+  wpOverlay.hidden = false;
+  haptic('light');
+
+  try {
+    const data = await api('/api/dictionary?q=' + encodeURIComponent(word));
+    if (!data.results || data.results.length === 0) {
+      body.innerHTML = '<div class="sub">No translation found for \u201c' + esc(word) + '\u201d.</div>';
+      return;
+    }
+    let html = '';
+    data.results.slice(0, 3).forEach(function (e) {
+      html += '<div class="wp-entry">';
+      if (e.pos) html += '<span class="dict-pos">' + esc(e.pos) + '</span> ';
+      if (e.pronunciation) html += '<span class="dict-ipa">' + esc(e.pronunciation) + '</span>';
+      if (e.persian) html += '<div class="dict-persian" style="font-size:18px;margin:4px 0 2px">' + esc(e.persian) + '</div>';
+      if (e.definition) html += '<div class="dict-def">' + esc(e.definition) + '</div>';
+      if (e.example) html += '<div class="dict-example">' + esc(e.example) + '</div>';
+      html += '</div>';
+    });
+    if (data.results.length > 3) {
+      html += '<div class="sub">' + (data.results.length - 3) + ' more sense' +
+        (data.results.length - 3 === 1 ? '' : 's') + ' \u2014 open in Dictionary.</div>';
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = '<div class="sub">Could not look up this word.</div>';
+  }
+}
+
+// Capture-phase handler: fires before ancestor bubble-phase handlers (swipe
+// card flip, expandable-row toggle) so they don't also activate.
+document.addEventListener('click', function (e) {
+  const tw = e.target.closest('.tw');
+  if (tw && !tw.closest('.wp-sheet')) {
+    e.stopPropagation();
+    openWordPopup(tw.textContent);
+  }
+}, true);
 
 // ---------------------------------------------------------------------------
 // Boot
