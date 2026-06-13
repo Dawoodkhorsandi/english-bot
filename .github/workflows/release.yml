@@ -50,7 +50,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           BINARY="english-bot-${{ matrix.goos }}-${{ matrix.goarch }}"
-          go build -trimpath -ldflags="-s -w" -o "$BINARY" .
+          go build -trimpath -ldflags="-s -w" -o "$BINARY" ./cmd/english-bot
           chmod +x "$BINARY"
 
       - name: Upload binary

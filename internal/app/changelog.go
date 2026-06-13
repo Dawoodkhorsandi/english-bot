@@ -385,4 +385,9 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Dictionary: added an offline English-Persian dictionary powered by kaikki.org (wiktextract) with fa.wiktionary.org live fallback. On first deploy the bot downloads and indexes ~17k English→Persian translation pairs into a local SQLite table. New Dict tab in the Mini App with search-as-you-type. Deck backfill now tries the free dictionary before spending AI calls on Persian/pronunciation/example fields.",
 	},
+	{
+		Version: "1.33.1",
+		Silent:  true,
+		Text:    "Fix: release workflow built binaries from the repo root (no Go files after the v1.32.4 restructure) instead of ./cmd/english-bot. Cross-platform release binaries now build correctly.",
+	},
 }
