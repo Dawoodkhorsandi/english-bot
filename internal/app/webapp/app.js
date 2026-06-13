@@ -1625,6 +1625,32 @@ document.addEventListener('click', function (e) {
   }
 }, true);
 
+// Touch fallback for dismissing the popup. In the iOS/Android Telegram webview,
+// taps on the popup's own controls (× / backdrop / Open-in-Dictionary) don't
+// reliably synthesize a click that reaches the handler above — so the popup
+// couldn't be closed, even though opening (a tap on a normal-flow .tw word)
+// works. touchend is the delivery path this codebase already trusts on mobile
+// (the swipe cards use it). It's wired only while the popup is open, so it can
+// never cause an accidental open while scrolling the page. preventDefault stops
+// the late synthesized click from firing this logic a second time.
+document.addEventListener('touchend', function (e) {
+  if (!wordPopupOpen()) return;
+  if (e.target.closest('.wp-x') || e.target === wpOverlay) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeWordPopup();
+  } else if (e.target.closest('.wp-open')) {
+    e.preventDefault();
+    e.stopPropagation();
+    const word = wpOverlay.querySelector('.wp-title').textContent;
+    closeWordPopup();
+    showView('dictionary');
+    const input = document.getElementById('dict-search');
+    input.value = word;
+    dictSearch(word, true);
+  }
+}, true);
+
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
