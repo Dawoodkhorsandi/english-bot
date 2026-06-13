@@ -480,3 +480,35 @@ button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manip
 .dict-example { font-size: 13px; color: var(--hint); font-style: italic; margin-top: 2px; }
 .dict-sense { font-size: 12px; color: var(--subtitle); margin-top: 4px; }
 .dict-tags { font-size: 12px; color: var(--accent-fg); margin-top: 2px; }
+
+/* ---- Achievements ---- */
+.ach-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 6px; }
+.badge {
+  text-align: center; background: var(--bg); border-radius: 12px; padding: 12px 6px;
+  position: relative; overflow: hidden;
+}
+.badge.unlocked { border: 1.5px solid var(--accent); }
+.badge.locked { opacity: .5; }
+.badge-icon { font-size: 28px; line-height: 1; display: block; margin-bottom: 4px; }
+.badge.locked .badge-icon { filter: grayscale(1); }
+.badge-name { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.2; }
+.badge-desc { font-size: 11px; color: var(--hint); margin-top: 2px; line-height: 1.2; }
+.badge-progress { margin-top: 6px; }
+.badge-progress .bar-wrap { height: 5px; }
+.badge-progress .sub { font-size: 10px; margin-top: 3px; }
+.ach-summary { font-size: 13px; color: var(--hint); margin-top: 8px; text-align: center; }
+
+/* ---- Analytics ---- */
+.analytics-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+.analytics-bar-label { width: 90px; text-align: right; color: var(--hint); flex-shrink: 0; }
+.analytics-bar-track { flex: 1; background: var(--border); border-radius: 4px; height: 14px; overflow: hidden; }
+.analytics-bar-fill { height: 100%; border-radius: 4px; background: var(--accent); transition: width .4s ease; }
+.analytics-bar-val { width: 36px; font-size: 12px; font-weight: 600; color: var(--text); }
+.hour-heat { display: flex; gap: 2px; align-items: flex-end; height: 40px; margin-top: 6px; }
+.hour-heat-cell { flex: 1; background: var(--border); border-radius: 2px; min-height: 3px; }
+.analytics-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 13px; }
+.analytics-row-label { width: 80px; text-align: right; color: var(--hint); flex-shrink: 0; }
+.analytics-row-val { font-weight: 600; }
+.sparkline { display: flex; gap: 2px; align-items: flex-end; height: 36px; margin-top: 6px; }
+.sparkline-cell { flex: 1; border-radius: 2px; min-height: 2px; background: var(--success); }
+.sparkline-empty { background: var(--border); }

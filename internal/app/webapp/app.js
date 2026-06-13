@@ -212,6 +212,10 @@ function renderDashboard(s) {
 
   html += activitySection(s);
 
+  html += achievementsSection(s);
+
+  html += analyticsSection(s);
+
   html += '<div class="card"><h2>Level</h2>' +
     '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
     '<div class="sub">' + s.active_days + ' active day' + (s.active_days === 1 ? '' : 's') + ' total' +
@@ -399,12 +403,113 @@ function localDateKey(d) {
          '-' + (d.getDate() + '').padStart(2, '0');
 }
 
+// ---------------------------------------------------------------------------
+// Achievements
+// ---------------------------------------------------------------------------
+function achievementsSection(s) {
+  const achs = s.achievements || [];
+  if (achs.length === 0) return '';
+  const unlocked = s.ach_unlocked || 0;
+  const total = s.ach_total || achs.length;
+
+  let html = '<div class="card"><h2>Achievements · ' + unlocked + '/' + total + '</h2>' +
+    '<div class="ach-grid">';
+  for (const a of achs) {
+    const cls = a.unlocked ? 'badge unlocked' : 'badge locked';
+    let progress = '';
+    if (!a.unlocked && a.target > 1) {
+      progress = '<div class="badge-progress">' +
+        bar(a.progress * 100 / a.target, 'var(--accent)') +
+        '<div class="sub">' + a.progress + ' / ' + a.target + '</div></div>';
+    }
+    html += '<div class="' + cls + '">' +
+      '<span class="badge-icon">' + a.icon + '</span>' +
+      '<div class="badge-name">' + esc(a.name) + '</div>' +
+      '<div class="badge-desc">' + esc(a.description) + '</div>' +
+      progress + '</div>';
+  }
+  html += '</div></div>';
+  return html;
+}
+
+// ---------------------------------------------------------------------------
+// Learning Analytics
+// ---------------------------------------------------------------------------
+function analyticsSection(s) {
+  if (!s._analytics) return '';
+  const a = s._analytics;
+
+  let html = '<div class="card"><h2>📊 Learning Analytics</h2>';
+
+  // Content diversity
+  if (a.content_diversity && a.content_diversity.length > 0) {
+    html += '<h2>Content breakdown</h2>';
+    const maxC = Math.max(...a.content_diversity.map(c => c.count));
+    for (const c of a.content_diversity) {
+      html += '<div class="analytics-bar">' +
+        '<div class="analytics-bar-label">' + esc(c.label) + '</div>' +
+        '<div class="analytics-bar-track"><div class="analytics-bar-fill" style="width:' +
+        Math.round(c.count * 100 / maxC) + '%"></div></div>' +
+        '<div class="analytics-bar-val">' + c.count + '</div></div>';
+    }
+  }
+
+  // Quiz accuracy trend (sparkline)
+  if (a.quiz_accuracy_trend && a.quiz_accuracy_trend.length > 0) {
+    html += '<h2>Quiz accuracy · last 30 days</h2><div class="sparkline">';
+    for (const d of a.quiz_accuracy_trend) {
+      const h = Math.max(4, Math.round(d.pct * 0.36));
+      html += '<div class="sparkline-cell" style="height:' + h + 'px" data-tip="' +
+        esc(d.date) + ': ' + d.pct + '% (' + d.correct + '/' + d.total + ')"></div>';
+    }
+    html += '</div>';
+  }
+
+  // Activity by hour
+  if (a.activity_by_hour && a.activity_by_hour.some(h => h.count > 0)) {
+    html += '<h2>Activity by hour</h2><div class="hour-heat">';
+    const maxH = Math.max(...a.activity_by_hour.map(h => h.count), 1);
+    for (const h of a.activity_by_hour) {
+      const pct = Math.round(h.count * 100 / maxH);
+      const opacity = h.count === 0 ? 0.1 : Math.max(0.2, pct / 100);
+      html += '<div class="hour-heat-cell" style="height:' + Math.max(3, pct) +
+        '%;opacity:' + opacity + '" data-tip="' + h.hour + ':00 — ' + h.count + '"></div>';
+    }
+    html += '</div>';
+  }
+
+  // Weekly velocity
+  if (a.weekly_velocity && a.weekly_velocity.length > 0) {
+    html += '<h2>Words per week</h2><div class="sparkline">';
+    const maxW = Math.max(...a.weekly_velocity.map(w => w.count), 1);
+    for (const w of a.weekly_velocity) {
+      const h = Math.max(4, Math.round(w.count * 36 / maxW));
+      html += '<div class="sparkline-cell" style="height:' + h + 'px" data-tip="' +
+        esc(w.week) + ': ' + w.count + ' words"></div>';
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// Fetch analytics data and attach it to the stats object.
+async function loadAnalytics(s) {
+  try {
+    s._analytics = await api('/api/analytics');
+  } catch (e) { /* analytics are optional — render without them */ }
+  return s;
+}
+
 async function loadDashboard() {
   // Skeleton on first paint only; on later visits the old content stays
   // until fresh data replaces it (no flash).
   if (!views.dashboard.dataset.ready) views.dashboard.innerHTML = skeletonCards(3);
   try {
-    renderDashboard(await api('/api/stats'));
+    const s = await api('/api/stats');
+    await loadAnalytics(s);
+    renderDashboard(s);
     views.dashboard.dataset.ready = '1';
   } catch (e) { views.dashboard.innerHTML = '<p class="empty">Could not load your stats.<br>Try again later.</p>'; }
 }
@@ -1520,8 +1625,11 @@ function showHeatTip(el) {
 function hideHeatTip() { heatTip.hidden = true; }
 
 document.addEventListener('click', function (e) {
-  const cell = e.target.closest('.heat-cell[data-tip], .wbar[data-tip]');
-  if (cell) { haptic('light'); showHeatTip(cell); return; }
+  const cell = e.target.closest('[data-tip]');
+  if (cell && (cell.classList.contains('heat-cell') || cell.classList.contains('wbar') ||
+      cell.classList.contains('sparkline-cell') || cell.classList.contains('hour-heat-cell'))) {
+    haptic('light'); showHeatTip(cell); return;
+  }
   hideHeatTip();
 });
 

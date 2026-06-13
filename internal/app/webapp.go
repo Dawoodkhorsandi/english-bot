@@ -74,6 +74,7 @@ func startWebServer(store *Store, notifier telegram.Notifier) {
 	mux.HandleFunc("/api/grammar", withUser(store, handleAPIGrammar))
 	mux.HandleFunc("/api/grammar/lesson", withUser(store, handleAPIGrammarLesson))
 	mux.HandleFunc("/api/dictionary", withUser(store, handleAPIDictionary))
+	mux.HandleFunc("/api/analytics", withUser(store, handleAPIAnalytics))
 	// Public config (no auth): the frontend needs the bot handle + web app URL
 	// before it can build an invite link.
 	mux.HandleFunc("/api/config", handleAPIConfig)
@@ -224,6 +225,9 @@ func handleAPIStats(w http.ResponseWriter, _ *http.Request, chatID int64, store 
 		memberSince = st.MemberSince.Format("2 Jan 2006")
 	}
 
+	achievements := store.ComputeAchievements(chatID, st)
+	achUnlocked, achTotal := AchievementStats(achievements)
+
 	writeJSON(w, map[string]interface{}{
 		"current_streak":  st.CurrentStreak,
 		"longest_streak":  st.LongestStreak,
@@ -243,6 +247,9 @@ func handleAPIStats(w http.ResponseWriter, _ *http.Request, chatID int64, store 
 		"level":           levelLabel(st.Level),
 		"paused":          st.Paused,
 		"member_since":    memberSince,
+		"achievements":    achievements,
+		"ach_unlocked":    achUnlocked,
+		"ach_total":       achTotal,
 	})
 }
 
@@ -1191,4 +1198,14 @@ func handleAPIDictionary(w http.ResponseWriter, r *http.Request, _ int64, store 
 		"seeding": dictSeeding.Load() == 1,
 		"total":   store.DictCount(),
 	})
+}
+
+// handleAPIAnalytics returns detailed learning analytics for the current user.
+func handleAPIAnalytics(w http.ResponseWriter, _ *http.Request, chatID int64, store *Store) {
+	analytics, err := store.ComputeAnalytics(chatID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, analytics)
 }
