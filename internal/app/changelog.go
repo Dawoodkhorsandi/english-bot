@@ -398,4 +398,9 @@ var Changelogs = []ChangelogEntry{
 			"The popup shows up to 3 senses with a link to open the full Dictionary tab. " +
 			"Also fixed heatmap dots not showing activity counts on mobile Telegram (replaced native title with a custom touch tooltip).",
 	},
+	{
+		Version: "1.34.1",
+		Silent:  true,
+		Text:    "Fix: the tap-to-translate word popup could not be dismissed — the .wp-overlay display:flex rule overrode the hidden attribute. The X button and backdrop now close it on mobile and desktop.",
+	},
 }
