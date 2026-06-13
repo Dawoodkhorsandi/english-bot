@@ -455,7 +455,9 @@ func runDeckBackfill(ctx context.Context, chain *ai.ProviderChain, store *Store)
 }
 
 // backfillOneDeckField fills one missing field on one card per call, keeping AI
-// usage low. Fields are tried in deckBackfillFields order.
+// usage low. Fields are tried in deckBackfillFields order. For persian,
+// pronunciation, and example fields, the local dictionary is tried first
+// (free and instant) before falling back to AI generation.
 func (s *Store) backfillOneDeckField(ctx context.Context, chain *ai.ProviderChain) {
 	for _, f := range deckBackfillFields {
 		var deckID, term, definition string
@@ -465,11 +467,27 @@ func (s *Store) backfillOneDeckField(ctx context.Context, chain *ai.ProviderChai
 		if err != nil {
 			continue // none missing for this field (or transient) — try the next
 		}
-		out, _, err := chain.Generate(ctx, f.prompt(term, definition))
-		if err != nil {
-			return
+
+		// Try the local dictionary first (free, instant, no AI cost).
+		var val string
+		switch f.column {
+		case "persian":
+			val = s.LookupPersian(ctx, term)
+		case "pronunciation":
+			val = s.LookupPronunciation(term)
+		case "example":
+			val = s.LookupExample(term)
 		}
-		val := strings.TrimSpace(strings.Trim(strings.TrimSpace(out), "\"'"))
+
+		// Fall back to AI if dictionary had nothing.
+		if val == "" {
+			out, _, aiErr := chain.Generate(ctx, f.prompt(term, definition))
+			if aiErr != nil {
+				return
+			}
+			val = strings.TrimSpace(strings.Trim(strings.TrimSpace(out), "\"'"))
+		}
+
 		if val == "" {
 			return
 		}

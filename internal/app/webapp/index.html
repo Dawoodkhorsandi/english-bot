@@ -100,6 +100,14 @@
     <h1>⚙️ Settings</h1>
     <div id="settings-body"><div class="loading">Loading…</div></div>
   </section>
+
+  <section class="view" id="view-dictionary" hidden>
+    <h1>📖 Dictionary</h1>
+    <input id="dict-search" class="search" type="search" placeholder="Search English → Persian…" autocomplete="off">
+    <div id="dict-status" class="sub" hidden></div>
+    <div id="dict-list" class="list"></div>
+    <p id="dict-empty" class="empty" hidden>Type an English word to see its Persian meaning.</p>
+  </section>
 </main>
 
 <!-- Bottom tab bar. Tabs are added here as later phases land. -->
@@ -109,6 +117,7 @@
   <button class="tab" data-view="decks"><span>📚</span>Decks</button>
   <button class="tab" data-view="review"><span>🧠</span>Review</button>
   <button class="tab" data-view="board"><span>🏆</span>Ranks</button>
+  <button class="tab" data-view="dictionary"><span>📖</span>Dict</button>
 </nav>
 
 <script src="app.js"></script>

@@ -73,6 +73,7 @@ func startWebServer(store *Store, notifier telegram.Notifier) {
 	mux.HandleFunc("/api/practice", withUser(store, handleAPIPractice))
 	mux.HandleFunc("/api/grammar", withUser(store, handleAPIGrammar))
 	mux.HandleFunc("/api/grammar/lesson", withUser(store, handleAPIGrammarLesson))
+	mux.HandleFunc("/api/dictionary", withUser(store, handleAPIDictionary))
 	// Public config (no auth): the frontend needs the bot handle + web app URL
 	// before it can build an invite link.
 	mux.HandleFunc("/api/config", handleAPIConfig)
@@ -1149,4 +1150,45 @@ func atoiOr(s string, def int) int {
 		return n
 	}
 	return def
+}
+
+// ---------------------------------------------------------------------------
+// Dictionary API
+// ---------------------------------------------------------------------------
+
+// handleAPIDictionary serves English→Persian dictionary lookups.
+//
+//	GET /api/dictionary?q=word             → exact match + wiktionary fallback
+//	GET /api/dictionary?q=wor&prefix=1     → autocomplete (local only)
+func handleAPIDictionary(w http.ResponseWriter, r *http.Request, _ int64, store *Store) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeJSON(w, map[string]interface{}{
+			"results": []DictEntry{},
+			"seeding": dictSeeding.Load() == 1,
+			"total":   store.DictCount(),
+		})
+		return
+	}
+
+	prefix := r.URL.Query().Get("prefix") == "1"
+	var results []DictEntry
+	if prefix {
+		results = store.DictSearch(q)
+	} else {
+		results = store.DictLookup(q)
+		// Live fallback for exact lookups when local is empty.
+		if len(results) == 0 {
+			results = store.wiktionaryFallback(r.Context(), q)
+		}
+	}
+	if results == nil {
+		results = []DictEntry{}
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"results": results,
+		"seeding": dictSeeding.Load() == 1,
+		"total":   store.DictCount(),
+	})
 }

@@ -1384,6 +1384,102 @@ try {
 } catch (e) { /* older Telegram clients */ }
 
 // ---------------------------------------------------------------------------
+// Dictionary tab
+// ---------------------------------------------------------------------------
+const dictState = { timer: null };
+
+function renderDictEntry(e) {
+  let html = '<div class="dict-card card">';
+  html += '<div class="dict-head"><span class="dict-word">' + esc(e.word) + '</span>';
+  if (e.pos) html += ' <span class="dict-pos">' + esc(e.pos) + '</span>';
+  if (e.pronunciation) html += ' <span class="dict-ipa">' + esc(e.pronunciation) + '</span>';
+  html += '</div>';
+  html += '<div class="dict-persian">' + esc(e.persian) + '</div>';
+  if (e.romanization) html += '<div class="dict-roman">' + esc(e.romanization) + '</div>';
+  if (e.definition) html += '<div class="dict-def">' + esc(e.definition) + '</div>';
+  if (e.example) html += '<div class="dict-example">' + esc(e.example) + '</div>';
+  if (e.sense) html += '<div class="dict-sense">Sense: ' + esc(e.sense) + '</div>';
+  if (e.tags) html += '<div class="dict-tags">' + esc(e.tags) + '</div>';
+  html += '</div>';
+  return html;
+}
+
+async function loadDictionary() {
+  const searchEl = document.getElementById('dict-search');
+  const listEl = document.getElementById('dict-list');
+  const emptyEl = document.getElementById('dict-empty');
+  const statusEl = document.getElementById('dict-status');
+
+  // Show initial state.
+  if (!searchEl.dataset.wired) {
+    searchEl.dataset.wired = '1';
+    searchEl.addEventListener('input', () => {
+      clearTimeout(dictState.timer);
+      dictState.timer = setTimeout(() => dictSearch(searchEl.value), 300);
+    });
+    searchEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        clearTimeout(dictState.timer);
+        dictSearch(searchEl.value, true);
+      }
+    });
+  }
+
+  // Fetch status (seeding, total count).
+  try {
+    const data = await api('/api/dictionary?q=');
+    if (data.seeding) {
+      statusEl.hidden = false;
+      statusEl.textContent = 'Dictionary is being prepared… (' + (data.total || 0).toLocaleString() + ' entries so far)';
+    } else if (data.total > 0) {
+      statusEl.hidden = false;
+      statusEl.textContent = data.total.toLocaleString() + ' words available';
+    } else {
+      statusEl.hidden = true;
+    }
+  } catch (e) { /* ignore */ }
+
+  // Show empty state if no search in progress.
+  if (!searchEl.value) {
+    listEl.innerHTML = '';
+    emptyEl.hidden = false;
+    emptyEl.textContent = 'Type an English word to see its Persian meaning.';
+  }
+}
+
+async function dictSearch(q, exact) {
+  const listEl = document.getElementById('dict-list');
+  const emptyEl = document.getElementById('dict-empty');
+  q = (q || '').trim();
+  if (!q) {
+    listEl.innerHTML = '';
+    emptyEl.hidden = false;
+    emptyEl.textContent = 'Type an English word to see its Persian meaning.';
+    return;
+  }
+
+  emptyEl.hidden = true;
+  listEl.innerHTML = skeletonRows(3);
+
+  try {
+    const path = '/api/dictionary?q=' + encodeURIComponent(q) + (exact ? '' : '&prefix=1');
+    const data = await api(path);
+    listEl.innerHTML = '';
+    if (!data.results || data.results.length === 0) {
+      emptyEl.hidden = false;
+      emptyEl.textContent = 'No results for "' + q + '".';
+      if (data.seeding) emptyEl.textContent += ' Dictionary is still loading — try again later.';
+      return;
+    }
+    data.results.forEach(e => { listEl.innerHTML += renderDictEntry(e); });
+  } catch (e) {
+    listEl.innerHTML = '';
+    emptyEl.hidden = false;
+    emptyEl.textContent = 'Could not look up this word. Try again later.';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 const loaders = {
@@ -1392,6 +1488,7 @@ const loaders = {
   decks: loadDecks,
   board: loadBoard,
   review: loadReview,
+  dictionary: loadDictionary,
 };
 
 // Restore cross-device UI state, then land on the user's last tab.

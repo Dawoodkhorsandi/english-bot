@@ -114,6 +114,7 @@ func Run() {
 	go runCollocationScheduler(ctx, chain, store, notifier)
 	go runStoryScheduler(ctx, chain, store, notifier)
 	go runDeckBackfill(ctx, chain, store)
+	go runDictionarySeeder(ctx, store)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store, notifier)
@@ -2946,6 +2947,22 @@ func openStore(path string) (*Store, error) {
 		value      TEXT NOT NULL,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+	CREATE TABLE IF NOT EXISTS dictionary (
+		id             INTEGER PRIMARY KEY AUTOINCREMENT,
+		word           TEXT    NOT NULL,
+		pos            TEXT    NOT NULL DEFAULT '',
+		definition     TEXT    NOT NULL DEFAULT '',
+		example        TEXT    NOT NULL DEFAULT '',
+		persian        TEXT    NOT NULL,
+		romanization   TEXT    NOT NULL DEFAULT '',
+		pronunciation  TEXT    NOT NULL DEFAULT '',
+		sense          TEXT    NOT NULL DEFAULT '',
+		tags           TEXT    NOT NULL DEFAULT '',
+		source         TEXT    NOT NULL DEFAULT 'kaikki',
+		created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(word, pos, persian)
+	);
+	CREATE INDEX IF NOT EXISTS idx_dict_word ON dictionary(word COLLATE NOCASE);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
