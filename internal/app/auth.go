@@ -286,26 +286,6 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request, store *Store) {
 	writeJSON(w, resp)
 }
 
-func withJWTAuth(next apiHandler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenStr == "" || tokenStr == authHeader {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		chatID, _, ok := validateJWT(tokenStr)
-		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		next(w, r, chatID, nil)
-	}
-}
-
 func registerAuthRoutes(mux *http.ServeMux, store *Store) {
 	mux.HandleFunc("/api/auth/register", func(w http.ResponseWriter, r *http.Request) {
 		handleAuthRegister(w, r, store)
