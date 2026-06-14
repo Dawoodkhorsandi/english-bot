@@ -14,7 +14,7 @@
 <body>
 <!-- Each .view is one tab screen; the active one is shown by app.js. -->
 <main id="main">
-  <section class="view" id="view-dashboard">
+  <section class="view" id="view-profile">
     <div class="loading">Loading…</div>
   </section>
 
@@ -29,10 +29,17 @@
       <button class="chip" data-filter="story">📖 Stories</button>
       <button class="chip" data-filter="tip">💡 Tips</button>
       <button class="chip" data-filter="quiz">🧩 Quizzes</button>
+      <button class="chip" data-filter="dict">📖 Dict</button>
     </div>
     <div id="vocab-list" class="list"></div>
     <button id="vocab-more" class="more" hidden>Load more</button>
     <p id="vocab-empty" class="empty" hidden></p>
+    <div id="dict-view" hidden>
+      <input id="dict-search" class="search" type="search" placeholder="Search English → Persian…" autocomplete="off">
+      <div id="dict-status" class="sub" hidden></div>
+      <div id="dict-list" class="list"></div>
+      <p id="dict-empty" class="empty" hidden>Type an English word to see its Persian meaning.</p>
+    </div>
   </section>
 
   <section class="view" id="view-board" hidden>
@@ -69,6 +76,8 @@
           <button class="chip" data-practice="word">📘 New word</button>
           <button class="chip" data-practice="idiom">💬 Idiom</button>
           <button class="chip" data-practice="collocation">🔗 Collocation</button>
+          <button class="chip" data-practice="story">📖 Story</button>
+          <button class="chip" data-practice="tip">💡 Tip</button>
         </div>
       </div>
       <div class="card grammar-cta" id="grammar-open">
@@ -100,24 +109,15 @@
     <h1>⚙️ Settings</h1>
     <div id="settings-body"><div class="loading">Loading…</div></div>
   </section>
-
-  <section class="view" id="view-dictionary" hidden>
-    <h1>📖 Dictionary</h1>
-    <input id="dict-search" class="search" type="search" placeholder="Search English → Persian…" autocomplete="off">
-    <div id="dict-status" class="sub" hidden></div>
-    <div id="dict-list" class="list"></div>
-    <p id="dict-empty" class="empty" hidden>Type an English word to see its Persian meaning.</p>
-  </section>
 </main>
 
 <!-- Bottom tab bar. Tabs are added here as later phases land. -->
 <nav id="tabbar">
-  <button class="tab tab-on" data-view="dashboard"><span>📊</span>Stats</button>
+  <button class="tab tab-on" data-view="profile"><span>📊</span>Profile</button>
   <button class="tab" data-view="vocab"><span>📘</span>Library</button>
-  <button class="tab" data-view="decks"><span>📚</span>Decks</button>
+  <button class="tab" data-view="decks"><span>📚</span>Study</button>
   <button class="tab" data-view="review"><span>🧠</span>Review</button>
   <button class="tab" data-view="board"><span>🏆</span>Ranks</button>
-  <button class="tab" data-view="dictionary"><span>📖</span>Dict</button>
 </nav>
 
 <script src="app.js"></script>

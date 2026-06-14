@@ -102,7 +102,7 @@ function tappableText(text) {
 // ---------------------------------------------------------------------------
 const views = {};
 document.querySelectorAll('.view').forEach(v => { views[v.id.replace('view-', '')] = v; });
-let currentView = 'dashboard';
+let currentView = 'profile';
 
 function showView(name) {
   try { tg.BackButton.hide(); } catch (e) { /* ignore */ } // reset on tab switch
@@ -159,13 +159,13 @@ function completionRing(known, total) {
 function renderDashboard(s) {
   const flame = s.current_streak >= 3 ? ' 🔥' : '';
 
-  // Sub-tab chips: Overview / Gamification
-  let html = '<h1>📊 Your Progress</h1>' +
+  let html = '<h1>📊 Profile</h1>' +
     '<div class="chips dash-tabs">' +
     '<button class="chip chip-on" data-dtab="overview">Overview</button>' +
-    '<button class="chip" data-dtab="gamification">🎮 Gamification</button></div>';
+    '<button class="chip" data-dtab="achievements">🏆 Achievements</button>' +
+    '<button class="chip" data-dtab="statistics">📈 Statistics</button></div>';
 
-  // --- Overview sub-tab ---
+  // --- Overview sub-tab (minimal: streak + vocab tiles) ---
   html += '<div id="dtab-overview">';
   if (s.paused) {
     html += '<div class="card self-paced"><h2>🧘 Self-paced mode</h2>' +
@@ -193,8 +193,16 @@ function renderDashboard(s) {
     '<div class="stat-tile"><div class="stat-emoji">📘</div><div class="stat-n">' + s.words + '</div><div class="sub">Words</div></div>' +
     '<div class="stat-tile"><div class="stat-emoji">✅</div><div class="stat-n">' + s.mastered + '</div><div class="sub">Mastered</div></div>' +
     '<div class="stat-tile"><div class="stat-emoji">🎯</div><div class="stat-n">' + s.verbs + '</div><div class="sub">Drills</div></div>' +
-    (s.quiz_answered > 0 ? '<div class="stat-tile"><div class="stat-emoji">🧩</div><div class="stat-n">' + s.quiz_pct + '%</div><div class="sub">Quiz</div></div>' : '') +
     '</div></div>';
+  html += '</div>'; // end dtab-overview
+
+  // --- Achievements sub-tab ---
+  html += '<div id="dtab-achievements" hidden>';
+  html += achievementsSection(s);
+  html += '</div>';
+
+  // --- Statistics sub-tab ---
+  html += '<div id="dtab-statistics" hidden>';
 
   const lib = [
     { emoji: '💬', label: 'Idioms', n: s.idioms || 0 },
@@ -224,14 +232,9 @@ function renderDashboard(s) {
     '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
     '<div class="sub">' + s.active_days + ' active day' + (s.active_days === 1 ? '' : 's') + ' total' +
     (s.member_since ? ' · member since ' + esc(s.member_since) : '') + '</div></div>';
-  html += '</div>'; // end dtab-overview
+  html += '</div>'; // end dtab-statistics
 
-  // --- Gamification sub-tab ---
-  html += '<div id="dtab-gamification" hidden>';
-  html += achievementsSection(s);
-  html += '</div>'; // end dtab-gamification
-
-  views.dashboard.innerHTML = html;
+  views.profile.innerHTML = html;
 
   // Sub-tab switching
   document.querySelectorAll('.dash-tabs .chip').forEach(btn => {
@@ -241,7 +244,8 @@ function renderDashboard(s) {
       btn.classList.add('chip-on');
       const tab = btn.dataset.dtab;
       document.getElementById('dtab-overview').hidden = (tab !== 'overview');
-      document.getElementById('dtab-gamification').hidden = (tab !== 'gamification');
+      document.getElementById('dtab-achievements').hidden = (tab !== 'achievements');
+      document.getElementById('dtab-statistics').hidden = (tab !== 'statistics');
     });
   });
 
@@ -293,7 +297,7 @@ async function maybeOfferHomeScreen(streak) {
         '<div class="chips" style="margin:12px 0 0">' +
         '<button class="chip chip-on" id="hs-add">➕ Add to Home Screen</button>' +
         '<button class="chip" id="hs-later">Not now</button></div>';
-      views.dashboard.prepend(card);
+      views.profile.prepend(card);
       card.querySelector('#hs-add').addEventListener('click', () => {
         haptic('light');
         try { tg.addToHomeScreen(); } catch (e) { /* ignore */ }
@@ -619,13 +623,13 @@ async function loadAnalytics(s) {
 async function loadDashboard() {
   // Skeleton on first paint only; on later visits the old content stays
   // until fresh data replaces it (no flash).
-  if (!views.dashboard.dataset.ready) views.dashboard.innerHTML = skeletonCards(3);
+  if (!views.profile.dataset.ready) views.profile.innerHTML = skeletonCards(3);
   try {
     const s = await api('/api/stats');
     await loadAnalytics(s);
     renderDashboard(s);
-    views.dashboard.dataset.ready = '1';
-  } catch (e) { views.dashboard.innerHTML = '<p class="empty">Could not load your stats.<br>Try again later.</p>'; }
+    views.profile.dataset.ready = '1';
+  } catch (e) { views.profile.innerHTML = '<p class="empty">Could not load your stats.<br>Try again later.</p>'; }
 }
 
 // ---------------------------------------------------------------------------
@@ -772,12 +776,25 @@ searchEl.addEventListener('input', () => {
   searchTimer = setTimeout(() => { vocabState.q = searchEl.value.trim(); loadVocab(true); }, 250);
 });
 
+const dictViewEl = document.getElementById('dict-view');
+
+function initDictSearch() {
+  loadDictionary();
+}
+
 document.querySelectorAll('[data-filter]').forEach(c => {
   c.addEventListener('click', () => {
     document.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('chip-on', x === c));
     vocabState.filter = c.dataset.filter;
     hapticSelect();
-    loadVocab(true);
+    const isDict = c.dataset.filter === 'dict';
+    searchEl.hidden = isDict;
+    listEl.hidden = isDict;
+    moreEl.hidden = isDict;
+    emptyEl.hidden = true;
+    dictViewEl.hidden = !isDict;
+    if (isDict) initDictSearch();
+    else loadVocab(true);
   });
 });
 
@@ -1521,7 +1538,7 @@ const TOGGLE_LABELS = {
   idiom: 'Idiom of the day', collocation: 'Collocation of the day', story: 'Mini stories',
   review: 'Spaced-repetition reviews', daily_review: 'Daily word recap', digest: 'Weekly digest',
 };
-let settingsReturnView = 'dashboard';
+let settingsReturnView = 'profile';
 
 function row(label, control) {
   return '<div class="set-row"><span>' + esc(label) + '</span>' + control + '</div>';
@@ -1838,9 +1855,17 @@ document.addEventListener('click', function (e) {
       e.stopPropagation();
       const word = wpOverlay.querySelector('.wp-title').textContent;
       closeWordPopup();
-      showView('dictionary');
+      showView('vocab');
+      document.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('chip-on', x.dataset.filter === 'dict'));
+      vocabState.filter = 'dict';
+      searchEl.hidden = true;
+      listEl.hidden = true;
+      moreEl.hidden = true;
+      emptyEl.hidden = true;
+      dictViewEl.hidden = false;
       const input = document.getElementById('dict-search');
       input.value = word;
+      initDictSearch();
       dictSearch(word, true);
       return;
     }
@@ -1872,9 +1897,17 @@ document.addEventListener('touchend', function (e) {
     e.stopPropagation();
     const word = wpOverlay.querySelector('.wp-title').textContent;
     closeWordPopup();
-    showView('dictionary');
+    showView('vocab');
+    document.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('chip-on', x.dataset.filter === 'dict'));
+    vocabState.filter = 'dict';
+    searchEl.hidden = true;
+    listEl.hidden = true;
+    moreEl.hidden = true;
+    emptyEl.hidden = true;
+    dictViewEl.hidden = false;
     const input = document.getElementById('dict-search');
     input.value = word;
+    initDictSearch();
     dictSearch(word, true);
   }
 }, true);
@@ -1883,12 +1916,11 @@ document.addEventListener('touchend', function (e) {
 // Boot
 // ---------------------------------------------------------------------------
 const loaders = {
-  dashboard: loadDashboard,
+  profile: loadDashboard,
   vocab: () => loadVocab(true),
   decks: loadDecks,
   board: loadBoard,
   review: loadReview,
-  dictionary: loadDictionary,
 };
 
 // Restore cross-device UI state, then land on the user's last tab.
@@ -1901,6 +1933,6 @@ const loaders = {
       x.classList.toggle('chip-on', x.dataset.metric === metric));
   }
   let tab = await cloudGet('lastTab');
-  if (!tab || !loaders[tab]) tab = 'dashboard';
+  if (!tab || !loaders[tab]) tab = 'profile';
   showView(tab);
 })();

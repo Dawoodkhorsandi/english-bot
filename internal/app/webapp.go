@@ -1021,6 +1021,8 @@ var practiceKinds = map[string]bool{
 	config.KindWord:        true,
 	config.KindIdiom:       true,
 	config.KindCollocation: true,
+	config.KindStory:       true,
+	config.KindTip:         true,
 }
 
 // practiceHourlyLimit bounds /api/practice and /api/quiz/next taps per user per
