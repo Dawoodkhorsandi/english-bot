@@ -518,6 +518,7 @@ button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manip
 .ach-compare-cat { margin-bottom: 12px; }
 /* Dashboard sub-tabs */
 .dash-tabs { margin-bottom: 12px; }
+.lib-dtab { margin-top: 8px; }
 
 /* ---- Analytics ---- */
 .analytics-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
