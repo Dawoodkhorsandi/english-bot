@@ -194,6 +194,13 @@ function renderDashboard(s) {
     '<div class="stat-tile"><div class="stat-emoji">✅</div><div class="stat-n">' + s.mastered + '</div><div class="sub">Mastered</div></div>' +
     '<div class="stat-tile"><div class="stat-emoji">🎯</div><div class="stat-n">' + s.verbs + '</div><div class="sub">Drills</div></div>' +
     '</div></div>';
+
+  html += activitySection(s);
+
+  html += '<div class="card"><h2>Level</h2>' +
+    '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
+    '<div class="sub">' + s.active_days + ' active day' + (s.active_days === 1 ? '' : 's') + ' total' +
+    (s.member_since ? ' · member since ' + esc(s.member_since) : '') + '</div></div>';
   html += '</div>'; // end dtab-overview
 
   // --- Achievements sub-tab ---
@@ -224,14 +231,8 @@ function renderDashboard(s) {
       bar(s.quiz_pct, 'var(--success)') + '</div>';
   }
 
-  html += activitySection(s);
-
   html += analyticsSection(s);
 
-  html += '<div class="card"><h2>Level</h2>' +
-    '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
-    '<div class="sub">' + s.active_days + ' active day' + (s.active_days === 1 ? '' : 's') + ' total' +
-    (s.member_since ? ' · member since ' + esc(s.member_since) : '') + '</div></div>';
   html += '</div>'; // end dtab-statistics
 
   views.profile.innerHTML = html;
