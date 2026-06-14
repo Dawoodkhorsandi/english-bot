@@ -428,4 +428,9 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Achievements redesign: Stats dashboard split into Overview and Gamification sub-tabs. 39 achievements (up from 26) with expandable category sections. New badges: First Drill, First Quiz, First Idiom, First Story, Vocabulary Legend (1000 words), Century Streak (100 days), Quiz Warrior (100 answers), Quiz Perfectionist (100% at 50+), Idiom Collector (20), Prolific Reader (20 stories), Popular (5 kudos), Century Active (100 days), Speed Learner (10+ in one day), Bookworm Supreme (25 bookmarks), Deck Explorer (50 cards). Leaderboard profile view now shows head-to-head achievement comparison.",
 	},
+	{
+		Version: "1.36.0",
+		Silent:  true,
+		Text:    "Mobile app authentication: email/password registration and login, JWT HMAC-SHA256 middleware, Telegram login overlay for cross-app linking. No user-facing changes to the Telegram bot.",
+	},
 }

@@ -75,6 +75,7 @@ func startWebServer(store *Store, notifier telegram.Notifier) {
 	mux.HandleFunc("/api/grammar/lesson", withUser(store, handleAPIGrammarLesson))
 	mux.HandleFunc("/api/dictionary", withUser(store, handleAPIDictionary))
 	mux.HandleFunc("/api/analytics", withUser(store, handleAPIAnalytics))
+	registerAuthRoutes(mux, store)
 	// Public config (no auth): the frontend needs the bot handle + web app URL
 	// before it can build an invite link.
 	mux.HandleFunc("/api/config", handleAPIConfig)

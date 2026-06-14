@@ -201,6 +201,7 @@ internal/app/       -- the coupled core (package app; imports config/ai/telegram
   vocab.go          -- /mywords (browse learned words) and /bookmark (favourites) features
   achievements.go   -- badge achievements computed from existing user data
   analytics.go      -- detailed learning analytics (breakdown, trends, activity by hour)
+  auth.go           -- email/password authentication (register, login, refresh, JWT middleware)
   webapp/           -- embedded Mini App SPA (index.html, app.js, styles.css, decks/, grammar/)
 
 internal/docsync/   -- CI tests that keep README.md & DOCS.md in sync with the code

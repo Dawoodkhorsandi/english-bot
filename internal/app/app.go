@@ -2963,6 +2963,20 @@ func openStore(path string) (*Store, error) {
 		UNIQUE(word, pos, persian)
 	);
 	CREATE INDEX IF NOT EXISTS idx_dict_word ON dictionary(word COLLATE NOCASE);
+	CREATE TABLE IF NOT EXISTS users (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		email           TEXT    UNIQUE,
+		password_hash   TEXT    NOT NULL,
+		name            TEXT    NOT NULL DEFAULT '',
+		telegram_chat_id INTEGER,
+		created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS user_sessions (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id    INTEGER NOT NULL,
+		token_hash TEXT    NOT NULL,
+		expires_at DATETIME NOT NULL
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err

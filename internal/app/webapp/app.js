@@ -6,6 +6,36 @@ tg.expand();
 // Blend the native bottom-bar area with the app's tab bar.
 try { tg.setBottomBarColor(tg.themeParams.bottom_bar_bg_color || 'bg_color'); } catch (e) { /* older clients */ }
 
+// ---------------------------------------------------------------------------
+// Telegram login flow: when opened from the mobile app with startapp=link_account,
+// show a "Copy Login Code" button instead of the full app.
+// ---------------------------------------------------------------------------
+(function checkTelegramLogin() {
+  const params = new URLSearchParams(window.location.search);
+  const startParam = tg.initDataUnsafe?.start_param || params.get('startapp');
+  if (startParam === 'link_account') {
+    document.getElementById('telegram-login-overlay').hidden = false;
+    document.getElementById('copy-login-btn').addEventListener('click', function() {
+      navigator.clipboard.writeText(tg.initData).then(function() {
+        document.getElementById('copy-status').hidden = false;
+        document.getElementById('copy-login-btn').textContent = 'Copied!';
+        try { tg.HapticFeedback.notificationOccurred('success'); } catch (e) { /* ignore */ }
+      }).catch(function() {
+        // Fallback: select text for manual copy
+        var ta = document.createElement('textarea');
+        ta.value = tg.initData;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        document.getElementById('copy-status').hidden = false;
+        document.getElementById('copy-login-btn').textContent = 'Copied!';
+      });
+    });
+    throw new Error('Telegram login mode — skipping normal app init');
+  }
+})();
+
 // Public config (bot handle + web app URL) for the share/invite link. Filled
 // from /api/config at boot; defaults keep the share button working offline.
 const config = { botUsername: '@mymusclememorybot', webAppURL: '' };
