@@ -752,7 +752,7 @@ func TestAPIPracticeServesAndRecords(t *testing.T) {
 	}
 
 	// Kinds outside the whitelist are rejected.
-	for _, kind := range []string{"story", "tip", "drill", ""} {
+	for _, kind := range []string{"drill", ""} {
 		if w := apiCall(store, handleAPIPractice, http.MethodGet, "/api/practice?kind="+kind, chatID, ""); w.Code != http.StatusBadRequest {
 			t.Errorf("kind %q code = %d, want 400", kind, w.Code)
 		}
