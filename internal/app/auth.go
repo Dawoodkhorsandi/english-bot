@@ -358,7 +358,7 @@ func handleTelegramCode(w http.ResponseWriter, r *http.Request, store *Store) {
 
 	// Rate limit: max 3 codes per user per 10 minutes
 	var recentCount int
-	store.db.QueryRow(
+	_ = store.db.QueryRow(
 		"SELECT COUNT(*) FROM auth_codes WHERE chat_id = ? AND created_at > datetime('now', '-10 minutes')",
 		chatID,
 	).Scan(&recentCount)
@@ -428,7 +428,7 @@ func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) 
 	}
 
 	// Mark code as used
-	store.db.Exec("UPDATE auth_codes SET used = 1 WHERE code = ?", req.Code)
+	_, _ = store.db.Exec("UPDATE auth_codes SET used = 1 WHERE code = ?", req.Code)
 
 	// Find or create user by chatID
 	var userID int64
@@ -461,10 +461,10 @@ func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) 
 	writeJSON(w, map[string]interface{}{
 		"token": token,
 		"user": map[string]interface{}{
-			"id":       userID,
-			"email":    email,
-			"name":     name,
-			"chat_id":  chatID,
+			"id":      userID,
+			"email":   email,
+			"name":    name,
+			"chat_id": chatID,
 		},
 	})
 }
