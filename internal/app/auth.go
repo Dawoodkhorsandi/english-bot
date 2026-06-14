@@ -440,8 +440,8 @@ func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) 
 	if err == sql.ErrNoRows {
 		// Create new user
 		res, err := store.db.Exec(
-			"INSERT INTO users (telegram_chat_id, name) VALUES (?, ?)",
-			chatID, fmt.Sprintf("User %d", chatID),
+			"INSERT INTO users (telegram_chat_id, name, password_hash) VALUES (?, ?, ?)",
+			chatID, fmt.Sprintf("User %d", chatID), "",
 		)
 		if err != nil {
 			log.Printf("auth: failed to create user: %v", err)
