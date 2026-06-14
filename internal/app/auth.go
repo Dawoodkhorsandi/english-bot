@@ -427,9 +427,6 @@ func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) 
 		return
 	}
 
-	// Mark code as used
-	_, _ = store.db.Exec("UPDATE auth_codes SET used = 1 WHERE code = ?", req.Code)
-
 	// Find or create user by chatID
 	var userID int64
 	var email, name string
@@ -439,12 +436,12 @@ func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) 
 	).Scan(&userID, &email, &name)
 	if err == sql.ErrNoRows {
 		// Create new user
-		res, err := store.db.Exec(
+		res, insertErr := store.db.Exec(
 			"INSERT INTO users (telegram_chat_id, name, password_hash) VALUES (?, ?, ?)",
 			chatID, fmt.Sprintf("User %d", chatID), "",
 		)
-		if err != nil {
-			log.Printf("auth: failed to create user: %v", err)
+		if insertErr != nil {
+			log.Printf("auth: failed to create user: %v", insertErr)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -455,6 +452,9 @@ func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) 
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	// Mark code as used AFTER user is ready
+	_, _ = store.db.Exec("UPDATE auth_codes SET used = 1 WHERE code = ?", req.Code)
 
 	token := generateJWT(chatID, email)
 
