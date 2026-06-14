@@ -2977,6 +2977,14 @@ func openStore(path string) (*Store, error) {
 		token_hash TEXT    NOT NULL,
 		expires_at DATETIME NOT NULL
 	);
+	CREATE TABLE IF NOT EXISTS auth_codes (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		chat_id    INTEGER NOT NULL,
+		code       TEXT    NOT NULL UNIQUE,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		used       INTEGER DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_auth_codes_code ON auth_codes(code);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err

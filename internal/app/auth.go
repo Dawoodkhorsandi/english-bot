@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"regexp"
@@ -298,5 +299,172 @@ func registerAuthRoutes(mux *http.ServeMux, store *Store) {
 	})
 	mux.HandleFunc("/api/auth/me", func(w http.ResponseWriter, r *http.Request) {
 		handleAuthMe(w, r, store)
+	})
+	mux.HandleFunc("/api/auth/telegram/code", func(w http.ResponseWriter, r *http.Request) {
+		handleTelegramCode(w, r, store)
+	})
+	mux.HandleFunc("/api/auth/telegram/verify", func(w http.ResponseWriter, r *http.Request) {
+		handleTelegramVerify(w, r, store)
+	})
+}
+
+// CleanupAuthCodes deletes expired auth codes (older than 10 minutes).
+func CleanupAuthCodes(db *sql.DB) {
+	for {
+		time.Sleep(10 * time.Minute)
+		result, err := db.Exec("DELETE FROM auth_codes WHERE created_at < datetime('now', '-10 minutes')")
+		if err != nil {
+			log.Printf("auth: cleanup error: %v", err)
+			continue
+		}
+		n, _ := result.RowsAffected()
+		if n > 0 {
+			log.Printf("auth: cleaned up %d expired codes", n)
+		}
+	}
+}
+
+// generateShortCode creates a 6-character alphanumeric code (e.g. "A3F-K9M").
+func generateShortCode() string {
+	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	b := make([]byte, 7)
+	_, _ = rand.Read(b)
+	b[3] = '-'
+	for i := range b {
+		if i != 3 {
+			b[i] = chars[b[i]%byte(len(chars))]
+		}
+	}
+	return string(b)
+}
+
+// handleTelegramCode creates a short code for Telegram login.
+// Auth: X-Init-Data header (withUser middleware validates Telegram initData).
+func handleTelegramCode(w http.ResponseWriter, r *http.Request, store *Store) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	initData := r.Header.Get("X-Init-Data")
+	if initData == "" {
+		initData = r.URL.Query().Get("initData")
+	}
+	chatID, _, ok := validateInitData(initData)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Rate limit: max 3 codes per user per 10 minutes
+	var recentCount int
+	store.db.QueryRow(
+		"SELECT COUNT(*) FROM auth_codes WHERE chat_id = ? AND created_at > datetime('now', '-10 minutes')",
+		chatID,
+	).Scan(&recentCount)
+	if recentCount >= 3 {
+		http.Error(w, "too many requests — wait a moment", http.StatusTooManyRequests)
+		return
+	}
+
+	code := generateShortCode()
+	_, err := store.db.Exec(
+		"INSERT INTO auth_codes (chat_id, code) VALUES (?, ?)",
+		chatID, code,
+	)
+	if err != nil {
+		log.Printf("auth: failed to create code: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"code":       code,
+		"expires_in": 300,
+	})
+}
+
+// handleTelegramVerify exchanges a short code for a JWT token.
+// Auth: None (public endpoint for the mobile app).
+func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
+		http.Error(w, "code required", http.StatusBadRequest)
+		return
+	}
+
+	var chatID int64
+	var createdAt time.Time
+	var used int
+	err := store.db.QueryRow(
+		"SELECT chat_id, created_at, used FROM auth_codes WHERE code = ?",
+		req.Code,
+	).Scan(&chatID, &createdAt, &used)
+	if err == sql.ErrNoRows {
+		http.Error(w, "invalid code", http.StatusUnauthorized)
+		return
+	}
+	if err != nil {
+		log.Printf("auth: verify query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if used != 0 {
+		http.Error(w, "code already used", http.StatusUnauthorized)
+		return
+	}
+
+	if time.Since(createdAt) > 5*time.Minute {
+		http.Error(w, "code expired", http.StatusUnauthorized)
+		return
+	}
+
+	// Mark code as used
+	store.db.Exec("UPDATE auth_codes SET used = 1 WHERE code = ?", req.Code)
+
+	// Find or create user by chatID
+	var userID int64
+	var email, name string
+	err = store.db.QueryRow(
+		"SELECT id, COALESCE(email, ''), name FROM users WHERE telegram_chat_id = ?",
+		chatID,
+	).Scan(&userID, &email, &name)
+	if err == sql.ErrNoRows {
+		// Create new user
+		res, err := store.db.Exec(
+			"INSERT INTO users (telegram_chat_id, name) VALUES (?, ?)",
+			chatID, fmt.Sprintf("User %d", chatID),
+		)
+		if err != nil {
+			log.Printf("auth: failed to create user: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		userID, _ = res.LastInsertId()
+		name = fmt.Sprintf("User %d", chatID)
+	} else if err != nil {
+		log.Printf("auth: verify user query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	token := generateJWT(chatID, email)
+
+	writeJSON(w, map[string]interface{}{
+		"token": token,
+		"user": map[string]interface{}{
+			"id":       userID,
+			"email":    email,
+			"name":     name,
+			"chat_id":  chatID,
+		},
 	})
 }
