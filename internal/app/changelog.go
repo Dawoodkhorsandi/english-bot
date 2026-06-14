@@ -433,4 +433,11 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Mobile app authentication: email/password registration and login, JWT HMAC-SHA256 middleware, Telegram login overlay for cross-app linking. No user-facing changes to the Telegram bot.",
 	},
+	{
+		Version: "1.37.0",
+		Text: "📣 <b>What's New in v1.37.0</b>\n\n" +
+			"• 📱 <b>Mobile app sign-in now works!</b> New /login command gives you a one-time code — enter it in the app, no Mini App or clipboard needed\n" +
+			"• 🔗 <b>One account across email & Telegram:</b> sign in with either and link them to share the same progress (Google sign-in coming next)\n" +
+			"• 🔒 Security hardening behind the scenes: stronger login-secret checks, a higher login-code limit, and a code-reuse fix",
+	},
 }

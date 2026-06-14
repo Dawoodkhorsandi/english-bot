@@ -94,6 +94,7 @@ go test ./... -v
 | `/grammar` | Browse bite-size grammar lessons (easy → advanced); `/grammar 1` opens a lesson |
 | `/stats` | View progress: streak, words, quiz accuracy with progress bars |
 | `/app` | Open the Telegram Mini App hub: dashboard, word list, decks, review and leaderboard (when `WEB_APP_URL` is set) |
+| `/login` | Get a one-time code to sign in on the mobile app (delivered in chat; valid 5 minutes) |
 | `/mywords` | Browse all learned vocabulary with mastery status; `/mywords bookmarks` for bookmarked only |
 | `/bookmark [word]` | Toggle bookmark on a word, or view bookmarks (no argument) |
 | `/level [beginner\|intermediate\|upper-intermediate\|advanced]` | Set difficulty level |
