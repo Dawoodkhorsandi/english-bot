@@ -778,24 +778,38 @@ searchEl.addEventListener('input', () => {
 });
 
 const dictViewEl = document.getElementById('dict-view');
+const filterChipsEl = document.querySelector('#view-vocab .chips:not(.lib-dtab)');
 
 function initDictSearch() {
   loadDictionary();
 }
+
+function showLibTab(tab) {
+  const isDict = tab === 'dict';
+  searchEl.hidden = isDict;
+  listEl.hidden = isDict;
+  moreEl.hidden = isDict;
+  emptyEl.hidden = true;
+  dictViewEl.hidden = !isDict;
+  filterChipsEl.hidden = isDict;
+  if (isDict) initDictSearch();
+  else loadVocab(true);
+}
+
+document.querySelectorAll('[data-lib-tab]').forEach(c => {
+  c.addEventListener('click', () => {
+    document.querySelectorAll('[data-lib-tab]').forEach(x => x.classList.toggle('chip-on', x === c));
+    hapticSelect();
+    showLibTab(c.dataset.libTab);
+  });
+});
 
 document.querySelectorAll('[data-filter]').forEach(c => {
   c.addEventListener('click', () => {
     document.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('chip-on', x === c));
     vocabState.filter = c.dataset.filter;
     hapticSelect();
-    const isDict = c.dataset.filter === 'dict';
-    searchEl.hidden = isDict;
-    listEl.hidden = isDict;
-    moreEl.hidden = isDict;
-    emptyEl.hidden = true;
-    dictViewEl.hidden = !isDict;
-    if (isDict) initDictSearch();
-    else loadVocab(true);
+    loadVocab(true);
   });
 });
 
@@ -1857,16 +1871,10 @@ document.addEventListener('click', function (e) {
       const word = wpOverlay.querySelector('.wp-title').textContent;
       closeWordPopup();
       showView('vocab');
-      document.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('chip-on', x.dataset.filter === 'dict'));
-      vocabState.filter = 'dict';
-      searchEl.hidden = true;
-      listEl.hidden = true;
-      moreEl.hidden = true;
-      emptyEl.hidden = true;
-      dictViewEl.hidden = false;
+      document.querySelectorAll('[data-lib-tab]').forEach(x => x.classList.toggle('chip-on', x.dataset.libTab === 'dict'));
+      showLibTab('dict');
       const input = document.getElementById('dict-search');
       input.value = word;
-      initDictSearch();
       dictSearch(word, true);
       return;
     }
@@ -1899,16 +1907,10 @@ document.addEventListener('touchend', function (e) {
     const word = wpOverlay.querySelector('.wp-title').textContent;
     closeWordPopup();
     showView('vocab');
-    document.querySelectorAll('[data-filter]').forEach(x => x.classList.toggle('chip-on', x.dataset.filter === 'dict'));
-    vocabState.filter = 'dict';
-    searchEl.hidden = true;
-    listEl.hidden = true;
-    moreEl.hidden = true;
-    emptyEl.hidden = true;
-    dictViewEl.hidden = false;
+    document.querySelectorAll('[data-lib-tab]').forEach(x => x.classList.toggle('chip-on', x.dataset.libTab === 'dict'));
+    showLibTab('dict');
     const input = document.getElementById('dict-search');
     input.value = word;
-    initDictSearch();
     dictSearch(word, true);
   }
 }, true);
