@@ -32,7 +32,7 @@ try { tg.setBottomBarColor(tg.themeParams.bottom_bar_bg_color || 'bg_color'); } 
         document.getElementById('copy-login-btn').textContent = 'Copied!';
       });
     });
-    throw new Error('Telegram login mode — skipping normal app init');
+    return; // Stop — don't initialize the full app
   }
 })();
 

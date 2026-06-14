@@ -534,3 +534,7 @@ button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manip
 .sparkline { display: flex; gap: 2px; align-items: flex-end; height: 36px; margin-top: 6px; }
 .sparkline-cell { flex: 1; border-radius: 2px; min-height: 2px; background: var(--success); }
 .sparkline-empty { background: var(--border); }
+
+/* Telegram login overlay */
+#telegram-login-overlay { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+#telegram-login-overlay[hidden] { display: none; }
