@@ -61,6 +61,7 @@ internal/app/           — the coupled core (package app)
   vocab.go              — /mywords (browse learned vocabulary) and /bookmark (save favourite words) features
   achievements.go       — badge achievements computed from existing user data (26 badges across 7 categories)
   analytics.go          — detailed learning analytics: vocabulary breakdown, quiz accuracy trends, activity by hour, weekly velocity, content diversity
+  auth.go               — email/password authentication: register, login, refresh, JWT HMAC middleware
 
 internal/docsync/       — CI tests that keep README.md & DOCS.md in sync with the code (doc_test.go)
 ```
