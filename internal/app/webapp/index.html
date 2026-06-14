@@ -12,15 +12,6 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<!-- Telegram login overlay (shown when startapp=link_account) -->
-<div id="telegram-login-overlay" hidden>
-  <div style="font-size:48px;margin-bottom:16px;">🔗</div>
-  <h2 style="margin:0 0 8px">Link to English App</h2>
-  <p style="color:var(--hint);margin:0 0 24px;max-width:300px;">Tap the button below to copy your login code, then return to the English App.</p>
-  <button id="copy-login-btn" style="background:var(--accent);color:var(--accent-text);border:none;border-radius:12px;padding:16px 32px;font-size:17px;font-weight:600;cursor:pointer;width:100%;max-width:300px;">Copy Login Code</button>
-  <p id="copy-status" style="color:var(--success);margin-top:12px;font-weight:600;" hidden>✓ Copied! Return to English App.</p>
-</div>
-
 <!-- Each .view is one tab screen; the active one is shown by app.js. -->
 <main id="main">
   <section class="view" id="view-profile">

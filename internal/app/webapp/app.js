@@ -6,38 +6,6 @@ tg.expand();
 // Blend the native bottom-bar area with the app's tab bar.
 try { tg.setBottomBarColor(tg.themeParams.bottom_bar_bg_color || 'bg_color'); } catch (e) { /* older clients */ }
 
-// ---------------------------------------------------------------------------
-// Telegram login flow: when opened from the mobile app with startapp=link_account,
-// show a "Copy Login Code" button instead of the full app.
-// ---------------------------------------------------------------------------
-function checkTelegramLogin() {
-  const startParam = tg.initDataUnsafe?.start_param;
-  console.log('[login-check] start_param:', startParam);
-  if (startParam === 'link_account') {
-    console.log('[login-check] showing overlay');
-    document.getElementById('telegram-login-overlay').hidden = false;
-    document.getElementById('copy-login-btn').addEventListener('click', function() {
-      navigator.clipboard.writeText(tg.initData).then(function() {
-        document.getElementById('copy-status').hidden = false;
-        document.getElementById('copy-login-btn').textContent = 'Copied!';
-        try { tg.HapticFeedback.notificationOccurred('success'); } catch (e) { /* ignore */ }
-      }).catch(function() {
-        var ta = document.createElement('textarea');
-        ta.value = tg.initData;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        document.getElementById('copy-status').hidden = false;
-        document.getElementById('copy-login-btn').textContent = 'Copied!';
-      });
-    });
-    return true;
-  }
-  return false;
-}
-if (!checkTelegramLogin()) { setTimeout(checkTelegramLogin, 500); }
-
 // Public config (bot handle + web app URL) for the share/invite link. Filled
 // from /api/config at boot; defaults keep the share button working offline.
 const config = { botUsername: '@mymusclememorybot', webAppURL: '' };
@@ -233,6 +201,14 @@ function renderDashboard(s) {
     '<div class="big" style="font-size:22px">' + esc(s.level) + '</div>' +
     '<div class="sub">' + s.active_days + ' active day' + (s.active_days === 1 ? '' : 's') + ' total' +
     (s.member_since ? ' · member since ' + esc(s.member_since) : '') + '</div></div>';
+
+  // Link to English App card
+  html += '<div class="card" id="link-app-card"><h2>📱 Link to English App</h2>' +
+    '<div class="sub" style="margin-bottom:12px">Copy your login code to sign in to the mobile app.</div>' +
+    '<button id="copy-login-btn" style="background:var(--accent);color:var(--accent-text);border:none;border-radius:12px;padding:14px 24px;font-size:15px;font-weight:600;cursor:pointer;width:100%;">Copy Login Code</button>' +
+    '<p id="copy-status" style="color:var(--success);margin-top:8px;font-weight:600;text-align:center;" hidden>✓ Copied! Return to English App.</p>' +
+    '</div>';
+
   html += '</div>'; // end dtab-overview
 
   // --- Achievements sub-tab ---
@@ -314,6 +290,27 @@ function renderDashboard(s) {
   }
 
   maybeOfferHomeScreen(s.current_streak);
+
+  // Copy Login Code button for mobile app linking
+  const copyBtn = document.getElementById('copy-login-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(tg.initData).then(() => {
+        document.getElementById('copy-status').hidden = false;
+        copyBtn.textContent = 'Copied!';
+        haptic('success');
+      }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = tg.initData;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        document.getElementById('copy-status').hidden = false;
+        copyBtn.textContent = 'Copied!';
+      });
+    });
+  }
 }
 
 // After a week-long streak, offer the home-screen shortcut once (Bot API 8.0+).
