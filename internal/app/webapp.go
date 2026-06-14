@@ -117,24 +117,43 @@ func serveIndex(w http.ResponseWriter) {
 // been validated from the Telegram initData.
 type apiHandler func(w http.ResponseWriter, r *http.Request, chatID int64, store *Store)
 
-// withUser validates the Telegram initData (from the X-Init-Data header, or the
-// initData query param as a fallback) and invokes fn with the resolved chat ID.
-// It replies 401 when validation fails.
+// withUser authenticates the caller and invokes fn with the resolved account id
+// (the value used as chat_id across every data table). It accepts either of the
+// two clients' credentials, both resolving to the same id space:
+//   - the mobile app's Bearer JWT (Authorization header), whose subject is the
+//     account id; or
+//   - the Telegram Mini App's signed initData (X-Init-Data header, or the
+//     initData query param as a fallback), whose user id is the chat id.
+//
+// It replies 401 when neither validates. The JWT is tried first so a logged-in
+// app user is authenticated even inside a Telegram webview.
 func withUser(store *Store, fn apiHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		initData := r.Header.Get("X-Init-Data")
-		if initData == "" {
-			initData = r.URL.Query().Get("initData")
-		}
-		chatID, _, ok := validateInitData(initData)
+		accountID, ok := resolveAccount(r)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		// Profile photos are intentionally not captured or shown (privacy).
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		fn(w, r, chatID, store)
+		fn(w, r, accountID, store)
 	}
+}
+
+// resolveAccount extracts the caller's account id from a Bearer JWT or, failing
+// that, from Telegram initData. Returns false when neither is present or valid.
+func resolveAccount(r *http.Request) (accountID int64, ok bool) {
+	if id, _, valid := bearerAccount(r); valid {
+		return id, true
+	}
+	initData := r.Header.Get("X-Init-Data")
+	if initData == "" {
+		initData = r.URL.Query().Get("initData")
+	}
+	if id, _, valid := validateInitData(initData); valid {
+		return id, true
+	}
+	return 0, false
 }
 
 // writeJSON encodes v as a JSON response.
@@ -487,7 +506,9 @@ func handleAPIKudos(w http.ResponseWriter, r *http.Request, chatID int64, store 
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if gave && notifier != nil {
+	if gave && notifier != nil && target > 0 {
+		// target > 0 skips app-only accounts (synthetic negative ids) that have no
+		// Telegram chat to deliver to.
 		// Respect self-paced mode: paused users get no automatic messages. The
 		// kudos still lands; they'll see the count next time they open the app.
 		if prefs, perr := store.GetPrefs(target); perr == nil && !prefs.Paused {

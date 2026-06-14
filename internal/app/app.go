@@ -42,6 +42,13 @@ func Run() {
 	log.Printf("⚙️  [CONFIG] Telegram Token Loaded: %t (Length: %d)", config.TelegramBotToken != "YOUR_TELEGRAM_BOT_TOKEN" && config.TelegramBotToken != "", len(config.TelegramBotToken))
 	log.Printf("⚙️  [CONFIG] Maintainer Chat ID Target: %s", config.MaintainerChatID)
 
+	// Fail fast on insecure auth configuration (e.g. a default/empty JWT_SECRET
+	// that would let anyone forge account tokens) rather than discovering it at
+	// request time.
+	if err := config.ValidateSecrets(); err != nil {
+		log.Fatalf("❌ [CRITICAL] Invalid configuration: %v", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -479,6 +486,23 @@ func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, n
 		_ = notifier.SendKeyboard(chatID,
 			"📱 <b>Your English hub</b>\n\nProgress, your word list and more — all in one place. Tap below to open it.",
 			kb)
+
+	case "/login":
+		// Mint a short login code for the mobile app, delivered over this
+		// already-authenticated chat — no Mini App round-trip or clipboard needed.
+		code, limited, err := store.CreateLoginCode(chatID)
+		if err != nil {
+			log.Printf("❌ [LOGIN] Could not create code for ChatID %d: %v", chatID, err)
+			_ = notifier.Send(chatID, "❌ Couldn't generate a login code right now. Please try again.")
+			return
+		}
+		if limited {
+			_ = notifier.Send(chatID, "⏳ You've requested several codes recently. Please wait a few minutes, then try again.")
+			return
+		}
+		_ = notifier.Send(chatID, fmt.Sprintf(
+			"🔐 <b>Your login code</b>\n\n<code>%s</code>\n\nEnter it in the mobile app within 5 minutes to sign in. Never share this code with anyone.",
+			code))
 
 	case "/quiz":
 		log.Printf("🧩 [QUIZ] requested by ChatID %d.", chatID)
@@ -2657,6 +2681,7 @@ func registerBotCommands() {
 		{"command": "tts", "description": "Toggle pronunciation audio on/off"},
 		{"command": "stats", "description": "See your progress and streak"},
 		{"command": "app", "description": "Open your English hub (progress, words & more)"},
+		{"command": "login", "description": "Get a code to sign in on the mobile app"},
 		{"command": "mywords", "description": "Browse your learned vocabulary"},
 		{"command": "bookmark", "description": "Bookmark or view important words"},
 		{"command": "pause", "description": "Pause scheduled sends"},
@@ -2985,6 +3010,16 @@ func openStore(path string) (*Store, error) {
 		used       INTEGER DEFAULT 0
 	);
 	CREATE INDEX IF NOT EXISTS idx_auth_codes_code ON auth_codes(code);
+	CREATE TABLE IF NOT EXISTS identities (
+		provider     TEXT    NOT NULL,
+		provider_uid TEXT    NOT NULL,
+		account_id   INTEGER NOT NULL,
+		credential   TEXT    NOT NULL DEFAULT '',
+		name         TEXT    NOT NULL DEFAULT '',
+		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (provider, provider_uid)
+	);
+	CREATE INDEX IF NOT EXISTS idx_identities_account ON identities(account_id);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
@@ -2992,6 +3027,11 @@ func openStore(path string) (*Store, error) {
 
 	store := &Store{db: db}
 	if err := store.migrate(); err != nil {
+		return nil, err
+	}
+	// Backfill the identities table from any legacy users rows so existing
+	// email/Telegram accounts keep working under the unified identity model.
+	if err := store.backfillIdentities(); err != nil {
 		return nil, err
 	}
 	store.migrateLegacyJSON()
