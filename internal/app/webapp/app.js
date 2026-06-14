@@ -204,9 +204,11 @@ function renderDashboard(s) {
 
   // Link to English App card
   html += '<div class="card" id="link-app-card"><h2>📱 Link to English App</h2>' +
-    '<div class="sub" style="margin-bottom:12px">Copy your login code to sign in to the mobile app.</div>' +
-    '<button id="copy-login-btn" style="background:var(--accent);color:var(--accent-text);border:none;border-radius:12px;padding:14px 24px;font-size:15px;font-weight:600;cursor:pointer;width:100%;">Copy Login Code</button>' +
-    '<p id="copy-status" style="color:var(--success);margin-top:8px;font-weight:600;text-align:center;" hidden>✓ Copied! Return to English App.</p>' +
+    '<div class="sub" style="margin-bottom:12px">Get a short code to sign in to the mobile app.</div>' +
+    '<div id="code-area">' +
+    '<button id="get-code-btn" style="background:var(--accent);color:var(--accent-text);border:none;border-radius:12px;padding:14px 24px;font-size:15px;font-weight:600;cursor:pointer;width:100%;">Get Login Code</button>' +
+    '</div>' +
+    '<p id="code-status" style="color:var(--success);margin-top:8px;font-weight:600;text-align:center;" hidden></p>' +
     '</div>';
 
   html += '</div>'; // end dtab-overview
@@ -291,24 +293,59 @@ function renderDashboard(s) {
 
   maybeOfferHomeScreen(s.current_streak);
 
-  // Copy Login Code button for mobile app linking
-  const copyBtn = document.getElementById('copy-login-btn');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(tg.initData).then(() => {
-        document.getElementById('copy-status').hidden = false;
-        copyBtn.textContent = 'Copied!';
-        haptic('success');
-      }).catch(() => {
-        const ta = document.createElement('textarea');
-        ta.value = tg.initData;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        document.getElementById('copy-status').hidden = false;
-        copyBtn.textContent = 'Copied!';
-      });
+  // Get Login Code button for mobile app linking
+  const getCodeBtn = document.getElementById('get-code-btn');
+  if (getCodeBtn) {
+    getCodeBtn.addEventListener('click', async () => {
+      haptic('light');
+      getCodeBtn.textContent = 'Getting code...';
+      getCodeBtn.disabled = true;
+      try {
+        const res = await api('/api/auth/telegram/code', { method: 'POST' });
+        const code = res.code;
+        const expiresIn = res.expires_in;
+        document.getElementById('code-area').innerHTML =
+          '<div style="font-size:32px;font-weight:bold;font-family:monospace;letter-spacing:4px;text-align:center;padding:16px;background:var(--card);border-radius:12px;margin-bottom:8px;">' + esc(code) + '</div>' +
+          '<button id="copy-code-btn" style="background:var(--accent);color:var(--accent-text);border:none;border-radius:12px;padding:12px 24px;font-size:15px;font-weight:600;cursor:pointer;width:100%;">Copy Code</button>' +
+          '<div class="sub" style="text-align:center;margin-top:8px;">Expires in ' + expiresIn + ' seconds</div>';
+        document.getElementById('copy-code-btn').addEventListener('click', () => {
+          navigator.clipboard.writeText(code).then(() => {
+            document.getElementById('code-status').hidden = false;
+            document.getElementById('code-status').textContent = '✓ Copied! Return to English App.';
+            document.getElementById('copy-code-btn').textContent = 'Copied!';
+            haptic('success');
+          }).catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = code;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            document.getElementById('code-status').hidden = false;
+            document.getElementById('code-status').textContent = '✓ Copied! Return to English App.';
+            document.getElementById('copy-code-btn').textContent = 'Copied!';
+          });
+        });
+        // Countdown timer
+        let remaining = expiresIn;
+        const timer = setInterval(() => {
+          remaining--;
+          const el = document.querySelector('#code-area .sub');
+          if (el) el.textContent = 'Expires in ' + remaining + ' seconds';
+          if (remaining <= 0) {
+            clearInterval(timer);
+            document.getElementById('code-area').innerHTML =
+              '<button id="get-code-btn" style="background:var(--accent);color:var(--accent-text);border:none;border-radius:12px;padding:14px 24px;font-size:15px;font-weight:600;cursor:pointer;width:100%;">Get New Code</button>';
+            document.getElementById('code-status').hidden = true;
+          }
+        }, 1000);
+      } catch (e) {
+        getCodeBtn.textContent = 'Get Login Code';
+        getCodeBtn.disabled = false;
+        document.getElementById('code-status').hidden = false;
+        document.getElementById('code-status').textContent = 'Error: ' + e.message;
+        document.getElementById('code-status').style.color = 'var(--danger)';
+      }
     });
   }
 }
