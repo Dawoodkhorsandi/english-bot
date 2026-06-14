@@ -10,10 +10,11 @@ try { tg.setBottomBarColor(tg.themeParams.bottom_bar_bg_color || 'bg_color'); } 
 // Telegram login flow: when opened from the mobile app with startapp=link_account,
 // show a "Copy Login Code" button instead of the full app.
 // ---------------------------------------------------------------------------
-(function checkTelegramLogin() {
-  const params = new URLSearchParams(window.location.search);
-  const startParam = tg.initDataUnsafe?.start_param || params.get('startapp');
+function checkTelegramLogin() {
+  const startParam = tg.initDataUnsafe?.start_param;
+  console.log('[login-check] start_param:', startParam);
   if (startParam === 'link_account') {
+    console.log('[login-check] showing overlay');
     document.getElementById('telegram-login-overlay').hidden = false;
     document.getElementById('copy-login-btn').addEventListener('click', function() {
       navigator.clipboard.writeText(tg.initData).then(function() {
@@ -21,7 +22,6 @@ try { tg.setBottomBarColor(tg.themeParams.bottom_bar_bg_color || 'bg_color'); } 
         document.getElementById('copy-login-btn').textContent = 'Copied!';
         try { tg.HapticFeedback.notificationOccurred('success'); } catch (e) { /* ignore */ }
       }).catch(function() {
-        // Fallback: select text for manual copy
         var ta = document.createElement('textarea');
         ta.value = tg.initData;
         document.body.appendChild(ta);
@@ -32,9 +32,11 @@ try { tg.setBottomBarColor(tg.themeParams.bottom_bar_bg_color || 'bg_color'); } 
         document.getElementById('copy-login-btn').textContent = 'Copied!';
       });
     });
-    return; // Stop — don't initialize the full app
+    return true;
   }
-})();
+  return false;
+}
+if (!checkTelegramLogin()) { setTimeout(checkTelegramLogin, 500); }
 
 // Public config (bot handle + web app URL) for the share/invite link. Filled
 // from /api/config at boot; defaults keep the share button working offline.
