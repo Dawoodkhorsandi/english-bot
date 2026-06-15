@@ -122,6 +122,7 @@ func Run() {
 	go runStoryScheduler(ctx, chain, store, notifier)
 	go runDeckBackfill(ctx, chain, store)
 	go runDictionarySeeder(ctx, store)
+	go CleanupAuthCodes(store.db)
 
 	log.Println("📡 [SYSTEM] Launching Telegram incoming updates consumer engine...")
 	go pollTelegramUpdates(ctx, chain, store, notifier)

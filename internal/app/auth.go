@@ -794,6 +794,12 @@ func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) 
 		return
 	}
 
+	ip := clientIP(r)
+	if authBlocked(ip) {
+		http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
+
 	var req struct {
 		Code string `json:"code"`
 	}
@@ -807,12 +813,15 @@ func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) 
 	case "ok":
 		// fall through
 	case "invalid":
+		recordAuthFailure(ip)
 		http.Error(w, "invalid code", http.StatusUnauthorized)
 		return
 	case "used":
+		recordAuthFailure(ip)
 		http.Error(w, "code already used", http.StatusUnauthorized)
 		return
 	case "expired":
+		recordAuthFailure(ip)
 		http.Error(w, "code expired", http.StatusUnauthorized)
 		return
 	default:
