@@ -460,12 +460,12 @@ func (s *Store) CreateLoginCode(chatID int64) (code string, limited bool, err er
 // used = 0 and checked via RowsAffected, so concurrent redemptions of the same
 // code cannot both succeed (closes the check-then-act race).
 func (s *Store) claimLoginCode(code string) (chatID int64, status string) {
-	var createdAt time.Time
+	var createdRaw any
 	var used int
 	err := s.db.QueryRow(
 		"SELECT chat_id, created_at, used FROM auth_codes WHERE code = ?",
 		code,
-	).Scan(&chatID, &createdAt, &used)
+	).Scan(&chatID, &createdRaw, &used)
 	if err == sql.ErrNoRows {
 		return 0, "invalid"
 	}
@@ -475,6 +475,15 @@ func (s *Store) claimLoginCode(code string) (chatID int64, status string) {
 	}
 	if used != 0 {
 		return 0, "used"
+	}
+	// created_at is a SQLite DATETIME stored in UTC; the driver may hand it back
+	// in the process-local timezone, so normalise via parseStoredUTC instead of
+	// scanning straight into time.Time (which made every code look expired on a
+	// non-UTC server, e.g. Asia/Tehran in production).
+	createdAt, ok := parseStoredUTC(createdRaw)
+	if !ok {
+		log.Printf("auth: claim cannot parse created_at %v (%T)", createdRaw, createdRaw)
+		return 0, "error"
 	}
 	if time.Since(createdAt) > loginCodeTTL {
 		return 0, "expired"

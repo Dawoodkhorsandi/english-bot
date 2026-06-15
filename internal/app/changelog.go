@@ -440,4 +440,9 @@ var Changelogs = []ChangelogEntry{
 			"• 🔗 <b>One account across email & Telegram:</b> sign in with either and link them to share the same progress (Google sign-in coming next)\n" +
 			"• 🔒 Security hardening behind the scenes: stronger login-secret checks, a higher login-code limit, and a code-reuse fix",
 	},
+	{
+		Version: "1.37.1",
+		Silent:  true,
+		Text:    "Fix: Telegram login codes were always rejected as expired on non-UTC servers (production runs Asia/Tehran). claimLoginCode now normalises the stored created_at via parseStoredUTC instead of scanning a DATETIME straight into time.Time.",
+	},
 }
