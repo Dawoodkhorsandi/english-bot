@@ -58,6 +58,7 @@ func startWebServer(store *Store, notifier telegram.Notifier) {
 		handleAPIKudos(w, r, chatID, st, notifier)
 	}))
 	mux.HandleFunc("/api/review/next", withUser(store, handleAPIReviewNext))
+	mux.HandleFunc("/api/review/count", withUser(store, handleAPIReviewCount))
 	mux.HandleFunc("/api/review/answer", withUser(store, handleAPIReviewAnswer))
 	mux.HandleFunc("/api/review/summary", withUser(store, handleAPIReviewSummary))
 	mux.HandleFunc("/api/decks", withUser(store, handleAPIDecks))
@@ -521,6 +522,20 @@ func handleAPIKudos(w http.ResponseWriter, r *http.Request, chatID int64, store 
 		}
 	}
 	writeJSON(w, map[string]interface{}{"count": count, "gaveByMe": gave})
+}
+
+// handleAPIReviewCount returns the number of due review cards without loading them.
+func handleAPIReviewCount(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	var count int
+	err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM review_schedule WHERE chat_id = ? AND due_at <= ?",
+		chatID, time.Now().UTC().Format("2006-01-02 15:04:05"),
+	).Scan(&count)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"count": count})
 }
 
 // handleAPIReviewNext returns the user's due spaced-repetition cards.
