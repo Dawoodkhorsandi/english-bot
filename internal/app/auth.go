@@ -673,10 +673,19 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request, store *Store) {
 		email = info.email
 	}
 
+	// If the identity name is the generic "User <id>" fallback, try the
+	// real Telegram first name from user_prefs instead.
+	name := info.name
+	if name == "" || strings.HasPrefix(name, "User ") {
+		if prefs, err := store.GetPrefs(accountID); err == nil && prefs.FirstName != "" {
+			name = prefs.FirstName
+		}
+	}
+
 	resp := map[string]interface{}{
 		"id":         accountID,
 		"email":      email,
-		"name":       info.name,
+		"name":       name,
 		"created_at": info.createdAt,
 	}
 	if info.telegramID.Valid {
@@ -811,7 +820,12 @@ func handleTelegramVerify(w http.ResponseWriter, r *http.Request, store *Store) 
 		return
 	}
 
+	// Prefer the real Telegram first name (kept current on every message)
+	// over the generic "User <id>" fallback.
 	name := fmt.Sprintf("User %d", chatID)
+	if prefs, err := store.GetPrefs(chatID); err == nil && prefs.FirstName != "" {
+		name = prefs.FirstName
+	}
 	if err := store.ensureTelegramIdentity(chatID, name); err != nil {
 		log.Printf("auth: failed to ensure telegram identity: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
