@@ -445,4 +445,9 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Fix: Telegram login codes were always rejected as expired on non-UTC servers (production runs Asia/Tehran). claimLoginCode now normalises the stored created_at via parseStoredUTC instead of scanning a DATETIME straight into time.Time.",
 	},
+	{
+		Version: "1.38.0",
+		Silent:  true,
+		Text:    "Security & hygiene: rate-limit POST /api/auth/telegram/verify (reuse existing authBlocked/recordAuthFailure guard), wire up CleanupAuthCodes goroutine in Run() to purge expired login codes every 10 minutes.",
+	},
 }
