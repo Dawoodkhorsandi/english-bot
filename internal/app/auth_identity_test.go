@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // TestWithUserAcceptsJWT is the regression test for the core bug: the data API
@@ -83,6 +84,32 @@ func TestClaimLoginCodeSingleUse(t *testing.T) {
 	}
 	if _, status := store.claimLoginCode("ZZZ-ZZZ"); status != "invalid" {
 		t.Fatalf("unknown code status=%q, want invalid", status)
+	}
+}
+
+// TestClaimLoginCodeFreshOnNonUTCServer is the regression test for the
+// "login code is wrong/expired" bug: on a non-UTC server (production runs
+// Asia/Tehran) the driver handed created_at back in process-local time, so a
+// freshly-minted code looked hours old and always claimed as "expired".
+// claimLoginCode must normalise the stored UTC timestamp regardless of
+// time.Local.
+func TestClaimLoginCodeFreshOnNonUTCServer(t *testing.T) {
+	saved := time.Local
+	tehran, err := time.LoadLocation("Asia/Tehran")
+	if err != nil {
+		t.Skipf("tz data unavailable: %v", err)
+	}
+	time.Local = tehran
+	t.Cleanup(func() { time.Local = saved })
+
+	store := testStoreHelper(t)
+	code, limited, err := store.CreateLoginCode(123123)
+	if err != nil || limited {
+		t.Fatalf("create code: err=%v limited=%v", err, limited)
+	}
+	id, status := store.claimLoginCode(code)
+	if status != "ok" || id != 123123 {
+		t.Fatalf("fresh code on non-UTC server: id=%d status=%q, want 123123/ok", id, status)
 	}
 }
 
