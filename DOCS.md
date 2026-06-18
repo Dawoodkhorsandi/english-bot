@@ -808,6 +808,9 @@ calls `validateInitData`: it sorts all fields except `hash` into a
 | `/api/quiz/answer` | POST | `{word, correct, exp, token, answer}` → verifies the token + TTL, records to `quiz_results`, returns `{correct}`. |
 | `/api/dictionary?q&prefix` | GET | English→Persian dictionary lookup. Exact match (default) tries local dictionary then fa.wiktionary.org fallback; `prefix=1` does autocomplete (local only, limit 20). Returns `{results, seeding, total}`. |
 | `/api/analytics` | GET | Detailed learning analytics: vocabulary breakdown by level, quiz accuracy trend (last 30 days), activity by hour of day, weekly velocity (words per week, last 8 weeks), and content diversity. Returns `LearningAnalytics` struct. |
+| `/api/report/bug` | POST | `{message, context?}` → forwards a user bug report to `MAINTAINER_CHAT_ID` via the `Notifier` (HTML-escaped, capped at 2000 chars). Returns `{ok:true}` even when no maintainer/notifier is configured (the send is just skipped). (v1.39.0) |
+| `/api/auth/google` | POST | **Public**: `{id_token}` → verifies a Google ID token (`verifyGoogleIDToken` via Google tokeninfo; `aud` must equal `GOOGLE_CLIENT_ID`) and returns `{token, user}`. Reuses an existing Google identity, links to an existing email identity with the same address, or creates a new account (`resolveGoogleAccount`). 503 until `GOOGLE_CLIENT_ID` is set. (v1.39.0) |
+| `/api/auth/link/google` | POST | Bearer JWT: `{id_token}` → attaches a Google identity to the caller's account; rejects a Google identity already owned by another account. (v1.39.0) |
 
 **Leaderboard** (`leaderboard.go`): cross-user ranking via `GROUP BY chat_id`
 over `sent_vocab` (words) or `review_schedule` (mastered, interval ≥ 21d). Each

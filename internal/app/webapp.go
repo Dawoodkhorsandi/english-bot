@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io/fs"
 	"log"
 	"net/http"
@@ -56,6 +57,10 @@ func startWebServer(store *Store, notifier telegram.Notifier) {
 	// the apiHandler signature stays uniform; nil-safe for tests via mockNotifier).
 	mux.HandleFunc("/api/kudos", withUser(store, func(w http.ResponseWriter, r *http.Request, chatID int64, st *Store) {
 		handleAPIKudos(w, r, chatID, st, notifier)
+	}))
+	// Bug reports are forwarded to the maintainer's Telegram chat.
+	mux.HandleFunc("/api/report/bug", withUser(store, func(w http.ResponseWriter, r *http.Request, chatID int64, st *Store) {
+		handleAPIReportBug(w, r, chatID, st, notifier)
 	}))
 	mux.HandleFunc("/api/review/next", withUser(store, handleAPIReviewNext))
 	mux.HandleFunc("/api/review/count", withUser(store, handleAPIReviewCount))
@@ -522,6 +527,53 @@ func handleAPIKudos(w http.ResponseWriter, r *http.Request, chatID int64, store 
 		}
 	}
 	writeJSON(w, map[string]interface{}{"count": count, "gaveByMe": gave})
+}
+
+// maxBugReportLen caps a forwarded report so one user can't flood the
+// maintainer's chat (Telegram messages top out at 4096 chars anyway).
+const maxBugReportLen = 2000
+
+// handleAPIReportBug forwards a user's bug report to the maintainer's Telegram
+// chat. notifier may be nil (tests); a nil notifier or unconfigured maintainer
+// just skips the send while still returning ok so the client shows success.
+func handleAPIReportBug(w http.ResponseWriter, r *http.Request, chatID int64, store *Store, notifier telegram.Notifier) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Message string `json:"message"`
+		Context string `json:"context"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	msg := strings.TrimSpace(body.Message)
+	if msg == "" {
+		http.Error(w, "message required", http.StatusBadRequest)
+		return
+	}
+	if len(msg) > maxBugReportLen {
+		msg = msg[:maxBugReportLen]
+	}
+	ctx := strings.TrimSpace(body.Context)
+	if len(ctx) > 200 {
+		ctx = ctx[:200]
+	}
+
+	mID, ok := maintainerID()
+	if ok && notifier != nil {
+		// parse_mode is HTML, so escape the user-supplied text.
+		text := fmt.Sprintf("🐞 <b>Bug report</b> from user <code>%d</code>\n\n%s", chatID, html.EscapeString(msg))
+		if ctx != "" {
+			text += "\n\n<i>" + html.EscapeString(ctx) + "</i>"
+		}
+		if err := notifier.Send(mID, text); err != nil {
+			log.Printf("⚠️  [REPORT] could not forward bug report: %v", err)
+		}
+	}
+	writeJSON(w, map[string]interface{}{"ok": true})
 }
 
 // handleAPIReviewCount returns the number of due review cards without loading them.

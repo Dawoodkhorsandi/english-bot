@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -274,7 +275,7 @@ type accountInfo struct {
 // accountInfo gathers the display profile for an account across its identities.
 func (s *Store) accountProfile(accountID int64) (accountInfo, error) {
 	rows, err := s.db.Query(
-		"SELECT provider, provider_uid, name, created_at FROM identities WHERE account_id = ? ORDER BY created_at",
+		"SELECT provider, provider_uid, COALESCE(credential, ''), name, created_at FROM identities WHERE account_id = ? ORDER BY created_at",
 		accountID,
 	)
 	if err != nil {
@@ -283,9 +284,10 @@ func (s *Store) accountProfile(accountID int64) (accountInfo, error) {
 	defer rows.Close()
 
 	var info accountInfo
+	var googleEmail string
 	for rows.Next() {
-		var provider, uid, name, created string
-		if err := rows.Scan(&provider, &uid, &name, &created); err != nil {
+		var provider, uid, credential, name, created string
+		if err := rows.Scan(&provider, &uid, &credential, &name, &created); err != nil {
 			return accountInfo{}, err
 		}
 		if info.createdAt == "" {
@@ -297,11 +299,20 @@ func (s *Store) accountProfile(accountID int64) (accountInfo, error) {
 		switch provider {
 		case providerEmail:
 			info.email = uid
+		case providerGoogle:
+			// Google identities store the verified email in the credential column.
+			if googleEmail == "" {
+				googleEmail = credential
+			}
 		case providerTelegram:
 			if id, perr := strconv.ParseInt(uid, 10, 64); perr == nil {
 				info.telegramID = sql.NullInt64{Int64: id, Valid: true}
 			}
 		}
+	}
+	// Prefer the email/password address; fall back to the Google one.
+	if info.email == "" {
+		info.email = googleEmail
 	}
 	return info, rows.Err()
 }
@@ -694,6 +705,224 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request, store *Store) {
 	writeJSON(w, resp)
 }
 
+// ---------------------------------------------------------------------------
+// Google sign-in
+// ---------------------------------------------------------------------------
+
+// googleClaims is the subset of a verified Google ID token we consume. The
+// tokeninfo endpoint returns email_verified as the string "true".
+type googleClaims struct {
+	Sub           string `json:"sub"`
+	Email         string `json:"email"`
+	EmailVerified string `json:"email_verified"`
+	Name          string `json:"name"`
+	Aud           string `json:"aud"`
+}
+
+// verifyGoogleIDToken validates a Google ID token and returns its claims. It
+// delegates signature/expiry checks to Google's tokeninfo endpoint (no extra
+// dependency), so a 200 response already means the token is well-formed and
+// unexpired; the caller still must check the audience. It is a package var so
+// tests can stub it without network access.
+var verifyGoogleIDToken = func(idToken string) (googleClaims, error) {
+	var c googleClaims
+	if strings.TrimSpace(idToken) == "" {
+		return c, fmt.Errorf("empty token")
+	}
+	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + url.QueryEscape(idToken))
+	if err != nil {
+		return c, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return c, fmt.Errorf("google tokeninfo status %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
+		return c, err
+	}
+	return c, nil
+}
+
+// createGoogleAccount registers a new Google identity on a fresh synthetic
+// account. The verified email is stored in the credential column (Google
+// identities have no password) so accountProfile can surface it.
+func (s *Store) createGoogleAccount(sub, email, name string) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	accountID, err := nextSyntheticAccountID(tx)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(
+		"INSERT INTO identities (provider, provider_uid, account_id, credential, name) VALUES (?, ?, ?, ?, ?)",
+		providerGoogle, sub, accountID, email, name,
+	); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return accountID, nil
+}
+
+// resolveGoogleAccount maps a verified Google identity to an account, creating
+// or linking as needed, and returns the account id and its display name:
+//   - existing Google identity → that account;
+//   - else an email identity with the same address → link Google to it (unifies
+//     a prior email/password sign-up with Google);
+//   - else a brand-new account.
+func (s *Store) resolveGoogleAccount(sub, email, name string) (accountID int64, displayName string, err error) {
+	if id, _, existingName, ok, qErr := s.identityAccount(providerGoogle, sub); qErr != nil {
+		return 0, "", qErr
+	} else if ok {
+		return id, existingName, nil
+	}
+
+	if email != "" {
+		if id, _, emailName, ok, qErr := s.identityAccount(providerEmail, email); qErr != nil {
+			return 0, "", qErr
+		} else if ok {
+			if _, err := s.db.Exec(
+				"INSERT OR IGNORE INTO identities (provider, provider_uid, account_id, credential, name) VALUES (?, ?, ?, ?, ?)",
+				providerGoogle, sub, id, email, name,
+			); err != nil {
+				return 0, "", err
+			}
+			if emailName != "" {
+				return id, emailName, nil
+			}
+			return id, name, nil
+		}
+	}
+
+	id, err := s.createGoogleAccount(sub, email, name)
+	if err != nil {
+		return 0, "", err
+	}
+	return id, name, nil
+}
+
+// handleAuthGoogle exchanges a Google ID token for an app JWT, creating or
+// linking the account as needed. Auth: none (the verified Google token is the
+// proof).
+func handleAuthGoogle(w http.ResponseWriter, r *http.Request, store *Store) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if config.GoogleClientID == "" {
+		http.Error(w, "google sign-in not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	ip := clientIP(r)
+	if authBlocked(ip) {
+		http.Error(w, "too many attempts — please wait a minute", http.StatusTooManyRequests)
+		return
+	}
+
+	var body struct {
+		IDToken string `json:"id_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	claims, err := verifyGoogleIDToken(body.IDToken)
+	if err != nil || claims.Aud != config.GoogleClientID || claims.Sub == "" {
+		recordAuthFailure(ip)
+		http.Error(w, "invalid google token", http.StatusUnauthorized)
+		return
+	}
+
+	email := strings.TrimSpace(strings.ToLower(claims.Email))
+	name := strings.TrimSpace(claims.Name)
+	accountID, resolvedName, err := store.resolveGoogleAccount(claims.Sub, email, name)
+	if err != nil {
+		log.Printf("❌ [AUTH] Google sign-in error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if resolvedName == "" {
+		resolvedName = name
+	}
+
+	resp := map[string]interface{}{
+		"token": generateJWT(accountID, email),
+		"user": map[string]interface{}{
+			"id":    accountID,
+			"email": email,
+			"name":  resolvedName,
+		},
+	}
+	if tgID := store.accountTelegramID(accountID); tgID.Valid {
+		resp["user"].(map[string]interface{})["telegram_chat_id"] = tgID.Int64
+	}
+	writeJSON(w, resp)
+}
+
+// handleAuthLinkGoogle attaches a Google identity to the caller's account.
+// Auth: Bearer JWT.
+func handleAuthLinkGoogle(w http.ResponseWriter, r *http.Request, store *Store) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if config.GoogleClientID == "" {
+		http.Error(w, "google sign-in not configured", http.StatusServiceUnavailable)
+		return
+	}
+	accountID, _, ok := bearerAccount(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var body struct {
+		IDToken string `json:"id_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	claims, err := verifyGoogleIDToken(body.IDToken)
+	if err != nil || claims.Aud != config.GoogleClientID || claims.Sub == "" {
+		http.Error(w, "invalid google token", http.StatusUnauthorized)
+		return
+	}
+
+	existing, _, _, exists, err := store.identityAccount(providerGoogle, claims.Sub)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if exists {
+		if existing == accountID {
+			writeJSON(w, map[string]interface{}{"ok": true, "alreadyLinked": true})
+			return
+		}
+		writeJSON(w, map[string]interface{}{"error": "google account already in use by another account"})
+		return
+	}
+
+	if _, err := store.db.Exec(
+		"INSERT INTO identities (provider, provider_uid, account_id, credential, name) VALUES (?, ?, ?, ?, ?)",
+		providerGoogle, claims.Sub, accountID,
+		strings.TrimSpace(strings.ToLower(claims.Email)), strings.TrimSpace(claims.Name),
+	); err != nil {
+		log.Printf("auth: link google error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
 func registerAuthRoutes(mux *http.ServeMux, store *Store) {
 	mux.HandleFunc("/api/auth/register", func(w http.ResponseWriter, r *http.Request) {
 		handleAuthRegister(w, r, store)
@@ -718,6 +947,12 @@ func registerAuthRoutes(mux *http.ServeMux, store *Store) {
 	})
 	mux.HandleFunc("/api/auth/link/telegram", func(w http.ResponseWriter, r *http.Request) {
 		handleAuthLinkTelegram(w, r, store)
+	})
+	mux.HandleFunc("/api/auth/google", func(w http.ResponseWriter, r *http.Request) {
+		handleAuthGoogle(w, r, store)
+	})
+	mux.HandleFunc("/api/auth/link/google", func(w http.ResponseWriter, r *http.Request) {
+		handleAuthLinkGoogle(w, r, store)
 	})
 }
 
