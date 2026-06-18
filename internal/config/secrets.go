@@ -22,6 +22,10 @@ var (
 	GeminiAPIKey     = GetEnv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY")
 	MaintainerChatID = GetEnv("MAINTAINER_CHAT_ID", "YOUR_PERSONAL_CHAT_ID")
 	JWTSecret        = GetEnv("JWT_SECRET", defaultJWTSecret)
+	// GoogleClientID is the OAuth 2.0 client id whose ID tokens we accept (a
+	// token's "aud" claim must equal this). Empty disables Google sign-in — the
+	// endpoint replies 503 until it is set (inside ENV_FILE in prod).
+	GoogleClientID = GetEnv("GOOGLE_CLIENT_ID", "")
 )
 
 // ValidateSecrets fails fast on misconfigured credentials that would otherwise

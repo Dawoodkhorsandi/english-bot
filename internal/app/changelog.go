@@ -450,4 +450,16 @@ var Changelogs = []ChangelogEntry{
 		Silent:  true,
 		Text:    "Security & hygiene: rate-limit POST /api/auth/telegram/verify (reuse existing authBlocked/recordAuthFailure guard), wire up CleanupAuthCodes goroutine in Run() to purge expired login codes every 10 minutes.",
 	},
+	{
+		Version: "1.39.0",
+		Silent:  true,
+		Text: "Mobile app account & feedback features. Sign in with Google: POST /api/auth/google " +
+			"verifies the Google ID token (via Google's tokeninfo endpoint, checking the aud against " +
+			"GOOGLE_CLIENT_ID) and creates or links the account — an existing email identity with the " +
+			"same address is unified, never duplicated; POST /api/auth/link/google attaches Google to " +
+			"the signed-in account. Connect Telegram from the app reuses /api/auth/link/telegram. " +
+			"POST /api/report/bug forwards a user's bug report to MAINTAINER_CHAT_ID via the notifier. " +
+			"Silent: Google sign-in stays dormant until GOOGLE_CLIENT_ID is set in prod, so no loud " +
+			"announcement yet.",
+	},
 }
