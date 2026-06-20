@@ -462,4 +462,17 @@ var Changelogs = []ChangelogEntry{
 			"Silent: Google sign-in stays dormant until GOOGLE_CLIENT_ID is set in prod, so no loud " +
 			"announcement yet.",
 	},
+	{
+		Version: "1.40.0",
+		Silent:  true,
+		Text: "In-app Chat feed support: two new pool-backed endpoints for the mobile app's " +
+			"Telegram-style feed. GET /api/feed/next returns the next message for the user's " +
+			"current broadcast slot (drill/word alternation via feedKindForSlot, or an explicit " +
+			"?kind= override) straight from the content pool — HTML preserved for rich rendering, " +
+			"unseen→recycled→oldest selection, and read-only (never records, so it can't perturb " +
+			"broadcast/SRS state). GET /api/lookup resolves a free-text term to a vocabulary card " +
+			"via the shared lookupWordCard helper (same path as the chat's plain-text lookup), " +
+			"pooling and recording it. Both reuse withUser auth and the practice rate limiter. " +
+			"Silent: backend-only; the Telegram bot's behaviour is unchanged.",
+	},
 }
