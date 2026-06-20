@@ -78,8 +78,9 @@ func startWebServer(store *Store, notifier telegram.Notifier, chain *ai.Provider
 	mux.HandleFunc("/api/quiz/next", withUser(store, handleAPIQuizNext))
 	mux.HandleFunc("/api/quiz/answer", withUser(store, handleAPIQuizAnswer))
 	mux.HandleFunc("/api/practice", withUser(store, handleAPIPractice))
-	// Chat feed: the next pooled message for the current broadcast slot. Pool-only,
-	// HTML preserved so the app renders rich Telegram-style bubbles.
+	// In-app feed: a paginated page of pooled posts (social-feed UI), plus the
+	// single-next variant (legacy chat UI). Both pool-only, HTML preserved.
+	mux.HandleFunc("/api/feed", withUser(store, handleAPIFeed))
 	mux.HandleFunc("/api/feed/next", withUser(store, handleAPIFeedNext))
 	// Free-text word lookup (the app's chat input). Mirrors the bot's plain-text
 	// lookup, so it needs the AI chain (captured here to keep the apiHandler
@@ -1257,6 +1258,40 @@ func handleAPIFeedNext(w http.ResponseWriter, r *http.Request, chatID int64, sto
 		"meaning":   meaning,
 		"text":      text,
 		"ts":        time.Now().Unix(),
+	})
+}
+
+// handleAPIFeed serves a newest-first, cursor-paginated page of pooled posts for
+// the in-app social feed. Like /api/feed/next it preserves HTML and never records
+// (read-only). Pagination is by content_pool.id: pass the previous page's
+// next_cursor as ?cursor= to get the next page. Rate-limited.
+func handleAPIFeed(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	if !practiceAllowed(chatID) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return
+	}
+	limit := atoiOr(r.URL.Query().Get("limit"), 10)
+	cursor := int64(atoiOr(r.URL.Query().Get("cursor"), 0))
+	items, err := store.FeedPage(store.GetLevel(chatID), cursor, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if items == nil {
+		items = []FeedItem{}
+	}
+	// next_cursor is the smallest id in the page; a full page implies there may be
+	// more (the next fetch returning fewer/empty ends pagination).
+	var nextCursor interface{}
+	hasMore := false
+	if n := len(items); n > 0 && limit > 0 && n >= limit {
+		nextCursor = items[n-1].ID
+		hasMore = true
+	}
+	writeJSON(w, map[string]interface{}{
+		"items":       items,
+		"next_cursor": nextCursor,
+		"has_more":    hasMore,
 	})
 }
 

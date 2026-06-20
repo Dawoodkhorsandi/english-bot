@@ -475,4 +475,15 @@ var Changelogs = []ChangelogEntry{
 			"pooling and recording it. Both reuse withUser auth and the practice rate limiter. " +
 			"Silent: backend-only; the Telegram bot's behaviour is unchanged.",
 	},
+	{
+		Version: "1.41.0",
+		Silent:  true,
+		Text: "Paginated feed endpoint for the app's new social-feed UI. " +
+			"GET /api/feed?limit&cursor returns a newest-first, cursor-paginated page of " +
+			"pooled posts across all kinds at the user's level (plus tips), via " +
+			"Store.FeedPage — HTML preserved, read-only (never records), paginated by " +
+			"content_pool.id so pages never overlap. Reuses withUser auth + the practice " +
+			"rate limiter; /api/feed/next stays for the older client. " +
+			"Silent: backend-only; the Telegram bot is unchanged.",
+	},
 }

@@ -172,3 +172,107 @@ func TestAPILookupSuccess(t *testing.T) {
 		t.Errorf("sent_vocab count = %d, want 1 (lookup must record)", n)
 	}
 }
+
+func TestFeedPageOrderAndPagination(t *testing.T) {
+	store := testStoreHelper(t)
+	lvl := config.DefaultLevel
+	// Insert in a known order; content_pool.id is autoincrement, so insertion
+	// order == id order, and the feed returns newest (highest id) first.
+	store.AddToPool(config.KindWord, lvl, "alpha", "m", "<b>alpha</b>")
+	store.AddToPool(config.KindDrill, lvl, "beta", "", "<b>beta</b>")
+	store.AddToPool(config.KindIdiom, lvl, "gamma", "m", "<b>gamma</b>")
+	store.AddToPool(config.KindTip, config.DefaultLevel, "delta", "m", "<b>delta</b>")
+
+	page1, err := store.FeedPage(lvl, 0, 2)
+	if err != nil {
+		t.Fatalf("FeedPage p1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page1 len = %d, want 2", len(page1))
+	}
+	if page1[0].Term != "delta" || page1[1].Term != "gamma" {
+		t.Errorf("page1 = [%s,%s], want [delta,gamma] (newest first)", page1[0].Term, page1[1].Term)
+	}
+	if page1[0].Text != "<b>delta</b>" {
+		t.Errorf("HTML not preserved: %q", page1[0].Text)
+	}
+
+	// Next page via cursor = last id of page1; must not overlap.
+	page2, err := store.FeedPage(lvl, page1[1].ID, 2)
+	if err != nil {
+		t.Fatalf("FeedPage p2: %v", err)
+	}
+	if len(page2) != 2 || page2[0].Term != "beta" || page2[1].Term != "alpha" {
+		t.Fatalf("page2 = %+v, want [beta,alpha]", page2)
+	}
+
+	// Tail page is empty.
+	page3, err := store.FeedPage(lvl, page2[1].ID, 2)
+	if err != nil {
+		t.Fatalf("FeedPage p3: %v", err)
+	}
+	if len(page3) != 0 {
+		t.Errorf("page3 len = %d, want 0 (exhausted)", len(page3))
+	}
+}
+
+func TestFeedPageLevelFilter(t *testing.T) {
+	store := testStoreHelper(t)
+	store.AddToPool(config.KindWord, config.DefaultLevel, "mine", "m", "x")
+	store.AddToPool(config.KindWord, config.LevelAdvanced, "other", "m", "x")
+	store.AddToPool(config.KindTip, config.DefaultLevel, "tipword", "m", "x")
+
+	items, err := store.FeedPage(config.DefaultLevel, 0, 30)
+	if err != nil {
+		t.Fatalf("FeedPage: %v", err)
+	}
+	got := map[string]bool{}
+	for _, it := range items {
+		got[it.Term] = true
+	}
+	if !got["mine"] || !got["tipword"] {
+		t.Errorf("expected level + tip items, got %v", got)
+	}
+	if got["other"] {
+		t.Errorf("advanced-level item leaked into intermediate feed")
+	}
+}
+
+func TestAPIFeedCursorAndNoRecord(t *testing.T) {
+	saveToken(t)
+	store := testStoreHelper(t)
+	const chatID = 100
+	for _, term := range []string{"one", "two", "three"} {
+		store.AddToPool(config.KindWord, config.DefaultLevel, term, "m", "<b>"+term+"</b>")
+	}
+
+	w := apiCall(store, handleAPIFeed, http.MethodGet, "/api/feed?limit=2", chatID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Items []struct {
+			ID   int64  `json:"id"`
+			Term string `json:"term"`
+			Text string `json:"text"`
+		} `json:"items"`
+		NextCursor *int64 `json:"next_cursor"`
+		HasMore    bool   `json:"has_more"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v (body=%s)", err, w.Body.String())
+	}
+	if len(resp.Items) != 2 || !resp.HasMore || resp.NextCursor == nil {
+		t.Fatalf("page1: items=%d hasMore=%v next=%v, want 2/true/non-nil", len(resp.Items), resp.HasMore, resp.NextCursor)
+	}
+	if resp.Items[0].Text != "<b>three</b>" {
+		t.Errorf("HTML not preserved / wrong order: %q", resp.Items[0].Text)
+	}
+
+	// The feed is read-only: it must not record to history.
+	var n int
+	store.db.QueryRow("SELECT COUNT(*) FROM sent_vocab WHERE chat_id = ?", chatID).Scan(&n)
+	if n != 0 {
+		t.Errorf("sent_vocab count = %d after feed, want 0 (read-only)", n)
+	}
+}
