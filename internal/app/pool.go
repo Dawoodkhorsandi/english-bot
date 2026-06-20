@@ -213,6 +213,54 @@ func (s *Store) FeedNext(chatID int64, now time.Time, kindOverride string) (kind
 	return kind, term, meaning, text, nil
 }
 
+// FeedItem is one post in the paginated in-app feed.
+type FeedItem struct {
+	ID      int64  `json:"id"`
+	Kind    string `json:"kind"`
+	Term    string `json:"term"`
+	Meaning string `json:"meaning"`
+	Text    string `json:"text"`
+	TS      int64  `json:"ts"`
+}
+
+// FeedPage returns a newest-first page of pooled posts for the social feed across
+// all kinds at the user's level (plus level-independent tips at the default
+// level), cursor-paginated by the monotonic content_pool.id. cursorID == 0 starts
+// at the newest item; otherwise only items with id < cursorID are returned, so
+// successive pages never overlap. HTML is preserved and nothing is recorded — the
+// feed is a read-only view of the pool (same rationale as FeedNext).
+func (s *Store) FeedPage(level string, cursorID int64, limit int) ([]FeedItem, error) {
+	if limit <= 0 {
+		limit = 10
+	} else if limit > 30 {
+		limit = 30
+	}
+	rows, err := s.db.Query(`
+		SELECT id, kind, term, COALESCE(meaning, ''), text,
+		       CAST(strftime('%s', created_at) AS INTEGER) AS ts
+		FROM content_pool
+		WHERE (level = ? OR (kind = ? AND level = ?))
+		  AND (? = 0 OR id < ?)
+		ORDER BY id DESC
+		LIMIT ?`,
+		level, config.KindTip, config.DefaultLevel, cursorID, cursorID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []FeedItem
+	for rows.Next() {
+		var it FeedItem
+		if err := rows.Scan(&it.ID, &it.Kind, &it.Term, &it.Meaning, &it.Text, &it.TS); err != nil {
+			return nil, err
+		}
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
 // DrillText returns the full stored drill text for a verb (kind=drill). It is used
 // to re-render a different page when a user taps a drill navigation button, so the
 // whole drill never has to travel in the button's callback data.
