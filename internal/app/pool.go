@@ -156,6 +156,63 @@ func (s *Store) PooledOldest(kind, level string) (term, meaning, text string, ok
 	return term, meaning, text, true, nil
 }
 
+// feedKindForSlot mirrors the broadcast drill/word alternation (dueAndKind) for
+// the wall-clock slot at t for a user on the given interval, so the in-app chat
+// feed advances through the same content cadence as Telegram broadcasts.
+func feedKindForSlot(t time.Time, interval int) string {
+	if interval <= 0 {
+		interval = defaultInterval
+	}
+	if (minutesSinceMidnight(t)/interval)%2 == 0 {
+		return config.KindDrill
+	}
+	return config.KindWord
+}
+
+// FeedNext returns one pooled item for the in-app chat feed: the kind the
+// broadcast scheduler would deliver for the current wall-clock slot (or an
+// explicit kindOverride for reply-keyboard taps), at the user's level, picked
+// unseen-first and falling back to recycled then oldest.
+//
+// Unlike PracticeContent it deliberately does NOT record the item to the user's
+// history, so the feed mirrors broadcasts without perturbing the user's real
+// SRS/stats state (the feed is a read-only view of the same pool). Explicit
+// interactions — quiz/SRS answers, bookmarks, word lookups — record via their own
+// endpoints. Returns errPoolEmpty when nothing is pooled for the kind/level.
+func (s *Store) FeedNext(chatID int64, now time.Time, kindOverride string) (kind, term, meaning, text string, err error) {
+	kind = kindOverride
+	if kind == "" {
+		prefs, _ := s.GetPrefs(chatID)
+		kind = feedKindForSlot(now, prefs.Interval)
+	}
+	level := s.GetLevel(chatID)
+	if kind == config.KindTip {
+		// Tips are level-independent (one shared pool), matching the schedulers.
+		level = config.DefaultLevel
+	}
+
+	term, meaning, text, ok, err := s.PooledUnseen(kind, level, chatID)
+	if err != nil {
+		return kind, "", "", "", err
+	}
+	if !ok {
+		term, meaning, text, ok, err = s.PooledRecycled(kind, level, chatID)
+		if err != nil {
+			return kind, "", "", "", err
+		}
+	}
+	if !ok {
+		term, meaning, text, ok, err = s.PooledOldest(kind, level)
+		if err != nil {
+			return kind, "", "", "", err
+		}
+	}
+	if !ok {
+		return kind, "", "", "", errPoolEmpty
+	}
+	return kind, term, meaning, text, nil
+}
+
 // DrillText returns the full stored drill text for a verb (kind=drill). It is used
 // to re-render a different page when a user taps a drill navigation button, so the
 // whole drill never has to travel in the button's callback data.

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Dawoodkhorsandi/english-bot/internal/ai"
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 	"github.com/Dawoodkhorsandi/english-bot/internal/content"
 	"github.com/Dawoodkhorsandi/english-bot/internal/telegram"
@@ -37,7 +38,7 @@ const initDataTTL = 24 * time.Hour
 
 // startWebServer starts the embedded HTTP server that serves the Telegram Mini
 // App. It is only called when WEB_APP_URL is configured.
-func startWebServer(store *Store, notifier telegram.Notifier) {
+func startWebServer(store *Store, notifier telegram.Notifier, chain *ai.ProviderChain) {
 	sub, err := fs.Sub(webappFiles, "webapp")
 	if err != nil {
 		log.Printf("⚠️  [WEBAPP] Could not open embedded assets: %v", err)
@@ -77,6 +78,15 @@ func startWebServer(store *Store, notifier telegram.Notifier) {
 	mux.HandleFunc("/api/quiz/next", withUser(store, handleAPIQuizNext))
 	mux.HandleFunc("/api/quiz/answer", withUser(store, handleAPIQuizAnswer))
 	mux.HandleFunc("/api/practice", withUser(store, handleAPIPractice))
+	// Chat feed: the next pooled message for the current broadcast slot. Pool-only,
+	// HTML preserved so the app renders rich Telegram-style bubbles.
+	mux.HandleFunc("/api/feed/next", withUser(store, handleAPIFeedNext))
+	// Free-text word lookup (the app's chat input). Mirrors the bot's plain-text
+	// lookup, so it needs the AI chain (captured here to keep the apiHandler
+	// signature uniform).
+	mux.HandleFunc("/api/lookup", withUser(store, func(w http.ResponseWriter, r *http.Request, chatID int64, st *Store) {
+		handleAPILookup(w, r, chatID, st, chain)
+	}))
 	mux.HandleFunc("/api/grammar", withUser(store, handleAPIGrammar))
 	mux.HandleFunc("/api/grammar/lesson", withUser(store, handleAPIGrammarLesson))
 	mux.HandleFunc("/api/dictionary", withUser(store, handleAPIDictionary))
@@ -1201,6 +1211,91 @@ func handleAPIPractice(w http.ResponseWriter, r *http.Request, chatID int64, sto
 		"kind":      kind,
 		"term":      term,
 		"text":      stripTelegramHTML(text),
+	})
+}
+
+// feedKinds whitelists the kind overrides the in-app chat feed may request via
+// ?kind= (the reply-keyboard taps). Pool-only — never triggers AI generation.
+var feedKinds = map[string]bool{
+	config.KindDrill:       true,
+	config.KindWord:        true,
+	config.KindIdiom:       true,
+	config.KindCollocation: true,
+	config.KindStory:       true,
+	config.KindTip:         true,
+}
+
+// handleAPIFeedNext serves the next chat-feed message from the content pool: the
+// kind the broadcast scheduler would send for the current wall-clock slot, or an
+// explicit ?kind= override (reply-keyboard taps). Unlike the other content
+// endpoints it preserves the Telegram HTML so the app can render rich bubbles
+// (bold, spoilers, etc.). Pool-only, never records, and rate-limited like
+// /api/practice so a tap loop can't drain anything.
+func handleAPIFeedNext(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	kindOverride := r.URL.Query().Get("kind")
+	if kindOverride != "" && !feedKinds[kindOverride] {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if !practiceAllowed(chatID) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return
+	}
+	kind, term, meaning, text, err := store.FeedNext(chatID, time.Now(), kindOverride)
+	if err != nil {
+		if errors.Is(err, errPoolEmpty) {
+			writeJSON(w, map[string]interface{}{"available": false})
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"available": true,
+		"kind":      kind,
+		"term":      term,
+		"meaning":   meaning,
+		"text":      text,
+		"ts":        time.Now().Unix(),
+	})
+}
+
+// handleAPILookup resolves a free-text term (the app's chat input) to a
+// vocabulary card, mirroring the bot's plain-text lookup (handleWordLookup): it
+// generates a /word-style card at the user's level via the AI chain, pools it,
+// and records it so it counts toward stats and feeds SRS. HTML is preserved for
+// rich rendering. Rejects sentence-length input the way the chat does.
+func handleAPILookup(w http.ResponseWriter, r *http.Request, chatID int64, store *Store, chain *ai.ProviderChain) {
+	term := strings.TrimSpace(r.URL.Query().Get("term"))
+	if term == "" {
+		term = strings.TrimSpace(r.URL.Query().Get("q"))
+	}
+	fields := strings.Fields(term)
+	if len(fields) == 0 {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if len(fields) > 4 || len([]rune(term)) > 40 {
+		writeJSON(w, map[string]interface{}{
+			"available": false,
+			"message":   "Send me a single word (or a short phrase) and I'll explain it — that looked more like a sentence!",
+		})
+		return
+	}
+	if !practiceAllowed(chatID) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return
+	}
+	card, word, meaning, err := lookupWordCard(r.Context(), chain, store, chatID, term)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"available": true,
+		"term":      word,
+		"text":      card,
+		"meaning":   meaning,
 	})
 }
 

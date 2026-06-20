@@ -84,7 +84,7 @@ func Run() {
 		if !strings.HasPrefix(config.WebAppURL, "https://") {
 			log.Printf("⚠️  [WEBAPP] WEB_APP_URL=%q is not https:// — Telegram rejects non-HTTPS Mini App buttons, so /stats will fail to send.", config.WebAppURL)
 		}
-		startWebServer(store, notifier)
+		startWebServer(store, notifier, chain)
 		// Make the Mini App the chat's persistent menu button (the "sticky"
 		// button next to the message input), so it's always one tap away.
 		setChatMenuButton()
@@ -683,14 +683,29 @@ func handleWordLookup(ctx context.Context, chain *ai.ProviderChain, store *Store
 	log.Printf("🔎 [LOOKUP] ChatID %d looked up %q.", chatID, term)
 	_ = notifier.Send(chatID, "🔄 <b>Looking that up...</b>")
 
-	level := store.GetLevel(chatID)
-	card, word, meaning, provider, err := content.GenerateWordFor(ctx, chain, level, term)
+	card, word, _, err := lookupWordCard(ctx, chain, store, chatID, term)
 	if err != nil {
 		log.Printf("❌ [LOOKUP_ERR] Generation failed for ChatID %d term %q: %v", chatID, term, err)
 		_ = notifier.Send(chatID, "❌ Sorry, I couldn't look that up right now. Please try again.")
 		return
 	}
+	if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card, word); err != nil {
+		log.Printf("❌ [LOOKUP_ERR] Send failed for chat %d term %q: %v", chatID, term, err)
+	}
+}
 
+// lookupWordCard resolves a free-text term to a /word-style vocabulary card at
+// the user's level (translating from another language when needed), then pools
+// and records it so the word counts toward /stats, feeds the daily review and
+// SRS, and isn't repeated. Shared by the chat's plain-text lookup
+// (handleWordLookup) and the /api/lookup endpoint. Returns the card HTML, the
+// resolved English word, and its meaning.
+func lookupWordCard(ctx context.Context, chain *ai.ProviderChain, store *Store, chatID int64, term string) (card, word, meaning string, err error) {
+	level := store.GetLevel(chatID)
+	card, word, meaning, provider, err := content.GenerateWordFor(ctx, chain, level, term)
+	if err != nil {
+		return "", "", "", err
+	}
 	// Treat a successful lookup like an on-demand /word: pool it and record it so
 	// it counts toward /stats, feeds the daily review, and isn't repeated.
 	if word != "" {
@@ -702,9 +717,7 @@ func handleWordLookup(ctx context.Context, chain *ai.ProviderChain, store *Store
 		}
 	}
 	log.Printf("✅ [LOOKUP] Delivered %q (resolved %q) to chat %d via %s.", term, word, chatID, provider)
-	if err := sendWordCardWithTTS(ctx, store, notifier, chatID, card, word); err != nil {
-		log.Printf("❌ [LOOKUP_ERR] Send failed for chat %d term %q: %v", chatID, term, err)
-	}
+	return card, word, meaning, nil
 }
 
 // ---------------------------------------------------------------------------
