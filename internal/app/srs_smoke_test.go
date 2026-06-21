@@ -7,44 +7,51 @@ import (
 	"github.com/Dawoodkhorsandi/english-bot/internal/config"
 )
 
-// TestSrsKnownProgression verifies the interval grows on repeated correct recalls
-// and the ease nudges up.
-func TestSrsKnownProgression(t *testing.T) {
-	interval, ease, reps := 1, srsDefaultEase, 0
-
-	// First "known": reps→1, interval→1.
-	interval, ease, reps = srsKnown(interval, ease, reps)
-	if reps != 1 || interval != 1 {
-		t.Fatalf("after 1st known: interval=%d reps=%d, want 1/1", interval, reps)
+// TestFsrsKnownGrowsStability verifies a correct recall grows stability (and so
+// the next interval), and that intervals get longer across repeated recalls.
+func TestFsrsKnownGrowsStability(t *testing.T) {
+	s := fsrsInitStability(gradeGood)
+	d := fsrsInitDifficulty(gradeGood)
+	iv1 := fsrsNextInterval(s, defaultRetention)
+	if iv1 < 1 {
+		t.Fatalf("first interval = %d, want >= 1", iv1)
 	}
-	// Second: reps→2, interval→3.
-	interval, ease, reps = srsKnown(interval, ease, reps)
-	if reps != 2 || interval != 3 {
-		t.Fatalf("after 2nd known: interval=%d reps=%d, want 3/2", interval, reps)
+	// A subsequent recall after the interval elapses must grow stability.
+	r := fsrsRetrievability(float64(iv1), s)
+	d = fsrsNextDifficulty(d, gradeGood)
+	s2 := fsrsNextStabilityRecall(d, s, r)
+	if s2 <= s {
+		t.Fatalf("stability did not grow: %v -> %v", s, s2)
 	}
-	// Third: interval should grow by ~ease (round(3*ease)).
-	prev := interval
-	interval, ease, _ = srsKnown(interval, ease, reps)
-	if interval <= prev {
-		t.Fatalf("after 3rd known: interval=%d, want > %d", interval, prev)
-	}
-	if ease <= srsDefaultEase {
-		t.Fatalf("ease did not grow: %v", ease)
+	if iv2 := fsrsNextInterval(s2, defaultRetention); iv2 <= iv1 {
+		t.Fatalf("interval did not grow: %d -> %d", iv1, iv2)
 	}
 }
 
-// TestSrsForgotResets verifies a failed recall resets the interval and floors ease.
-func TestSrsForgotResets(t *testing.T) {
-	interval, ease, reps := srsForgot(srsMinEase)
-	if interval != 1 || reps != 0 {
-		t.Fatalf("forgot: interval=%d reps=%d, want 1/0", interval, reps)
+// TestFsrsForgotShrinksStability verifies a lapse never increases stability.
+func TestFsrsForgotShrinksStability(t *testing.T) {
+	const s = 20.0
+	r := fsrsRetrievability(s, s)
+	sf := fsrsNextStabilityForget(fsrsNextDifficulty(6, gradeAgain), s, r)
+	if sf > s {
+		t.Fatalf("lapse increased stability: %v -> %v", s, sf)
 	}
-	if ease < srsMinEase {
-		t.Fatalf("ease %v below floor %v", ease, srsMinEase)
+	if sf <= 0 {
+		t.Fatalf("stability non-positive: %v", sf)
 	}
-	// Ease never drops below the floor.
-	if _, e, _ := srsForgot(srsMinEase); e != srsMinEase {
-		t.Fatalf("ease floor not respected: %v", e)
+}
+
+// TestFsrsRetentionDial verifies the desired-retention dial trades reviews for
+// retention: a higher target schedules the next review sooner.
+func TestFsrsRetentionDial(t *testing.T) {
+	const s = 10.0
+	hi := fsrsNextInterval(s, 0.95)
+	lo := fsrsNextInterval(s, 0.85)
+	if hi >= lo {
+		t.Fatalf("retention dial backwards: 0.95=>%d 0.85=>%d", hi, lo)
+	}
+	if got := normalizeRetention(1.5); got != defaultRetention {
+		t.Fatalf("normalizeRetention(1.5) = %v, want default %v", got, defaultRetention)
 	}
 }
 

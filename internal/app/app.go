@@ -148,7 +148,7 @@ func pollTelegramUpdates(ctx context.Context, chain *ai.ProviderChain, store *St
 		default:
 			url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=30&allowed_updates=%s",
 				config.TelegramBotToken, offset,
-				"%5B%22message%22%2C%22callback_query%22%2C%22poll_answer%22%5D")
+				"%5B%22message%22%2C%22callback_query%22%2C%22poll_answer%22%2C%22pre_checkout_query%22%5D")
 
 			log.Printf("📡 [POLLER_REQ] Requesting updates from endpoint gateway. Current Offset pointer: %d", offset)
 			resp, err := client.Get(url)
@@ -201,6 +201,9 @@ func pollTelegramUpdates(ctx context.Context, chain *ai.ProviderChain, store *St
 				case update.PollAnswer != nil:
 					log.Printf("🗳️ [POLL_ANSWER] Update %d | Poll %q", update.UpdateID, update.PollAnswer.PollID)
 					go handleQuizPollAnswer(store, update.PollAnswer)
+				case update.PreCheckoutQuery != nil:
+					log.Printf("💳 [PRECHECKOUT] Update %d | Payload %q", update.UpdateID, update.PreCheckoutQuery.InvoicePayload)
+					handlePreCheckout(notifier, update.PreCheckoutQuery)
 				default:
 					log.Printf("📝 [POLLER_SKIP] Non-message update %d. Skipping.", update.UpdateID)
 				}
@@ -210,6 +213,18 @@ func pollTelegramUpdates(ctx context.Context, chain *ai.ProviderChain, store *St
 }
 
 func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, notifier telegram.Notifier, msg *telegram.Message) {
+	// A completed Stars purchase arrives as a message with no text but a
+	// successful_payment payload — handle it before the empty-text guard.
+	if msg.SuccessfulPayment != nil {
+		handleSuccessfulPayment(store, notifier, msg.Chat.ID, msg.SuccessfulPayment)
+		return
+	}
+	// A voice note is a pronunciation attempt (#6) — score it against the chat's
+	// pending /pronounce target.
+	if msg.Voice != nil {
+		handlePronounceVoice(ctx, chain, notifier, msg.Chat.ID, msg.Voice)
+		return
+	}
 	if msg.Text == "" {
 		log.Printf("ℹ️  [ROUTER] Ignoring empty message ID %d.", msg.MessageID)
 		return
@@ -475,6 +490,15 @@ func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, n
 			_ = notifier.Send(chatID, formatStats(stats, firstName))
 		}
 
+	case "/pronounce":
+		handlePronounce(notifier, chatID, args)
+
+	case "/streak":
+		handleStreak(store, notifier, chatID)
+
+	case "/buystreak":
+		handleBuyStreak(notifier, chatID, args)
+
 	case "/app":
 		if config.WebAppURL == "" {
 			_ = notifier.Send(chatID, "📱 The in-app experience isn't available right now. You can still use all features here in the chat.")
@@ -630,7 +654,12 @@ func handleMessage(ctx context.Context, chain *ai.ProviderChain, store *Store, n
 			handleAdminMsgSend(notifier, chatID, msg.Text)
 			return
 		}
-		// Plain text (no leading slash) is treated as a word lookup (Change M).
+		// A long pasted/forwarded passage becomes a personal deck (#4); a short
+		// message is treated as a single-word lookup (Change M).
+		if len(strings.Fields(msg.Text)) >= forwardDeckMinWords {
+			handleBuildDeck(store, notifier, chatID, msg.Text)
+			return
+		}
 		handleWordLookup(ctx, chain, store, notifier, chatID, msg.Text)
 	}
 }
@@ -2154,6 +2183,13 @@ func handleCallback(store *Store, notifier telegram.Notifier, cb *telegram.Callb
 	}
 	chatID := cb.Message.Chat.ID
 
+	if strings.HasPrefix(cb.Data, "streakbuy:") {
+		qty, _ := strconv.Atoi(strings.TrimPrefix(cb.Data, "streakbuy:"))
+		_ = notifier.AnswerCallback(cb.ID, "Opening checkout…")
+		sendStreakInvoice(notifier, chatID, qty)
+		return
+	}
+
 	if strings.HasPrefix(cb.Data, "level:") {
 		level, ok := normalizeLevel(strings.TrimPrefix(cb.Data, "level:"))
 		if !ok {
@@ -2597,6 +2633,9 @@ func checkStreakCelebration(store *Store, notifier telegram.Notifier, chatID int
 		return
 	}
 	store.SetStreakCelebrated(chatID, milestone)
+	// Reward the milestone with a streak saver (#7) that auto-protects a future
+	// missed day. Best-effort; a DB hiccup just skips the reward.
+	freezeBal, _ := store.AddStreakFreezes(chatID, 1)
 
 	name := firstName
 	if name == "" {
@@ -2622,6 +2661,7 @@ func checkStreakCelebration(store *Store, notifier telegram.Notifier, chatID int
 		msg = fmt.Sprintf("💎 <b>60-day streak!</b> Two months of daily practice, %s! You're unstoppable.", name)
 	}
 	if msg != "" {
+		msg += fmt.Sprintf("\n\n🧊 You earned a <b>streak saver</b> (you now have %d) — it'll automatically protect your streak if you ever miss a day.", freezeBal)
 		_ = notifier.Send(chatID, msg)
 	}
 }
@@ -2694,6 +2734,8 @@ func registerBotCommands() {
 		{"command": "interval", "description": "Set how often practice arrives"},
 		{"command": "tts", "description": "Toggle pronunciation audio on/off"},
 		{"command": "stats", "description": "See your progress and streak"},
+		{"command": "pronounce", "description": "Practice saying a word and get a match score"},
+		{"command": "streak", "description": "Streak savers: protect your streak if you miss a day"},
 		{"command": "app", "description": "Open your English hub (progress, words & more)"},
 		{"command": "login", "description": "Get a code to sign in on the mobile app"},
 		{"command": "mywords", "description": "Browse your learned vocabulary"},
@@ -2903,6 +2945,10 @@ func openStore(path string) (*Store, error) {
 		display_name         TEXT    NOT NULL DEFAULT '',
 		streak_celebrated    INTEGER NOT NULL DEFAULT 0,
 		public_id            TEXT    NOT NULL DEFAULT '',
+		desired_retention    REAL    NOT NULL DEFAULT 0.9,
+		streak_freezes       INTEGER NOT NULL DEFAULT 0,
+		exam_target          TEXT    NOT NULL DEFAULT '',
+		onboarded            INTEGER NOT NULL DEFAULT 0,
 		updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS kudos (
@@ -2919,6 +2965,9 @@ func openStore(path string) (*Store, error) {
 		ease          REAL    NOT NULL DEFAULT 2.5,
 		reps          INTEGER NOT NULL DEFAULT 0,
 		due_at        DATETIME NOT NULL,
+		stability     REAL    NOT NULL DEFAULT 0,
+		difficulty    REAL    NOT NULL DEFAULT 0,
+		last_review   DATETIME,
 		PRIMARY KEY (chat_id, word)
 	);
 	CREATE INDEX IF NOT EXISTS idx_review_due ON review_schedule(chat_id, due_at);
@@ -2944,7 +2993,15 @@ func openStore(path string) (*Store, error) {
 		persian       TEXT    NOT NULL DEFAULT '',
 		pronunciation TEXT    NOT NULL DEFAULT '',
 		mnemonic      TEXT    NOT NULL DEFAULT '',
+		frequency_rank INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY (deck_id, term)
+	);
+	CREATE TABLE IF NOT EXISTS user_decks (
+		chat_id    INTEGER NOT NULL,
+		deck_id    TEXT    NOT NULL,
+		name       TEXT    NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (chat_id, deck_id)
 	);
 	CREATE TABLE IF NOT EXISTS leitner_progress (
 		chat_id    INTEGER  NOT NULL,
@@ -3315,6 +3372,42 @@ func (s *Store) migrate() error {
 	// only after the column exists on migrated legacy DBs (v1.32.0).
 	if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_user_public ON user_prefs(public_id)"); err != nil {
 		return err
+	}
+	// user_prefs columns for FSRS retention dial, streak-saver freezes, the
+	// IELTS/TOEFL exam target, and the known-word onboarding flag.
+	for col, def := range map[string]string{
+		"desired_retention": "REAL NOT NULL DEFAULT 0.9",
+		"streak_freezes":    "INTEGER NOT NULL DEFAULT 0",
+		"exam_target":       "TEXT NOT NULL DEFAULT ''",
+		"onboarded":         "INTEGER NOT NULL DEFAULT 0",
+	} {
+		if !s.columnExists("user_prefs", col) {
+			log.Printf("💾 [DB_MIGRATE] Adding user_prefs.%s column...", col)
+			if _, err := s.db.Exec("ALTER TABLE user_prefs ADD COLUMN " + col + " " + def); err != nil {
+				return err
+			}
+		}
+	}
+	// review_schedule FSRS columns (stability/difficulty/last_review); legacy
+	// SM-2 rows keep their interval and are bootstrapped on their next grade.
+	for col, def := range map[string]string{
+		"stability":   "REAL NOT NULL DEFAULT 0",
+		"difficulty":  "REAL NOT NULL DEFAULT 0",
+		"last_review": "DATETIME",
+	} {
+		if !s.columnExists("review_schedule", col) {
+			log.Printf("💾 [DB_MIGRATE] Adding review_schedule.%s column...", col)
+			if _, err := s.db.Exec("ALTER TABLE review_schedule ADD COLUMN " + col + " " + def); err != nil {
+				return err
+			}
+		}
+	}
+	// deck_cards frequency rank (lower = more common); 0 = unranked, sorts last.
+	if !s.columnExists("deck_cards", "frequency_rank") {
+		log.Printf("💾 [DB_MIGRATE] Adding deck_cards.frequency_rank column...")
+		if _, err := s.db.Exec("ALTER TABLE deck_cards ADD COLUMN frequency_rank INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
 	}
 	// bookmarks table added in v1.21.0; CREATE IF NOT EXISTS is safe for existing DBs.
 	if _, err := s.db.Exec(`

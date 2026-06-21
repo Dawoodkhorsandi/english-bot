@@ -42,7 +42,11 @@ type UserPrefs struct {
 	DailyReviewEnabled bool // midnight vocab recap
 	QuizIntervalHours  int  // hours between scheduled quizzes
 	FirstName          string
-	StreakCelebrated   int // highest streak milestone already celebrated
+	StreakCelebrated   int     // highest streak milestone already celebrated
+	DesiredRetention   float64 // FSRS target recall probability (0.70–0.97)
+	StreakFreezes      int     // streak-saver tokens banked
+	ExamTarget         string  // "", "ielts", or "toefl"
+	Onboarded          int     // 1 once the known-word onboarding has been completed
 }
 
 // normalizeLevel lowercases/trims a level string and validates it, falling back
@@ -127,24 +131,31 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 		CollocationEnabled: true, StoryEnabled: true,
 		DigestEnabled: true, DailyReviewEnabled: true,
 		QuizIntervalHours: defaultQuizIntervalHours,
+		DesiredRetention:  defaultRetention,
 	}
 	var level, firstName string
 	var paused, interval, ttsEnabled, tipsEnabled int
 	var quizEnabled, idiomEnabled, reviewEnabled, digestEnabled, dailyReviewEnabled int
 	var collocationEnabled, storyEnabled int
 	var quizIntervalHours, streakCelebrated int
+	var desiredRetention float64
+	var streakFreezes, onboarded int
+	var examTarget string
 	err := s.db.QueryRow(
 		`SELECT level, paused, interval_minutes, tts_enabled, tips_enabled,
 		        quiz_enabled, idiom_enabled, review_enabled, digest_enabled,
 		        daily_review_enabled, quiz_interval_hours,
 		        COALESCE(collocation_enabled,1), COALESCE(story_enabled,1),
-		        COALESCE(first_name,''), COALESCE(streak_celebrated,0)
+		        COALESCE(first_name,''), COALESCE(streak_celebrated,0),
+		        COALESCE(desired_retention,0.9), COALESCE(streak_freezes,0),
+		        COALESCE(exam_target,''), COALESCE(onboarded,0)
 		 FROM user_prefs WHERE chat_id = ?`, chatID,
 	).Scan(&level, &paused, &interval, &ttsEnabled, &tipsEnabled,
 		&quizEnabled, &idiomEnabled, &reviewEnabled, &digestEnabled,
 		&dailyReviewEnabled, &quizIntervalHours,
 		&collocationEnabled, &storyEnabled,
-		&firstName, &streakCelebrated)
+		&firstName, &streakCelebrated, &desiredRetention,
+		&streakFreezes, &examTarget, &onboarded)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return prefs, nil
@@ -172,7 +183,129 @@ func (s *Store) GetPrefs(chatID int64) (UserPrefs, error) {
 	}
 	prefs.FirstName = firstName
 	prefs.StreakCelebrated = streakCelebrated
+	prefs.DesiredRetention = normalizeRetention(desiredRetention)
+	prefs.StreakFreezes = streakFreezes
+	prefs.ExamTarget = normalizeExamTarget(examTarget)
+	prefs.Onboarded = onboarded
 	return prefs, nil
+}
+
+// ---------------------------------------------------------------------------
+// Streak-saver freezes (#7) — banked tokens that auto-rescue a missed day.
+// ---------------------------------------------------------------------------
+
+// GetStreakFreezes returns how many streak-saver tokens the user has banked.
+func (s *Store) GetStreakFreezes(chatID int64) int {
+	var n int
+	_ = s.db.QueryRow("SELECT COALESCE(streak_freezes,0) FROM user_prefs WHERE chat_id = ?", chatID).Scan(&n)
+	return n
+}
+
+// AddStreakFreezes grants (or, with a negative delta, spends) streak-saver
+// tokens, never letting the balance drop below zero. Returns the new balance.
+func (s *Store) AddStreakFreezes(chatID int64, delta int) (int, error) {
+	if _, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, streak_freezes) VALUES (?, MAX(0, ?))
+		ON CONFLICT(chat_id) DO UPDATE SET
+			streak_freezes = MAX(0, COALESCE(streak_freezes,0) + ?),
+			updated_at = CURRENT_TIMESTAMP`,
+		chatID, delta, delta,
+	); err != nil {
+		return 0, err
+	}
+	return s.GetStreakFreezes(chatID), nil
+}
+
+// ---------------------------------------------------------------------------
+// Exam target (#1) — IELTS / TOEFL focus.
+// ---------------------------------------------------------------------------
+
+// allExamTargets enumerates the supported exam tracks ("" = none).
+var allExamTargets = []string{"", "ielts", "toefl"}
+
+// normalizeExamTarget validates an exam-target string, defaulting to "" (none).
+func normalizeExamTarget(t string) string {
+	t = strings.ToLower(strings.TrimSpace(t))
+	for _, v := range allExamTargets {
+		if v == t {
+			return t
+		}
+	}
+	return ""
+}
+
+// examTargetLabel returns a human label for an exam target.
+func examTargetLabel(t string) string {
+	switch normalizeExamTarget(t) {
+	case "ielts":
+		return "IELTS"
+	case "toefl":
+		return "TOEFL"
+	default:
+		return "None"
+	}
+}
+
+// GetExamTarget returns the user's exam track ("" when none).
+func (s *Store) GetExamTarget(chatID int64) string {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		return ""
+	}
+	return prefs.ExamTarget
+}
+
+// SetExamTarget upserts the user's exam track.
+func (s *Store) SetExamTarget(chatID int64, target string) error {
+	target = normalizeExamTarget(target)
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, exam_target) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET exam_target = excluded.exam_target, updated_at = CURRENT_TIMESTAMP`,
+		chatID, target,
+	)
+	return err
+}
+
+// IsOnboarded reports whether the user has completed known-word onboarding (#8).
+func (s *Store) IsOnboarded(chatID int64) bool {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		return false
+	}
+	return prefs.Onboarded != 0
+}
+
+// SetOnboarded marks the known-word onboarding as completed.
+func (s *Store) SetOnboarded(chatID int64) error {
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, onboarded) VALUES (?, 1)
+		ON CONFLICT(chat_id) DO UPDATE SET onboarded = 1, updated_at = CURRENT_TIMESTAMP`,
+		chatID,
+	)
+	return err
+}
+
+// GetDesiredRetention returns the user's FSRS target recall probability
+// (default 0.9 when unset).
+func (s *Store) GetDesiredRetention(chatID int64) float64 {
+	prefs, err := s.GetPrefs(chatID)
+	if err != nil {
+		log.Printf("⚠️  [PREFS] Could not load desired_retention for chat %d: %v (using default)", chatID, err)
+		return defaultRetention
+	}
+	return prefs.DesiredRetention
+}
+
+// SetDesiredRetention upserts the user's FSRS target recall probability,
+// clamped to the supported range.
+func (s *Store) SetDesiredRetention(chatID int64, r float64) error {
+	r = normalizeRetention(r)
+	_, err := s.db.Exec(`
+		INSERT INTO user_prefs (chat_id, desired_retention) VALUES (?, ?)
+		ON CONFLICT(chat_id) DO UPDATE SET desired_retention = excluded.desired_retention, updated_at = CURRENT_TIMESTAMP`,
+		chatID, r,
+	)
+	return err
 }
 
 // SetFirstName stores the user's Telegram first name (best-effort, updated on

@@ -312,7 +312,10 @@ func runDailyReviewScheduler(ctx context.Context, store *Store, notifier telegra
 		case <-time.After(wait):
 		}
 
-		sendDailyReview(store, notifier, time.Now())
+		now := time.Now()
+		// Rescue at-risk streaks with banked savers before sending the recap.
+		protectStreaks(store, notifier, now)
+		sendDailyReview(store, notifier, now)
 	}
 }
 

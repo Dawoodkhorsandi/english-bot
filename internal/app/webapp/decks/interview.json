@@ -1,0 +1,247 @@
+[
+ {
+  "term": "strengths",
+  "definition": "the things you are good at or do well",
+  "example": "One of my key strengths is staying calm under pressure.",
+  "group": "Job Interview English",
+  "persian": "نقاط قوت"
+ },
+ {
+  "term": "weaknesses",
+  "definition": "the things you are not good at or need to improve",
+  "example": "My biggest weakness is that I take on too much work at once.",
+  "group": "Job Interview English",
+  "persian": "نقاط ضعف"
+ },
+ {
+  "term": "team player",
+  "definition": "someone who works well with others toward a shared goal",
+  "example": "I'm a team player who enjoys collaborating with colleagues.",
+  "group": "Job Interview English",
+  "persian": "فرد اهل کار تیمی"
+ },
+ {
+  "term": "deadline",
+  "definition": "the latest time by which a task must be finished",
+  "example": "I always make sure to meet the deadline, even on tight schedules.",
+  "group": "Job Interview English",
+  "persian": "مهلت / ضرب‌الاجل"
+ },
+ {
+  "term": "I'm passionate about...",
+  "definition": "a way to say you care deeply about something",
+  "example": "I'm passionate about building products that help people.",
+  "group": "Job Interview English",
+  "persian": "من به ... علاقهٔ شدیدی دارم"
+ },
+ {
+  "term": "tell me about yourself",
+  "definition": "a common opening interview question asking for a brief professional summary",
+  "example": "When they said 'tell me about yourself,' I gave a two-minute summary of my career.",
+  "group": "Job Interview English",
+  "persian": "دربارهٔ خودتان بگویید"
+ },
+ {
+  "term": "qualifications",
+  "definition": "the skills, education, or experience that make you suitable for a job",
+  "example": "My qualifications include a degree in marketing and five years of experience.",
+  "group": "Job Interview English",
+  "persian": "صلاحیت‌ها / شرایط احراز"
+ },
+ {
+  "term": "experience",
+  "definition": "the knowledge and skill gained from doing a job over time",
+  "example": "I have three years of experience in customer service.",
+  "group": "Job Interview English",
+  "persian": "تجربه / سابقه"
+ },
+ {
+  "term": "responsibilities",
+  "definition": "the duties and tasks you are expected to carry out in a role",
+  "example": "My main responsibilities were managing the team and reporting to the director.",
+  "group": "Job Interview English",
+  "persian": "مسئولیت‌ها / وظایف"
+ },
+ {
+  "term": "achievement",
+  "definition": "something important that you succeeded in doing through effort",
+  "example": "My proudest achievement was increasing sales by 30 percent.",
+  "group": "Job Interview English",
+  "persian": "دستاورد / موفقیت"
+ },
+ {
+  "term": "to take initiative",
+  "definition": "to act and make decisions on your own without being told",
+  "example": "I took the initiative to redesign our filing system.",
+  "group": "Job Interview English",
+  "persian": "پیش‌قدم شدن / ابتکار عمل به خرج دادن"
+ },
+ {
+  "term": "problem-solving",
+  "definition": "the ability to find good solutions to difficult situations",
+  "example": "Strong problem-solving skills are essential in this role.",
+  "group": "Job Interview English",
+  "persian": "حل مسئله"
+ },
+ {
+  "term": "attention to detail",
+  "definition": "the ability to do work carefully and notice small but important things",
+  "example": "My attention to detail helps me catch errors before they become problems.",
+  "group": "Job Interview English",
+  "persian": "توجه به جزئیات / دقت نظر"
+ },
+ {
+  "term": "to multitask",
+  "definition": "to handle several tasks at the same time",
+  "example": "In this job you need to multitask during busy hours.",
+  "group": "Job Interview English",
+  "persian": "چند کار را همزمان انجام دادن"
+ },
+ {
+  "term": "to meet expectations",
+  "definition": "to do as well as is required or hoped for",
+  "example": "I'm confident I can meet the expectations of this position.",
+  "group": "Job Interview English",
+  "persian": "برآورده کردن انتظارات"
+ },
+ {
+  "term": "career goals",
+  "definition": "what you want to achieve in your professional life",
+  "example": "My long-term career goal is to become a project manager.",
+  "group": "Job Interview English",
+  "persian": "اهداف شغلی / اهداف حرفه‌ای"
+ },
+ {
+  "term": "where do you see yourself in five years?",
+  "definition": "an interview question about your future career plans",
+  "example": "'Where do you see yourself in five years?' is a question I always prepare for.",
+  "group": "Job Interview English",
+  "persian": "خودتان را پنج سال آینده کجا می‌بینید؟"
+ },
+ {
+  "term": "to be a good fit",
+  "definition": "to match well with a job, team, or company",
+  "example": "I believe I'd be a good fit for your company culture.",
+  "group": "Job Interview English",
+  "persian": "مناسب بودن / همخوانی داشتن"
+ },
+ {
+  "term": "work ethic",
+  "definition": "the belief in working hard and being responsible",
+  "example": "I have a strong work ethic and rarely miss a deadline.",
+  "group": "Job Interview English",
+  "persian": "اخلاق کاری / وجدان کاری"
+ },
+ {
+  "term": "to follow up",
+  "definition": "to take further action or check on something after a first contact",
+  "example": "I'll follow up with a thank-you email after the interview.",
+  "group": "Job Interview English",
+  "persian": "پیگیری کردن"
+ },
+ {
+  "term": "references",
+  "definition": "people who can confirm your skills and character to an employer",
+  "example": "I can provide references from my previous managers if needed.",
+  "group": "Job Interview English",
+  "persian": "معرف‌ها / مرجع‌ها"
+ },
+ {
+  "term": "cover letter",
+  "definition": "a letter sent with a CV explaining why you want the job",
+  "example": "I tailored my cover letter to each company I applied to.",
+  "group": "Job Interview English",
+  "persian": "نامهٔ پوششی / نامهٔ همراه رزومه"
+ },
+ {
+  "term": "résumé / CV",
+  "definition": "a document summarizing your education, skills, and work history",
+  "example": "Please attach your résumé when you apply.",
+  "group": "Job Interview English",
+  "persian": "رزومه / شرح سوابق"
+ },
+ {
+  "term": "to apply for",
+  "definition": "to formally request a job in writing",
+  "example": "I'd like to apply for the marketing position you advertised.",
+  "group": "Job Interview English",
+  "persian": "درخواست دادن برای / تقاضای شغل کردن"
+ },
+ {
+  "term": "salary expectations",
+  "definition": "the amount of pay you hope to receive",
+  "example": "My salary expectations are in line with the industry average.",
+  "group": "Job Interview English",
+  "persian": "انتظارات حقوقی / حقوق مورد انتظار"
+ },
+ {
+  "term": "to negotiate",
+  "definition": "to discuss something in order to reach an agreement, like pay",
+  "example": "I'd like to negotiate the salary before accepting the offer.",
+  "group": "Job Interview English",
+  "persian": "مذاکره کردن / چانه زدن"
+ },
+ {
+  "term": "notice period",
+  "definition": "the time you must keep working after telling your employer you'll leave",
+  "example": "I have a one-month notice period at my current job.",
+  "group": "Job Interview English",
+  "persian": "مدت اطلاع‌رسانی پیش از ترک کار"
+ },
+ {
+  "term": "to be proactive",
+  "definition": "to take action in advance rather than waiting for problems",
+  "example": "I try to be proactive and solve issues before they grow.",
+  "group": "Job Interview English",
+  "persian": "کنشگر / پیش‌نگر بودن"
+ },
+ {
+  "term": "adaptable",
+  "definition": "able to change easily to fit new conditions",
+  "example": "I'm adaptable and comfortable working in fast-changing environments.",
+  "group": "Job Interview English",
+  "persian": "انعطاف‌پذیر / سازگار"
+ },
+ {
+  "term": "to thrive",
+  "definition": "to do very well and grow in a particular situation",
+  "example": "I thrive in collaborative, high-energy teams.",
+  "group": "Job Interview English",
+  "persian": "شکوفا شدن / رشد کردن"
+ },
+ {
+  "term": "to handle pressure",
+  "definition": "to stay effective in stressful or demanding situations",
+  "example": "I handle pressure well by prioritizing my tasks.",
+  "group": "Job Interview English",
+  "persian": "از پس فشار کاری برآمدن"
+ },
+ {
+  "term": "transferable skills",
+  "definition": "abilities useful across many different jobs",
+  "example": "Communication and leadership are transferable skills I bring to any role.",
+  "group": "Job Interview English",
+  "persian": "مهارت‌های قابل انتقال"
+ },
+ {
+  "term": "to delegate",
+  "definition": "to give tasks or responsibilities to other people",
+  "example": "A good manager knows how to delegate effectively.",
+  "group": "Job Interview English",
+  "persian": "واگذار کردن وظایف / تفویض اختیار"
+ },
+ {
+  "term": "hands-on experience",
+  "definition": "practical experience from actually doing something yourself",
+  "example": "I have hands-on experience with data analysis tools.",
+  "group": "Job Interview English",
+  "persian": "تجربهٔ عملی / تجربهٔ دست‌اول"
+ },
+ {
+  "term": "to add value",
+  "definition": "to make a useful, positive contribution to a company",
+  "example": "I'm confident I can add value to your sales team.",
+  "group": "Job Interview English",
+  "persian": "ارزش‌افزایی کردن / ارزش افزودن"
+ }
+]

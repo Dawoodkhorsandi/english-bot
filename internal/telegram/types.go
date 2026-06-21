@@ -5,18 +5,46 @@ package telegram
 
 // Update is a single Telegram Bot API update.
 type Update struct {
-	UpdateID      int64          `json:"update_id"`
-	Message       *Message       `json:"message"`
-	CallbackQuery *CallbackQuery `json:"callback_query"`
-	PollAnswer    *PollAnswer    `json:"poll_answer"`
+	UpdateID         int64             `json:"update_id"`
+	Message          *Message          `json:"message"`
+	CallbackQuery    *CallbackQuery    `json:"callback_query"`
+	PollAnswer       *PollAnswer       `json:"poll_answer"`
+	PreCheckoutQuery *PreCheckoutQuery `json:"pre_checkout_query"`
 }
 
 // Message is an inbound text message.
 type Message struct {
-	MessageID int64  `json:"message_id"`
-	Chat      Chat   `json:"chat"`
-	Text      string `json:"text"`
-	From      *User  `json:"from"`
+	MessageID         int64              `json:"message_id"`
+	Chat              Chat               `json:"chat"`
+	Text              string             `json:"text"`
+	From              *User              `json:"from"`
+	SuccessfulPayment *SuccessfulPayment `json:"successful_payment"`
+	Voice             *Voice             `json:"voice"`
+}
+
+// Voice is an inbound voice note (e.g. for pronunciation practice).
+type Voice struct {
+	FileID   string `json:"file_id"`
+	Duration int    `json:"duration"`
+	MimeType string `json:"mime_type"`
+}
+
+// PreCheckoutQuery is an inbound checkout confirmation that must be answered
+// within ~10s before Telegram completes a payment (e.g. a Telegram Stars buy).
+type PreCheckoutQuery struct {
+	ID             string `json:"id"`
+	From           *User  `json:"from"`
+	Currency       string `json:"currency"`
+	TotalAmount    int    `json:"total_amount"`
+	InvoicePayload string `json:"invoice_payload"`
+}
+
+// SuccessfulPayment arrives (on a Message) once a payment completes.
+type SuccessfulPayment struct {
+	Currency         string `json:"currency"`
+	TotalAmount      int    `json:"total_amount"`
+	InvoicePayload   string `json:"invoice_payload"`
+	TelegramChargeID string `json:"telegram_payment_charge_id"`
 }
 
 // CallbackQuery represents a tap on an inline-keyboard button.

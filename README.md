@@ -24,7 +24,7 @@ A Telegram bot that sends subscribers AI-generated English practice on a configu
 - **Progress Dashboard** -- `/stats` shows Unicode progress bars for streak and quiz accuracy; optional Telegram Mini App with a 30-day activity chart (set `WEB_APP_URL`)
 - **Achievements** -- 26 unlockable badges across 7 categories (Vocabulary, Grammar, Streaks, Quiz, SRS, Library, Social, Dedication, Mastery) computed from existing learning data; displayed in the Mini App dashboard with progress bars for locked badges
 - **Learning Analytics** -- detailed charts in the Mini App: vocabulary breakdown by level, quiz accuracy trends (30-day sparkline), activity-by-hour heatmap, weekly learning velocity, and content diversity breakdown
-- **Mini App hub** -- a multi-tab Telegram Mini App (opened from the persistent menu button or `/app`): progress dashboard, searchable vocabulary list, swipe-to-review (SRS), curated **Leitner word decks** (504 Essential Words + Barron's GRE), a cross-user **leaderboard**, and an in-app settings panel
+- **Mini App hub** -- a multi-tab Telegram Mini App (opened from the persistent menu button or `/app`): progress dashboard, searchable vocabulary list, swipe-to-review (SRS), curated **Leitner word decks** (504 Essential Words, Barron's GRE, IELTS/TOEFL, Idioms, Travel, Confusing Words, Irregular Verbs, Everyday & Interview English — plus your own decks built by forwarding text), a cross-user **leaderboard**, and an in-app settings panel
 - **Typing Indicator** -- "typing…" chat action fires before every AI generation call
 - **Multi-Provider AI** -- Gemini, Groq, Cerebras, OpenRouter, GitHub Models, Cloudflare, Mistral, Gemini2, SambaNova, Cohere with automatic fallback
 - **Pre-Generated Pool** -- background worker keeps a content pool topped up; broadcasts never block on AI calls
@@ -93,6 +93,9 @@ go test ./... -v
 | `/quiz` | Take a multiple-choice quiz (native Telegram poll) |
 | `/grammar` | Browse bite-size grammar lessons (easy → advanced); `/grammar 1` opens a lesson |
 | `/stats` | View progress: streak, words, quiz accuracy with progress bars |
+| `/pronounce [word]` | Practice pronunciation: send the word, then a voice note, and get a match score |
+| `/streak` | Show your streak-saver balance and buy more with Telegram Stars |
+| `/buystreak` | Buy streak savers with Telegram Stars (`/buystreak [count]`) |
 | `/app` | Open the Telegram Mini App hub: dashboard, word list, decks, review and leaderboard (when `WEB_APP_URL` is set) |
 | `/login` | Get a one-time code to sign in on the mobile app (delivered in chat; valid 5 minutes) |
 | `/mywords` | Browse all learned vocabulary with mastery status; `/mywords bookmarks` for bookmarked only |
@@ -191,7 +194,10 @@ internal/app/       -- the coupled core (package app; imports config/ai/telegram
   schedule.go       -- quiet hours, broadcast/daily-review/weekly-digest schedulers
   prefs.go          -- user_prefs Store methods, level/interval/pause/toggle helpers
   tts.go            -- pronunciation TTS (Gemini + espeak-ng fallback), audio cache
-  srs.go            -- spaced-repetition SM-2-lite logic, review scheduler
+  srs.go            -- spaced-repetition FSRS scheduler + retention dial, review_schedule Store methods
+  streak.go         -- streak savers: earn on milestones, auto-rescue a missed day, Telegram Stars buy
+  userdeck.go       -- forward-to-deck: mine pasted/forwarded text into a personal dictionary-backed deck
+  pronounce.go      -- pronunciation check: transcribe a voice note (Gemini audio) and score it vs the target
   quiz.go           -- quiz building (4 types + native polls), poll registry, quiz scheduler
   stats.go          -- /stats computation (progress bars), admin metrics
   admin.go          -- admin panel: paginated /users, user detail, direct messaging

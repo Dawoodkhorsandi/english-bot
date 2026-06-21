@@ -81,6 +81,27 @@ func (p *GeminiProvider) Generate(ctx context.Context, prompt string) (string, e
 	return "", fmt.Errorf("gemini returned no content")
 }
 
+// Transcribe converts spoken audio to text using Gemini's audio understanding.
+// Only Gemini handles audio; the OpenAI-compatible providers are text-only.
+func (p *GeminiProvider) Transcribe(ctx context.Context, audio []byte, mimeType string) (string, error) {
+	if p.client == nil {
+		return "", fmt.Errorf("gemini disabled")
+	}
+	parts := []*genai.Part{
+		genai.NewPartFromText("Transcribe the spoken English in this audio. Return ONLY the exact words spoken — no commentary, labels, or quotation marks."),
+		genai.NewPartFromBytes(audio, mimeType),
+	}
+	contents := []*genai.Content{genai.NewContentFromParts(parts, genai.Role("user"))}
+	resp, err := p.client.Models.GenerateContent(ctx, p.model, contents, nil)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil && len(resp.Candidates[0].Content.Parts) > 0 {
+		return resp.Candidates[0].Content.Parts[0].Text, nil
+	}
+	return "", fmt.Errorf("gemini returned no transcript")
+}
+
 // ---------------------------------------------------------------------------
 // Generic OpenAI-compatible provider (Groq, OpenRouter, Cerebras, GitHub
 // Models, Cloudflare, Mistral, …)
@@ -255,6 +276,17 @@ func NewProviderChain(ctx context.Context) *ProviderChain {
 }
 
 func (c *ProviderChain) HasAny() bool { return len(c.providers) > 0 }
+
+// Transcribe converts speech to text using the first audio-capable (Gemini)
+// provider in the chain. Returns an error when none is configured.
+func (c *ProviderChain) Transcribe(ctx context.Context, audio []byte, mimeType string) (string, error) {
+	for _, p := range c.providers {
+		if g, ok := p.(*GeminiProvider); ok && g.Enabled() {
+			return g.Transcribe(ctx, audio, mimeType)
+		}
+	}
+	return "", fmt.Errorf("no audio-capable provider configured")
+}
 
 // ProviderNames returns the names of the enabled providers, in chain order.
 func (c *ProviderChain) ProviderNames() []string {

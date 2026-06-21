@@ -2,7 +2,9 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +37,76 @@ type UserStats struct {
 	HasMemberSince bool
 	ActivityDays   []string       // "2006-01-02" strings for the mini-app calendar
 	ActivityCounts map[string]int // items received per "2006-01-02" day (heatmap intensity)
+}
+
+// ExamStatus summarises a user's progress toward their target exam (#1): the
+// matching deck plus a rough band/score estimate derived from quiz accuracy. The
+// estimate is intentionally a motivational guide, not an official prediction.
+type ExamStatus struct {
+	Target   string `json:"target"`
+	Label    string `json:"label"`
+	DeckID   string `json:"deckId"`
+	DeckName string `json:"deckName"`
+	Estimate string `json:"estimate"`
+	Scale    string `json:"scale"` // "band" (IELTS) or "score" (TOEFL)
+	Accuracy int    `json:"accuracy"`
+	Ready    bool   `json:"ready"`
+	Detail   string `json:"detail"`
+}
+
+// examMinSample is how many quiz answers are needed before we show an estimate.
+const examMinSample = 10
+
+// ExamStatus computes the exam-track summary for a user. When no exam target is
+// set, Target is "" and the caller can hide the panel.
+func (s *Store) ExamStatus(chatID int64) (ExamStatus, error) {
+	target := s.GetExamTarget(chatID)
+	out := ExamStatus{Target: target, Label: examTargetLabel(target)}
+	if target == "" {
+		return out, nil
+	}
+	out.DeckID, out.DeckName = examDeckFor(target)
+
+	st, err := s.UserStats(chatID)
+	if err != nil {
+		return out, err
+	}
+	if st.QuizAnswered > 0 {
+		out.Accuracy = st.QuizCorrect * 100 / st.QuizAnswered
+	}
+	if st.QuizAnswered < examMinSample {
+		out.Detail = "Take a few more quizzes to unlock your estimated score."
+		return out, nil
+	}
+	out.Ready = true
+	out.Estimate, out.Scale = examEstimate(target, out.Accuracy)
+	out.Detail = "Estimated from your quiz accuracy — a guide, not an official score."
+	return out, nil
+}
+
+// examEstimate maps a quiz-accuracy percentage to an approximate exam result.
+func examEstimate(target string, accuracy int) (estimate, scale string) {
+	a := float64(accuracy) / 100
+	switch normalizeExamTarget(target) {
+	case "ielts":
+		// Map 0–100% accuracy onto a 4.0–8.5 band, rounded to the nearest 0.5.
+		band := 4.0 + a*4.5
+		band = math.Round(band*2) / 2
+		if band > 8.5 {
+			band = 8.5
+		}
+		return strconv.FormatFloat(band, 'f', 1, 64), "band"
+	case "toefl":
+		// Map 0–100% accuracy onto a 40–120 score, rounded to the nearest 5.
+		score := 40 + a*80
+		score = math.Round(score/5) * 5
+		if score > 120 {
+			score = 120
+		}
+		return strconv.Itoa(int(score)), "score"
+	default:
+		return "", ""
+	}
 }
 
 // parseStoredUTC interprets a SQLite DATETIME value (which the driver may hand

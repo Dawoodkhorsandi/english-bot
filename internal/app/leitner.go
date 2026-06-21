@@ -32,10 +32,12 @@ const (
 )
 
 // DeckMeta describes a curated deck. Cards are loaded from the embedded `file`.
+// Exam tags a deck to an exam track ("ielts"/"toefl"); "" is a general deck.
 type DeckMeta struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Exam        string `json:"exam,omitempty"`
 	file        string
 }
 
@@ -74,10 +76,64 @@ var deckRegistry = []DeckMeta{
 	},
 	{
 		ID:          "ielts",
-		Name:        "IELTS / TOEFL High-Frequency",
-		Description: "Common test vocabulary (abundant, deteriorate, prominent…) with examples.",
+		Name:        "IELTS High-Frequency",
+		Description: "Common IELTS vocabulary (abundant, deteriorate, prominent…) with examples.",
+		Exam:        "ielts",
 		file:        "webapp/decks/ielts.json",
 	},
+	{
+		ID:          "toefl",
+		Name:        "TOEFL High-Frequency",
+		Description: "Common TOEFL vocabulary (hypothesis, fluctuate, comprehensive…) with examples.",
+		Exam:        "toefl",
+		file:        "webapp/decks/toefl.json",
+	},
+	{
+		ID:          "idioms",
+		Name:        "Common English Idioms",
+		Description: "Everyday English idioms (break the ice, piece of cake…) with meanings and examples.",
+		file:        "webapp/decks/idioms.json",
+	},
+	{
+		ID:          "travel",
+		Name:        "Travel & Survival English",
+		Description: "Airport, hotel, directions, restaurant and emergency essentials for travellers.",
+		file:        "webapp/decks/travel.json",
+	},
+	{
+		ID:          "confusing",
+		Name:        "Commonly Confused Words",
+		Description: "affect/effect, fewer/less and other classic English mix-ups, side by side.",
+		file:        "webapp/decks/confusing.json",
+	},
+	{
+		ID:          "irregular",
+		Name:        "Irregular Verbs",
+		Description: "The essential English irregular verbs with their past and past participle.",
+		file:        "webapp/decks/irregular.json",
+	},
+	{
+		ID:          "everyday",
+		Name:        "Everyday Spoken English",
+		Description: "High-frequency words and expressions for natural daily conversation.",
+		file:        "webapp/decks/everyday.json",
+	},
+	{
+		ID:          "interview",
+		Name:        "Job Interview English",
+		Description: "Vocabulary and phrases for interviews and the workplace.",
+		file:        "webapp/decks/interview.json",
+	},
+}
+
+// examDeckFor returns the curated deck id for an exam target ("" if none).
+func examDeckFor(target string) (id, name string) {
+	for _, d := range deckRegistry {
+		if d.Exam != "" && d.Exam == normalizeExamTarget(target) {
+			return d.ID, d.Name
+		}
+	}
+	return "", ""
 }
 
 // deckCard mirrors one entry in an embedded deck JSON file. persian /
@@ -188,11 +244,13 @@ func (s *Store) SeedDecks() error {
 // Store methods
 // ---------------------------------------------------------------------------
 
-// Decks returns the per-user progress summary for every registered deck.
+// Decks returns the per-user progress summary for every registered deck,
+// curated and user-created (forward-to-deck), with cards seeded.
 func (s *Store) Decks(chatID int64) ([]DeckProgress, error) {
 	now := time.Now().UTC().Format(srsTimeLayout)
-	out := make([]DeckProgress, 0, len(deckRegistry))
-	for _, d := range deckRegistry {
+	metas := s.allDeckMetas(chatID)
+	out := make([]DeckProgress, 0, len(metas))
+	for _, d := range metas {
 		var total int
 		if err := s.db.QueryRow("SELECT COUNT(*) FROM deck_cards WHERE deck_id = ?", d.ID).Scan(&total); err != nil {
 			return nil, err
@@ -261,7 +319,9 @@ func (s *Store) DeckStudy(chatID int64, deckID string, limit int) ([]DeckStudyCa
 		LEFT JOIN leitner_progress lp
 		  ON lp.chat_id = ? AND lp.deck_id = dc.deck_id AND lp.term = dc.term
 		WHERE dc.deck_id = ? AND (lp.term IS NULL OR lp.due_at <= ?)
-		ORDER BY (lp.term IS NULL) ASC, lp.due_at ASC, dc.ordering ASC
+		ORDER BY (lp.term IS NULL) ASC, lp.due_at ASC,
+		         (CASE WHEN dc.frequency_rank > 0 THEN dc.frequency_rank ELSE 999999 END) ASC,
+		         dc.ordering ASC
 		LIMIT ?`,
 		chatID, deckID, now, limit,
 	)
@@ -307,14 +367,8 @@ var leitnerBoxLabels = map[int]string{1: "Learning", 2: "Familiar", 3: "Comforta
 
 // DeckDetail returns the box distribution + summary stats for one deck and user.
 func (s *Store) DeckDetail(chatID int64, deckID string) (DeckDetail, bool, error) {
-	var meta DeckMeta
-	for _, d := range deckRegistry {
-		if d.ID == deckID {
-			meta = d
-			break
-		}
-	}
-	if meta.ID == "" {
+	meta, ok := s.deckMeta(chatID, deckID)
+	if !ok {
 		return DeckDetail{}, false, nil
 	}
 	det := DeckDetail{ID: meta.ID, Name: meta.Name, Description: meta.Description}
@@ -407,6 +461,62 @@ func (s *Store) DeckSwipe(chatID int64, deckID, term string, known bool, now tim
 		chatID, deckID, term, next, due,
 	)
 	return err
+}
+
+// onboardingDeck is the deck whose frequency-ordered words drive known-word
+// onboarding (the 504 essential words — the highest-utility starter set).
+const onboardingDeck = "504"
+
+// OnboardingWords returns the most common words (frequency-ordered) the user has
+// not yet progressed, for the "mark what you already know" onboarding step.
+func (s *Store) OnboardingWords(chatID int64, limit int) ([]DeckStudyCard, error) {
+	rows, err := s.db.Query(`
+		SELECT dc.term, dc.definition, COALESCE(dc.persian, ''), COALESCE(dc.pronunciation, '')
+		FROM deck_cards dc
+		LEFT JOIN leitner_progress lp
+		  ON lp.chat_id = ? AND lp.deck_id = dc.deck_id AND lp.term = dc.term
+		WHERE dc.deck_id = ? AND lp.term IS NULL
+		ORDER BY (CASE WHEN dc.frequency_rank > 0 THEN dc.frequency_rank ELSE 999999 END) ASC,
+		         dc.ordering ASC
+		LIMIT ?`,
+		chatID, onboardingDeck, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []DeckStudyCard
+	for rows.Next() {
+		var c DeckStudyCard
+		if err := rows.Scan(&c.Term, &c.Definition, &c.Persian, &c.Pronunciation); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// MarkDeckKnown files the given terms straight into the mastered Leitner box for
+// the onboarding deck, so words the user already knows are skipped in study.
+func (s *Store) MarkDeckKnown(chatID int64, terms []string, now time.Time) error {
+	due := now.UTC().AddDate(0, 0, leitnerBoxDays[leitnerMaxBox]).Format(srsTimeLayout)
+	for _, term := range terms {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" {
+			continue
+		}
+		if _, err := s.db.Exec(`
+			INSERT INTO leitner_progress (chat_id, deck_id, term, box, due_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			ON CONFLICT(chat_id, deck_id, term)
+			DO UPDATE SET box = excluded.box, due_at = excluded.due_at, updated_at = CURRENT_TIMESTAMP`,
+			chatID, onboardingDeck, term, leitnerMaxBox, due,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

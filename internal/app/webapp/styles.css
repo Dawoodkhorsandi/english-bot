@@ -538,3 +538,17 @@ button, .chip, .tab, .word.expandable, .deck, .grammar-cta { touch-action: manip
 /* Telegram login overlay */
 #telegram-login-overlay { position: fixed; inset: 0; z-index: 9999; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
 #telegram-login-overlay[hidden] { display: none; }
+
+/* Known-word onboarding overlay (#8) */
+.onboard-overlay { position: fixed; inset: 0; z-index: 9998; background: var(--bg); display: flex; flex-direction: column; padding: 20px 16px; overflow-y: auto; }
+.onboard-sheet { margin: auto 0; }
+.onboard-sheet h1 { margin: 8px 0 4px; }
+.onboard-chips { margin-top: 16px; gap: 8px; }
+.onboard-chip { font-size: 15px; }
+.onboard-actions { display: flex; gap: 8px; margin-top: 24px; position: sticky; bottom: 0; padding: 8px 0; background: var(--bg); }
+.onboard-actions .chip { flex: 1; padding: 12px; font-size: 15px; }
+
+/* Exam-track panel (#1) */
+.exam-card .exam-estimate { font-size: 40px; font-weight: 700; line-height: 1.1; margin: 4px 0; color: var(--accent); }
+.exam-card .exam-scale { font-size: 16px; font-weight: 600; color: var(--hint); }
+.exam-card .exam-estimate-empty { color: var(--hint); }

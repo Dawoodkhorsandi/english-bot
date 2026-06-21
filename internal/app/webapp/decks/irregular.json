@@ -1,0 +1,317 @@
+[
+ {
+  "term": "be",
+  "definition": "past: was/were · past participle: been — to exist or have a quality",
+  "example": "I want to be a doctor when I grow up.",
+  "group": "Irregular Verbs",
+  "persian": "بودن"
+ },
+ {
+  "term": "have",
+  "definition": "past: had · past participle: had — to possess or own",
+  "example": "They have a small house near the sea.",
+  "group": "Irregular Verbs",
+  "persian": "داشتن"
+ },
+ {
+  "term": "do",
+  "definition": "past: did · past participle: done — to perform an action",
+  "example": "Please do your homework before dinner.",
+  "group": "Irregular Verbs",
+  "persian": "انجام دادن"
+ },
+ {
+  "term": "say",
+  "definition": "past: said · past participle: said — to speak words",
+  "example": "She didn't say anything about the meeting.",
+  "group": "Irregular Verbs",
+  "persian": "گفتن"
+ },
+ {
+  "term": "go",
+  "definition": "past: went · past participle: gone — to move or travel",
+  "example": "We go to the gym every morning.",
+  "group": "Irregular Verbs",
+  "persian": "رفتن"
+ },
+ {
+  "term": "get",
+  "definition": "past: got · past participle: gotten/got — to obtain or receive",
+  "example": "I got a letter from my brother yesterday.",
+  "group": "Irregular Verbs",
+  "persian": "به دست آوردن / گرفتن"
+ },
+ {
+  "term": "make",
+  "definition": "past: made · past participle: made — to create or produce",
+  "example": "He made a cake for her birthday.",
+  "group": "Irregular Verbs",
+  "persian": "ساختن / درست کردن"
+ },
+ {
+  "term": "know",
+  "definition": "past: knew · past participle: known — to have information or be aware",
+  "example": "I knew the answer to that question.",
+  "group": "Irregular Verbs",
+  "persian": "دانستن"
+ },
+ {
+  "term": "think",
+  "definition": "past: thought · past participle: thought — to use the mind to consider",
+  "example": "She thought about the problem all night.",
+  "group": "Irregular Verbs",
+  "persian": "فکر کردن"
+ },
+ {
+  "term": "take",
+  "definition": "past: took · past participle: taken — to grasp or carry",
+  "example": "He took my umbrella by mistake.",
+  "group": "Irregular Verbs",
+  "persian": "برداشتن / گرفتن"
+ },
+ {
+  "term": "see",
+  "definition": "past: saw · past participle: seen — to perceive with the eyes",
+  "example": "I saw a great film last weekend.",
+  "group": "Irregular Verbs",
+  "persian": "دیدن"
+ },
+ {
+  "term": "come",
+  "definition": "past: came · past participle: come — to move toward a place",
+  "example": "Can you come to my party on Friday?",
+  "group": "Irregular Verbs",
+  "persian": "آمدن"
+ },
+ {
+  "term": "want",
+  "definition": "past: wanted · past participle: wanted — to desire (regular, but a top verb)",
+  "example": "They wanted to leave early.",
+  "group": "Irregular Verbs",
+  "persian": "خواستن"
+ },
+ {
+  "term": "give",
+  "definition": "past: gave · past participle: given — to hand something to someone",
+  "example": "She gave me a useful book.",
+  "group": "Irregular Verbs",
+  "persian": "دادن"
+ },
+ {
+  "term": "find",
+  "definition": "past: found · past participle: found — to discover or locate",
+  "example": "I found my keys under the sofa.",
+  "group": "Irregular Verbs",
+  "persian": "پیدا کردن"
+ },
+ {
+  "term": "tell",
+  "definition": "past: told · past participle: told — to inform or narrate",
+  "example": "He told us a funny story.",
+  "group": "Irregular Verbs",
+  "persian": "گفتن / تعریف کردن"
+ },
+ {
+  "term": "feel",
+  "definition": "past: felt · past participle: felt — to experience an emotion or sensation",
+  "example": "I felt tired after the long trip.",
+  "group": "Irregular Verbs",
+  "persian": "احساس کردن"
+ },
+ {
+  "term": "become",
+  "definition": "past: became · past participle: become — to start to be something",
+  "example": "She became a teacher in 2010.",
+  "group": "Irregular Verbs",
+  "persian": "شدن"
+ },
+ {
+  "term": "leave",
+  "definition": "past: left · past participle: left — to go away from a place",
+  "example": "They left the office at six.",
+  "group": "Irregular Verbs",
+  "persian": "ترک کردن / رفتن"
+ },
+ {
+  "term": "put",
+  "definition": "past: put · past participle: put — to place something somewhere",
+  "example": "Please put the box on the table.",
+  "group": "Irregular Verbs",
+  "persian": "گذاشتن"
+ },
+ {
+  "term": "mean",
+  "definition": "past: meant · past participle: meant — to intend or signify",
+  "example": "I didn't mean to hurt you.",
+  "group": "Irregular Verbs",
+  "persian": "قصد داشتن / معنی دادن"
+ },
+ {
+  "term": "keep",
+  "definition": "past: kept · past participle: kept — to retain or continue",
+  "example": "She kept all his old letters.",
+  "group": "Irregular Verbs",
+  "persian": "نگه داشتن"
+ },
+ {
+  "term": "let",
+  "definition": "past: let · past participle: let — to allow or permit",
+  "example": "My parents let me stay up late.",
+  "group": "Irregular Verbs",
+  "persian": "اجازه دادن"
+ },
+ {
+  "term": "begin",
+  "definition": "past: began · past participle: begun — to start",
+  "example": "The movie began at eight o'clock.",
+  "group": "Irregular Verbs",
+  "persian": "شروع کردن"
+ },
+ {
+  "term": "show",
+  "definition": "past: showed · past participle: shown — to let someone see something",
+  "example": "He showed me his new car.",
+  "group": "Irregular Verbs",
+  "persian": "نشان دادن"
+ },
+ {
+  "term": "hear",
+  "definition": "past: heard · past participle: heard — to perceive sound",
+  "example": "I heard a strange noise last night.",
+  "group": "Irregular Verbs",
+  "persian": "شنیدن"
+ },
+ {
+  "term": "run",
+  "definition": "past: ran · past participle: run — to move quickly on foot",
+  "example": "She ran to catch the bus.",
+  "group": "Irregular Verbs",
+  "persian": "دویدن"
+ },
+ {
+  "term": "bring",
+  "definition": "past: brought · past participle: brought — to carry something to a place",
+  "example": "Don't forget to bring your passport.",
+  "group": "Irregular Verbs",
+  "persian": "آوردن"
+ },
+ {
+  "term": "write",
+  "definition": "past: wrote · past participle: written — to form letters or words",
+  "example": "He wrote a letter to his friend.",
+  "group": "Irregular Verbs",
+  "persian": "نوشتن"
+ },
+ {
+  "term": "sit",
+  "definition": "past: sat · past participle: sat — to rest on a seat",
+  "example": "We sat by the window during lunch.",
+  "group": "Irregular Verbs",
+  "persian": "نشستن"
+ },
+ {
+  "term": "stand",
+  "definition": "past: stood · past participle: stood — to be on one's feet",
+  "example": "They stood in line for an hour.",
+  "group": "Irregular Verbs",
+  "persian": "ایستادن"
+ },
+ {
+  "term": "lose",
+  "definition": "past: lost · past participle: lost — to no longer have something",
+  "example": "I lost my phone at the station.",
+  "group": "Irregular Verbs",
+  "persian": "گم کردن / باختن"
+ },
+ {
+  "term": "pay",
+  "definition": "past: paid · past participle: paid — to give money for something",
+  "example": "She paid for the dinner.",
+  "group": "Irregular Verbs",
+  "persian": "پرداختن"
+ },
+ {
+  "term": "meet",
+  "definition": "past: met · past participle: met — to come together with someone",
+  "example": "I met her at a conference.",
+  "group": "Irregular Verbs",
+  "persian": "ملاقات کردن"
+ },
+ {
+  "term": "set",
+  "definition": "past: set · past participle: set — to put or arrange in place",
+  "example": "He set the alarm for six.",
+  "group": "Irregular Verbs",
+  "persian": "تنظیم کردن / گذاشتن"
+ },
+ {
+  "term": "speak",
+  "definition": "past: spoke · past participle: spoken — to talk or use language",
+  "example": "She speaks three languages.",
+  "group": "Irregular Verbs",
+  "persian": "صحبت کردن"
+ },
+ {
+  "term": "read",
+  "definition": "past: read · past participle: read — to look at and understand text",
+  "example": "I read that book last summer.",
+  "group": "Irregular Verbs",
+  "persian": "خواندن"
+ },
+ {
+  "term": "buy",
+  "definition": "past: bought · past participle: bought — to get something for money",
+  "example": "We bought fresh fruit at the market.",
+  "group": "Irregular Verbs",
+  "persian": "خریدن"
+ },
+ {
+  "term": "send",
+  "definition": "past: sent · past participle: sent — to cause something to go somewhere",
+  "example": "He sent me an email this morning.",
+  "group": "Irregular Verbs",
+  "persian": "فرستادن"
+ },
+ {
+  "term": "build",
+  "definition": "past: built · past participle: built — to construct something",
+  "example": "They built a new bridge over the river.",
+  "group": "Irregular Verbs",
+  "persian": "ساختن"
+ },
+ {
+  "term": "spend",
+  "definition": "past: spent · past participle: spent — to use time or money",
+  "example": "We spent the whole day at the beach.",
+  "group": "Irregular Verbs",
+  "persian": "خرج کردن / صرف کردن"
+ },
+ {
+  "term": "eat",
+  "definition": "past: ate · past participle: eaten — to consume food",
+  "example": "I ate breakfast before leaving.",
+  "group": "Irregular Verbs",
+  "persian": "خوردن"
+ },
+ {
+  "term": "drink",
+  "definition": "past: drank · past participle: drunk — to take in liquid",
+  "example": "She drank a glass of water.",
+  "group": "Irregular Verbs",
+  "persian": "نوشیدن"
+ },
+ {
+  "term": "drive",
+  "definition": "past: drove · past participle: driven — to operate a vehicle",
+  "example": "He drove to work in the rain.",
+  "group": "Irregular Verbs",
+  "persian": "رانندگی کردن"
+ },
+ {
+  "term": "sleep",
+  "definition": "past: slept · past participle: slept — to rest with eyes closed",
+  "example": "I slept for nine hours last night.",
+  "group": "Irregular Verbs",
+  "persian": "خوابیدن"
+ }
+]
