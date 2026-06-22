@@ -25,9 +25,9 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	// srsMinEase is the floor for the ease factor (classic SM-2 uses 1.3).
-	srsMinEase = 1.3
-	// srsDefaultEase is the starting ease for a freshly seeded word.
+	// srsDefaultEase is the legacy SM-2 ease column's default for newly seeded
+	// words. The scheduler is now FSRS (stability/difficulty); ease is retained
+	// only so existing rows and the seed INSERT stay schema-compatible.
 	srsDefaultEase = 2.5
 	// srsMasteredIntervalDays is the interval at/above which a word counts as
 	// moved into long-term memory (used by /stats).
@@ -47,33 +47,112 @@ type dueReview struct {
 	reps         int
 }
 
-// srsKnown advances a word's schedule after a successful recall. The interval
-// grows (1 → 3 → round(interval×ease)) and the ease nudges up slightly.
-func srsKnown(intervalDays int, ease float64, reps int) (nextInterval int, nextEase float64, nextReps int) {
-	nextReps = reps + 1
-	nextEase = ease + 0.1
-	switch nextReps {
-	case 1:
-		nextInterval = 1
-	case 2:
-		nextInterval = 3
-	default:
-		nextInterval = int(math.Round(float64(intervalDays) * ease))
-		if nextInterval <= intervalDays {
-			nextInterval = intervalDays + 1
-		}
-	}
-	return nextInterval, nextEase, nextReps
+// ---------------------------------------------------------------------------
+// FSRS-lite scheduler
+//
+// We schedule with the open FSRS algorithm (the modern successor to SM-2 used by
+// Anki). Each card carries a stability S (days until recall probability decays
+// to ~90%) and a difficulty D (1–10). The next interval is chosen so the
+// predicted recall probability at review time equals the user's *desired
+// retention* dial (a per-user pref). Higher retention ⇒ shorter intervals ⇒ more
+// reviews but fewer lapses. We only have two buttons, so a "Knew it" maps to the
+// FSRS "good" grade and a "Forgot" to "again".
+//
+// fsrsW are the FSRS-5 default weights. fsrsFactor / fsrsDecay define the power
+// forgetting curve R(t) = (1 + FACTOR·t/S)^DECAY.
+// ---------------------------------------------------------------------------
+
+var fsrsW = [19]float64{
+	0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046,
+	1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315,
+	2.9898, 0.51655, 0.6621,
 }
 
-// srsForgot resets a word's schedule after a failed recall: back to a 1-day
-// interval, reps zeroed, and the ease reduced (floored at srsMinEase).
-func srsForgot(ease float64) (nextInterval int, nextEase float64, nextReps int) {
-	nextEase = ease - 0.2
-	if nextEase < srsMinEase {
-		nextEase = srsMinEase
+const (
+	fsrsDecay       = -0.5
+	fsrsFactor      = 0.2345679 // 0.9^(1/fsrsDecay) − 1, the FSRS interval constant
+	fsrsMaxInterval = 365 * 5   // cap a single interval at five years
+
+	gradeAgain = 1 // "Forgot"
+	gradeGood  = 3 // "Knew it"
+	gradeEasy  = 4 // used only as the difficulty mean-reversion target
+
+	// retention dial bounds; 0.9 is the FSRS default sweet spot.
+	defaultRetention = 0.9
+	minRetention     = 0.70
+	maxRetention     = 0.97
+)
+
+func fsrsClampD(d float64) float64 {
+	return math.Max(1, math.Min(10, d))
+}
+
+// fsrsInitStability is the stability of a brand-new card for a given grade.
+func fsrsInitStability(grade int) float64 {
+	return math.Max(fsrsW[grade-1], 0.1)
+}
+
+// fsrsInitDifficulty is the starting difficulty for a brand-new card.
+func fsrsInitDifficulty(grade int) float64 {
+	return fsrsClampD(fsrsW[4] - math.Exp(fsrsW[5]*float64(grade-1)) + 1)
+}
+
+// fsrsRetrievability is the predicted recall probability of a card with the
+// given stability after elapsedDays have passed since the last review.
+func fsrsRetrievability(elapsedDays, stability float64) float64 {
+	if stability <= 0 {
+		return 0
 	}
-	return 1, nextEase, 0
+	if elapsedDays < 0 {
+		elapsedDays = 0
+	}
+	return math.Pow(1+fsrsFactor*elapsedDays/stability, fsrsDecay)
+}
+
+// fsrsNextInterval picks the whole-day interval whose predicted retrievability
+// equals the desired retention.
+func fsrsNextInterval(stability, retention float64) int {
+	if retention <= 0 || retention >= 1 {
+		retention = defaultRetention
+	}
+	iv := stability / fsrsFactor * (math.Pow(retention, 1/fsrsDecay) - 1)
+	n := int(math.Round(iv))
+	if n < 1 {
+		n = 1
+	}
+	if n > fsrsMaxInterval {
+		n = fsrsMaxInterval
+	}
+	return n
+}
+
+// fsrsNextDifficulty updates difficulty after a grade (FSRS-5 linear damping +
+// mean reversion toward the "easy" baseline).
+func fsrsNextDifficulty(d float64, grade int) float64 {
+	delta := -fsrsW[6] * float64(grade-3)
+	dp := d + delta*(10-d)/9
+	return fsrsClampD(fsrsW[7]*fsrsInitDifficulty(gradeEasy) + (1-fsrsW[7])*dp)
+}
+
+// fsrsNextStabilityRecall grows stability after a successful recall.
+func fsrsNextStabilityRecall(d, s, r float64) float64 {
+	return s * (1 + math.Exp(fsrsW[8])*(11-d)*math.Pow(s, -fsrsW[9])*(math.Exp((1-r)*fsrsW[10])-1))
+}
+
+// fsrsNextStabilityForget computes the (lower) post-lapse stability. A lapse can
+// never increase stability.
+func fsrsNextStabilityForget(d, s, r float64) float64 {
+	sf := fsrsW[11] * math.Pow(d, -fsrsW[12]) * (math.Pow(s+1, fsrsW[13]) - 1) * math.Exp((1-r)*fsrsW[14])
+	return math.Max(0.1, math.Min(sf, s))
+}
+
+// normalizeRetention clamps a desired-retention value to the supported range,
+// falling back to the default for zero/out-of-range input.
+func normalizeRetention(r float64) float64 {
+	if r < minRetention || r > maxRetention {
+		return defaultRetention
+	}
+	return r
 }
 
 // ---------------------------------------------------------------------------
@@ -146,14 +225,48 @@ func (s *Store) getReview(chatID int64, word string) (intervalDays int, ease flo
 	return intervalDays, ease, reps, true, nil
 }
 
-// updateReview persists a word's new schedule state, setting the next due_at to
-// now + intervalDays days.
-func (s *Store) updateReview(chatID int64, word string, intervalDays int, ease float64, reps int, now time.Time) error {
+// fsrsCard is the FSRS memory state persisted for one (chat, word).
+type fsrsCard struct {
+	stability    float64
+	difficulty   float64
+	intervalDays int
+	reps         int
+	lastReview   time.Time
+	hasLast      bool
+}
+
+// getReviewState loads a word's FSRS state. ok=false when it isn't scheduled.
+func (s *Store) getReviewState(chatID int64, word string) (fsrsCard, bool, error) {
+	word = strings.ToLower(strings.TrimSpace(word))
+	var c fsrsCard
+	var lastRaw any
+	err := s.db.QueryRow(
+		`SELECT COALESCE(stability,0), COALESCE(difficulty,0), interval_days, reps, last_review
+		 FROM review_schedule WHERE chat_id = ? AND word = ?`,
+		chatID, word,
+	).Scan(&c.stability, &c.difficulty, &c.intervalDays, &c.reps, &lastRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return c, false, nil
+	}
+	if err != nil {
+		return c, false, err
+	}
+	if ts, ok := parseStoredUTC(lastRaw); ok {
+		c.lastReview, c.hasLast = ts, true
+	}
+	return c, true, nil
+}
+
+// updateReviewState persists a word's new FSRS state and reschedules due_at to
+// now + intervalDays days, stamping last_review = now.
+func (s *Store) updateReviewState(chatID int64, word string, c fsrsCard, intervalDays int, now time.Time) error {
 	word = strings.ToLower(strings.TrimSpace(word))
 	due := now.UTC().AddDate(0, 0, intervalDays).Format(srsTimeLayout)
 	_, err := s.db.Exec(
-		"UPDATE review_schedule SET interval_days = ?, ease = ?, reps = ?, due_at = ? WHERE chat_id = ? AND word = ?",
-		intervalDays, ease, reps, due, chatID, word,
+		`UPDATE review_schedule
+		 SET interval_days = ?, stability = ?, difficulty = ?, reps = ?, last_review = ?, due_at = ?
+		 WHERE chat_id = ? AND word = ?`,
+		intervalDays, c.stability, c.difficulty, c.reps, now.UTC().Format(srsTimeLayout), due, chatID, word,
 	)
 	return err
 }
@@ -177,23 +290,101 @@ func (s *Store) SnoozeReview(chatID int64, word string, intervalDays int, now ti
 // ApplyReviewKnown promotes a word after a correct/"Knew it" recall. ok=false
 // when the word isn't in the schedule (e.g. a stale button).
 func (s *Store) ApplyReviewKnown(chatID int64, word string, now time.Time) (ok bool, err error) {
-	interval, ease, reps, found, err := s.getReview(chatID, word)
-	if err != nil || !found {
-		return false, err
-	}
-	ni, ne, nr := srsKnown(interval, ease, reps)
-	return true, s.updateReview(chatID, word, ni, ne, nr, now)
+	return s.applyReview(chatID, word, gradeGood, now)
 }
 
 // ApplyReviewForgot resets a word after a "Forgot" recall. ok=false when the
 // word isn't in the schedule.
 func (s *Store) ApplyReviewForgot(chatID int64, word string, now time.Time) (ok bool, err error) {
-	_, ease, _, found, err := s.getReview(chatID, word)
+	return s.applyReview(chatID, word, gradeAgain, now)
+}
+
+// applyReview folds one grade into a word's FSRS state and reschedules it at the
+// user's desired retention. Brand-new cards take the FSRS init values; legacy
+// SM-2 cards (which predate stability tracking) are bootstrapped from their
+// existing interval so a user's progress carries over.
+func (s *Store) applyReview(chatID int64, word string, grade int, now time.Time) (bool, error) {
+	c, found, err := s.getReviewState(chatID, word)
 	if err != nil || !found {
 		return false, err
 	}
-	ni, ne, nr := srsForgot(ease)
-	return true, s.updateReview(chatID, word, ni, ne, nr, now)
+	retention := s.GetDesiredRetention(chatID)
+
+	if c.stability <= 0 {
+		if c.reps > 0 && c.intervalDays > 0 {
+			// Legacy card: seed FSRS state from the prior interval, neutral difficulty.
+			c.stability = float64(c.intervalDays)
+			c.difficulty = 5
+		} else {
+			// Brand-new card: initialise straight from the grade.
+			c.stability = fsrsInitStability(grade)
+			c.difficulty = fsrsInitDifficulty(grade)
+			c.reps = 0
+			if grade != gradeAgain {
+				c.reps = 1
+			}
+			return true, s.updateReviewState(chatID, word, c, fsrsNextInterval(c.stability, retention), now)
+		}
+	}
+
+	elapsed := 0.0
+	if c.hasLast {
+		elapsed = now.Sub(c.lastReview).Hours() / 24
+	}
+	r := fsrsRetrievability(elapsed, c.stability)
+	c.difficulty = fsrsNextDifficulty(c.difficulty, grade)
+	if grade == gradeAgain {
+		c.stability = fsrsNextStabilityForget(c.difficulty, c.stability, r)
+		c.reps = 0
+	} else {
+		c.stability = fsrsNextStabilityRecall(c.difficulty, c.stability, r)
+		c.reps++
+	}
+	return true, s.updateReviewState(chatID, word, c, fsrsNextInterval(c.stability, retention), now)
+}
+
+// ExportWord is one row of a user's exportable learning data.
+type ExportWord struct {
+	Term         string  `json:"term"`
+	Meaning      string  `json:"meaning"`
+	IntervalDays int     `json:"interval_days"`
+	Stability    float64 `json:"stability"`
+	Difficulty   float64 `json:"difficulty"`
+	Reps         int     `json:"reps"`
+	DueAt        string  `json:"due_at"`
+	Mastered     bool    `json:"mastered"`
+}
+
+// ExportReviewData returns a user's full spaced-repetition schedule (with the
+// pooled meaning for each word) for the data-export feature — every word they've
+// learned plus its FSRS memory state, so progress is portable, not locked in.
+func (s *Store) ExportReviewData(chatID int64) ([]ExportWord, error) {
+	rows, err := s.db.Query(`
+		SELECT rs.word, COALESCE(MAX(cp.meaning), ''),
+		       rs.interval_days, COALESCE(rs.stability,0), COALESCE(rs.difficulty,0),
+		       rs.reps, rs.due_at
+		FROM review_schedule rs
+		LEFT JOIN content_pool cp ON cp.kind = 'word' AND cp.term = rs.word
+		WHERE rs.chat_id = ?
+		GROUP BY rs.word, rs.interval_days, rs.stability, rs.difficulty, rs.reps, rs.due_at
+		ORDER BY rs.due_at ASC`,
+		chatID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ExportWord
+	for rows.Next() {
+		var e ExportWord
+		if err := rows.Scan(&e.Term, &e.Meaning, &e.IntervalDays, &e.Stability, &e.Difficulty, &e.Reps, &e.DueAt); err != nil {
+			return nil, err
+		}
+		e.Mastered = e.IntervalDays >= srsMasteredIntervalDays
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // MasteredCount returns how many of a user's words have reached the mastered

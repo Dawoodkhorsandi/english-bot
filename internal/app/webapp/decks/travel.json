@@ -1,0 +1,282 @@
+[
+ {
+  "term": "passport",
+  "definition": "an official document that proves your identity and lets you travel between countries",
+  "example": "Please have your passport ready at the immigration desk.",
+  "group": "Travel & Survival English",
+  "persian": "پاسپورت / گذرنامه"
+ },
+ {
+  "term": "boarding pass",
+  "definition": "the ticket that lets you get on a plane",
+  "example": "Show your boarding pass and passport at the gate.",
+  "group": "Travel & Survival English",
+  "persian": "کارت پرواز / بوردینگ پس"
+ },
+ {
+  "term": "check-in",
+  "definition": "the process of registering at an airport or hotel when you arrive",
+  "example": "Online check-in for the flight opens 24 hours before departure.",
+  "group": "Travel & Survival English",
+  "persian": "پذیرش / چک‌این کردن"
+ },
+ {
+  "term": "departure",
+  "definition": "the act of leaving, or the time a plane/train leaves",
+  "example": "The departure gate is on the second floor.",
+  "group": "Travel & Survival English",
+  "persian": "خروج / عزیمت"
+ },
+ {
+  "term": "arrival",
+  "definition": "the act of reaching a place, or the time you get there",
+  "example": "Our arrival time is 9 p.m. local time.",
+  "group": "Travel & Survival English",
+  "persian": "ورود / رسیدن"
+ },
+ {
+  "term": "luggage",
+  "definition": "the bags and suitcases you take when you travel",
+  "example": "I have one suitcase and one piece of hand luggage.",
+  "group": "Travel & Survival English",
+  "persian": "چمدان / بار سفر"
+ },
+ {
+  "term": "baggage claim",
+  "definition": "the area in an airport where you collect your checked bags",
+  "example": "Follow the signs to baggage claim after you land.",
+  "group": "Travel & Survival English",
+  "persian": "محل تحویل بار"
+ },
+ {
+  "term": "customs",
+  "definition": "the place where officials check what you are bringing into a country",
+  "example": "Do I need to declare this at customs?",
+  "group": "Travel & Survival English",
+  "persian": "گمرک"
+ },
+ {
+  "term": "immigration",
+  "definition": "the place where officials check passports and visas as you enter a country",
+  "example": "The immigration officer asked how long I would stay.",
+  "group": "Travel & Survival English",
+  "persian": "اداره مهاجرت / کنترل گذرنامه"
+ },
+ {
+  "term": "visa",
+  "definition": "official permission stamped or attached to your passport allowing you to enter a country",
+  "example": "I have a tourist visa valid for thirty days.",
+  "group": "Travel & Survival English",
+  "persian": "ویزا / روادید"
+ },
+ {
+  "term": "How much is it?",
+  "definition": "a question asking the price of something",
+  "example": "This looks nice. How much is it?",
+  "group": "Travel & Survival English",
+  "persian": "قیمتش چنده؟"
+ },
+ {
+  "term": "Where is the bathroom?",
+  "definition": "a polite question asking for the location of a toilet",
+  "example": "Excuse me, where is the bathroom?",
+  "group": "Travel & Survival English",
+  "persian": "دستشویی کجاست؟"
+ },
+ {
+  "term": "reservation",
+  "definition": "an arrangement made in advance to keep a room, table, or seat for you",
+  "example": "I have a reservation under the name Ahmadi.",
+  "group": "Travel & Survival English",
+  "persian": "رزرو"
+ },
+ {
+  "term": "check out",
+  "definition": "to pay and leave a hotel at the end of your stay",
+  "example": "What time do I need to check out?",
+  "group": "Travel & Survival English",
+  "persian": "تسویه و ترک هتل"
+ },
+ {
+  "term": "reception",
+  "definition": "the front desk of a hotel where guests are helped",
+  "example": "Leave your key at reception when you go out.",
+  "group": "Travel & Survival English",
+  "persian": "پذیرش / میز جلوی هتل"
+ },
+ {
+  "term": "How do I get to...?",
+  "definition": "a question asking for directions to a place",
+  "example": "Excuse me, how do I get to the train station?",
+  "group": "Travel & Survival English",
+  "persian": "چطور به ... برم؟"
+ },
+ {
+  "term": "turn left",
+  "definition": "to change direction to the left",
+  "example": "Turn left at the traffic lights and the hotel is on your right.",
+  "group": "Travel & Survival English",
+  "persian": "بپیچ به چپ / به چپ بپیچید"
+ },
+ {
+  "term": "turn right",
+  "definition": "to change direction to the right",
+  "example": "Go straight, then turn right after the bank.",
+  "group": "Travel & Survival English",
+  "persian": "بپیچ به راست / به راست بپیچید"
+ },
+ {
+  "term": "straight ahead",
+  "definition": "directly in front of you, without turning",
+  "example": "The market is straight ahead, just past the bridge.",
+  "group": "Travel & Survival English",
+  "persian": "مستقیم / رو به جلو"
+ },
+ {
+  "term": "nearby",
+  "definition": "a short distance away; close",
+  "example": "Is there a pharmacy nearby?",
+  "group": "Travel & Survival English",
+  "persian": "همین نزدیکی‌ها / در همان حوالی"
+ },
+ {
+  "term": "the menu",
+  "definition": "the list of food and drinks a restaurant offers",
+  "example": "Could I see the menu, please?",
+  "group": "Travel & Survival English",
+  "persian": "منو / فهرست غذا"
+ },
+ {
+  "term": "the bill",
+  "definition": "the paper showing how much you owe at a restaurant",
+  "example": "Can we have the bill, please?",
+  "group": "Travel & Survival English",
+  "persian": "صورت‌حساب"
+ },
+ {
+  "term": "order",
+  "definition": "to ask for food or drink in a restaurant",
+  "example": "Are you ready to order?",
+  "group": "Travel & Survival English",
+  "persian": "سفارش دادن"
+ },
+ {
+  "term": "I'm allergic to...",
+  "definition": "a phrase warning that a certain food makes you ill",
+  "example": "I'm allergic to nuts, so please leave them out.",
+  "group": "Travel & Survival English",
+  "persian": "من به ... حساسیت دارم"
+ },
+ {
+  "term": "vegetarian",
+  "definition": "describing food with no meat, or a person who eats no meat",
+  "example": "Do you have any vegetarian dishes?",
+  "group": "Travel & Survival English",
+  "persian": "گیاهخوار / غذای گیاهی"
+ },
+ {
+  "term": "cash",
+  "definition": "money in the form of notes and coins",
+  "example": "Do you take cards, or is it cash only?",
+  "group": "Travel & Survival English",
+  "persian": "پول نقد"
+ },
+ {
+  "term": "change",
+  "definition": "the money returned when you pay more than the price; also smaller coins",
+  "example": "Here is your change, ten dollars.",
+  "group": "Travel & Survival English",
+  "persian": "پول خرد / باقی پول"
+ },
+ {
+  "term": "exchange rate",
+  "definition": "how much one currency is worth in another",
+  "example": "What's the exchange rate for dollars to euros today?",
+  "group": "Travel & Survival English",
+  "persian": "نرخ ارز / نرخ تبدیل"
+ },
+ {
+  "term": "ATM",
+  "definition": "a machine where you withdraw cash from your bank account",
+  "example": "Is there an ATM near the hotel?",
+  "group": "Travel & Survival English",
+  "persian": "دستگاه خودپرداز / عابربانک"
+ },
+ {
+  "term": "receipt",
+  "definition": "a paper proving you paid for something",
+  "example": "Can I have a receipt, please?",
+  "group": "Travel & Survival English",
+  "persian": "رسید"
+ },
+ {
+  "term": "Help!",
+  "definition": "a word shouted to ask for urgent assistance",
+  "example": "Help! Someone call an ambulance!",
+  "group": "Travel & Survival English",
+  "persian": "کمک!"
+ },
+ {
+  "term": "emergency",
+  "definition": "a sudden serious situation needing immediate action",
+  "example": "In an emergency, dial this number for the police.",
+  "group": "Travel & Survival English",
+  "persian": "اورژانس / وضعیت اضطراری"
+ },
+ {
+  "term": "police",
+  "definition": "the people whose job is to keep order and protect citizens",
+  "example": "My bag was stolen; I need to call the police.",
+  "group": "Travel & Survival English",
+  "persian": "پلیس"
+ },
+ {
+  "term": "hospital",
+  "definition": "a place where sick or injured people are treated",
+  "example": "Please take me to the nearest hospital.",
+  "group": "Travel & Survival English",
+  "persian": "بیمارستان"
+ },
+ {
+  "term": "pharmacy",
+  "definition": "a shop where you buy medicine",
+  "example": "I need some painkillers from the pharmacy.",
+  "group": "Travel & Survival English",
+  "persian": "داروخانه"
+ },
+ {
+  "term": "I don't feel well",
+  "definition": "a phrase saying you feel sick",
+  "example": "I don't feel well; I think I have a fever.",
+  "group": "Travel & Survival English",
+  "persian": "حالم خوب نیست"
+ },
+ {
+  "term": "I'm lost",
+  "definition": "a phrase saying you don't know where you are",
+  "example": "Excuse me, I'm lost. Can you help me find this address?",
+  "group": "Travel & Survival English",
+  "persian": "من گم شده‌ام / راه را گم کرده‌ام"
+ },
+ {
+  "term": "Do you speak English?",
+  "definition": "a question asking if someone can communicate in English",
+  "example": "Excuse me, do you speak English?",
+  "group": "Travel & Survival English",
+  "persian": "انگلیسی بلدید؟ / انگلیسی صحبت می‌کنید؟"
+ },
+ {
+  "term": "Can you help me?",
+  "definition": "a polite request for assistance",
+  "example": "Excuse me, can you help me? I can't find my gate.",
+  "group": "Travel & Survival English",
+  "persian": "می‌تونید کمکم کنید؟"
+ },
+ {
+  "term": "How much does it cost?",
+  "definition": "a question asking the total price of a service or item",
+  "example": "How much does it cost to get to the city center by taxi?",
+  "group": "Travel & Survival English",
+  "persian": "چقدر هزینه دارد؟ / چند می‌شود؟"
+ }
+]

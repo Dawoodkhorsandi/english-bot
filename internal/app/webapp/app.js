@@ -1345,10 +1345,42 @@ async function loadDecks() {
   try { data = await api('/api/decks'); }
   catch (e) { decksListEl.innerHTML = ''; decksEmptyEl.hidden = false; decksEmptyEl.textContent = 'Could not load decks.'; return; }
   decksListEl.innerHTML = '';
-  (data.decks || []).forEach(d => decksListEl.appendChild(deckCardEl(d)));
-  const has = decksListEl.children.length > 0;
-  decksEmptyEl.hidden = has;
-  if (!has) decksEmptyEl.textContent = 'No decks available yet.';
+  const decks = data.decks || [];
+  // Exam-track panel (#1): shown only when the user picked an IELTS/TOEFL goal.
+  try {
+    const exam = await api('/api/exam');
+    if (exam && exam.target) decksListEl.appendChild(examCardEl(exam, decks));
+  } catch (e) { /* non-fatal */ }
+  decks.forEach(d => decksListEl.appendChild(deckCardEl(d)));
+  const tip = document.createElement('div');
+  tip.className = 'sub';
+  tip.style.marginTop = '12px';
+  tip.textContent = '💡 Forward or paste any English text to the bot and it becomes a deck.';
+  decksListEl.appendChild(tip);
+  decksEmptyEl.hidden = true;
+}
+
+// examCardEl builds the IELTS/TOEFL goal panel: estimated band/score + a button
+// that jumps straight into the matching exam deck.
+function examCardEl(exam, decks) {
+  const el = document.createElement('div');
+  el.className = 'card exam-card';
+  const big = exam.ready
+    ? '<div class="exam-estimate">' + esc(exam.estimate) +
+      (exam.scale === 'band' ? '<span class="exam-scale"> band</span>' : '') + '</div>'
+    : '<div class="exam-estimate exam-estimate-empty">—</div>';
+  el.innerHTML =
+    '<h2>🎓 ' + esc(exam.label) + ' goal</h2>' + big +
+    '<div class="sub">' + esc(exam.detail || '') +
+    (exam.ready ? ' · ' + exam.accuracy + '% quiz accuracy' : '') + '</div>' +
+    (exam.deckId ? '<button class="quiz-next" id="exam-study-btn">Study ' + esc(exam.deckName) + ' →</button>' : '');
+  const btn = el.querySelector('#exam-study-btn');
+  if (btn) btn.addEventListener('click', () => {
+    haptic('light');
+    const d = decks.find(x => x.id === exam.deckId) || { id: exam.deckId, name: exam.deckName };
+    openDeckDetail(d);
+  });
+  return el;
 }
 
 // renderDeckDetail builds the deck detail page: progress, Leitner box
@@ -1415,6 +1447,7 @@ function startDeckStudy(d) {
 const practiceBody = document.getElementById('practice-body');
 const PRACTICE_TITLES = {
   quiz: '🧩 Quiz', word: '📘 New word', idiom: '💬 Idiom', collocation: '🔗 Collocation',
+  story: '📖 Story', tip: '💡 Tip', pronounce: '🎙️ Pronounce',
 };
 
 function openPractice(kind) {
@@ -1422,7 +1455,93 @@ function openPractice(kind) {
   document.getElementById('practice-title').textContent = PRACTICE_TITLES[kind] || 'Practice';
   haptic('light');
   if (kind === 'quiz') loadQuizQuestion({ asked: 0, right: 0 });
+  else if (kind === 'pronounce') loadPronouncePractice();
   else loadPracticeCard(kind);
+}
+
+// loadPronouncePractice picks a word and lets the user record themselves saying
+// it; the clip is scored by the backend (Gemini transcription + match score).
+async function loadPronouncePractice() {
+  practiceBody.innerHTML = skeletonCards(1);
+  let data;
+  try { data = await api('/api/practice?kind=word'); }
+  catch (e) {
+    practiceBody.innerHTML = '<p class="empty">Could not load a word. Try again later.</p>';
+    return;
+  }
+  if (!data.available || !data.term) {
+    practiceBody.innerHTML = '<p class="empty">No word to practise yet — learn a few first!</p>';
+    return;
+  }
+  const term = data.term;
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
+    practiceBody.innerHTML = '<div class="card"><div class="word-term" style="font-size:22px">' + esc(term) + '</div>' +
+      '<div class="sub" style="margin-top:8px">Recording isn\'t supported here. Open the bot chat and use <b>/pronounce ' + esc(term) + '</b>.</div></div>';
+    return;
+  }
+  practiceBody.innerHTML =
+    '<div class="card"><div class="sub">Say this word clearly:</div>' +
+    '<div class="word-term" style="font-size:28px;margin-top:6px">' + esc(term) + '</div></div>' +
+    '<div class="chips"><button class="chip chip-on" id="pron-rec">🎙️ Hold to record</button>' +
+    '<button class="chip" id="pron-next">🔄 Another</button></div>' +
+    '<div id="pron-result" style="margin-top:12px"></div>';
+  document.getElementById('pron-next').addEventListener('click', () => { hapticSelect(); loadPronouncePractice(); });
+  wirePronounceRecorder(term);
+}
+
+function wirePronounceRecorder(term) {
+  const btn = document.getElementById('pron-rec');
+  const result = document.getElementById('pron-result');
+  let recorder = null, chunks = [], recording = false;
+
+  const start = async () => {
+    if (recording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorder = new MediaRecorder(stream);
+      chunks = [];
+      recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        submitPronounce(term, new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }), result, btn);
+      };
+      recorder.start();
+      recording = true;
+      haptic('light');
+      btn.textContent = '⏺️ Recording… release to score';
+      btn.classList.add('chip-on');
+    } catch (e) {
+      result.innerHTML = '<p class="empty">Microphone permission is needed to practise pronunciation.</p>';
+    }
+  };
+  const stop = () => {
+    if (recording && recorder) { recording = false; btn.textContent = '⏳ Scoring…'; recorder.stop(); }
+  };
+  btn.addEventListener('mousedown', start);
+  btn.addEventListener('touchstart', e => { e.preventDefault(); start(); });
+  btn.addEventListener('mouseup', stop);
+  btn.addEventListener('mouseleave', stop);
+  btn.addEventListener('touchend', e => { e.preventDefault(); stop(); });
+}
+
+async function submitPronounce(term, blob, result, btn) {
+  const form = new FormData();
+  form.append('target', term);
+  form.append('audio', blob, 'clip.webm');
+  try {
+    const res = await fetch('/api/pronounce', { method: 'POST', headers: { 'X-Init-Data': tg.initData }, body: form });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    hapticNotify(d.score >= 70 ? 'success' : 'warning');
+    result.innerHTML = '<div class="card"><div class="big" style="color:var(--accent)">' + (d.score | 0) + '%</div>' +
+      '<div style="margin-top:4px">' + esc(d.verdict || '') + '</div>' +
+      '<div class="sub" style="margin-top:6px">I heard: <i>' + esc(d.transcript || '—') + '</i></div></div>';
+  } catch (e) {
+    hapticNotify('error');
+    result.innerHTML = '<p class="empty">Could not score that. Try again in a quiet spot.</p>';
+  }
+  btn.textContent = '🎙️ Hold to record';
+  btn.classList.remove('chip-on');
 }
 
 async function loadPracticeCard(kind) {
@@ -1663,6 +1782,31 @@ function renderSettings(s) {
   Object.keys(TOGGLE_LABELS).forEach(k => { html += row(TOGGLE_LABELS[k], toggleHTML(k, !!s.toggles[k], TOGGLE_LABELS[k])); });
   html += '</div>';
 
+  // Review tuning — the FSRS desired-retention dial.
+  const retPct = Math.round((s.desired_retention || 0.9) * 100);
+  html += '<div class="card"><h2>Review tuning</h2>' +
+    '<div class="set-row"><span>Target recall</span><span id="ret-val">' + retPct + '%</span></div>' +
+    '<input id="set-retention" type="range" min="70" max="97" step="1" value="' + retPct + '" style="width:100%">' +
+    '<div class="sub">Higher = you remember more, but you get more reviews. 90% is the sweet spot most learners want.</div></div>';
+
+  // Exam goal — IELTS / TOEFL focus.
+  const exam = s.exam_target || '';
+  html += '<div class="card"><h2>Exam goal</h2><div class="chips" id="set-exam">';
+  [['', 'None'], ['ielts', 'IELTS'], ['toefl', 'TOEFL']].forEach(opt => {
+    html += '<button class="chip' + (opt[0] === exam ? ' chip-on' : '') + '" data-exam="' + opt[0] + '">' + opt[1] + '</button>';
+  });
+  html += '</div><div class="sub">Pick a target test to surface its band-targeted deck and exam practice in Study.</div></div>';
+
+  // Streak savers — banked tokens that auto-rescue a missed day.
+  html += '<div class="card"><h2>Streak savers</h2>' +
+    '<div class="set-row"><span>🧊 Savers banked</span><span>' + (s.streak_freezes || 0) + '</span></div>' +
+    '<div class="sub">A saver automatically protects your streak if you miss a day. Earn one at each streak milestone, or send <b>/streak</b> to the bot to buy more with Telegram Stars.</div></div>';
+
+  // Data export — your progress is portable, never locked in.
+  html += '<div class="card"><h2>Your data</h2>' +
+    row('Export your vocabulary &amp; schedule', '<button class="chip chip-on" id="set-export">Export</button>') +
+    '<div class="sub">Downloads everything you\'ve learned, with its FSRS memory state, as a JSON file.</div></div>';
+
   body.innerHTML = html;
 
   body.querySelectorAll('[data-level]').forEach(c => c.addEventListener('click', async () => {
@@ -1697,6 +1841,53 @@ function renderSettings(s) {
     if (await postSetting('interval', n)) lastInterval = n;
     else intv.value = lastInterval;
   });
+
+  const ret = document.getElementById('set-retention');
+  const retVal = document.getElementById('ret-val');
+  let lastRet = parseInt(ret.value, 10);
+  ret.addEventListener('input', () => { retVal.textContent = ret.value + '%'; });
+  ret.addEventListener('change', async () => {
+    const pct = Math.max(70, Math.min(97, parseInt(ret.value, 10)));
+    if (await postSetting('desired_retention', pct / 100)) {
+      lastRet = pct;
+    } else {
+      ret.value = lastRet; retVal.textContent = lastRet + '%';
+    }
+  });
+
+  body.querySelectorAll('[data-exam]').forEach(c => c.addEventListener('click', async () => {
+    const prev = body.querySelector('[data-exam].chip-on');
+    body.querySelectorAll('[data-exam]').forEach(x => x.classList.toggle('chip-on', x === c));
+    hapticSelect();
+    if (!await postSetting('exam_target', c.dataset.exam)) {
+      body.querySelectorAll('[data-exam]').forEach(x => x.classList.toggle('chip-on', x === prev));
+    } else if (views.decks) {
+      views.decks.dataset.ready = ''; // exam deck visibility may have changed
+    }
+  }));
+
+  document.getElementById('set-export').addEventListener('click', exportData);
+}
+
+// exportData downloads the user's full learning data as a JSON file.
+async function exportData() {
+  haptic('light');
+  try {
+    const data = await api('/api/export');
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'engram-export.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    hapticNotify('success');
+  } catch (e) {
+    hapticNotify('error');
+    if (tg.showAlert) tg.showAlert('Export failed. Please try again.');
+  }
 }
 
 function toggleHTML(key, on, label) {
@@ -1982,6 +2173,49 @@ document.addEventListener('touchend', function (e) {
 }, true);
 
 // ---------------------------------------------------------------------------
+// Known-word onboarding (#8): a one-time triage where the user marks the common
+// words they already know so study skips them.
+// ---------------------------------------------------------------------------
+async function maybeOnboard() {
+  let data;
+  try { data = await api('/api/onboarding?limit=40'); } catch (e) { return; }
+  if (!data || data.onboarded || !(data.words || []).length) return;
+  renderOnboarding(data.words);
+}
+
+function renderOnboarding(words) {
+  const known = new Set();
+  const ov = document.createElement('div');
+  ov.className = 'onboard-overlay';
+  const chips = words.map(w =>
+    '<button class="chip onboard-chip" data-term="' + esc(w.term) + '">' + esc(w.term) + '</button>'
+  ).join('');
+  ov.innerHTML =
+    '<div class="onboard-sheet">' +
+    '<h1>Which of these do you already know?</h1>' +
+    '<p class="sub">Tap every word you know well — we\'ll skip them so you only study what\'s new.</p>' +
+    '<div class="chips onboard-chips">' + chips + '</div>' +
+    '<div class="onboard-actions">' +
+    '<button class="chip" id="onboard-skip">I\'m a beginner</button>' +
+    '<button class="chip chip-on" id="onboard-done">Continue</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  ov.querySelectorAll('.onboard-chip').forEach(c => c.addEventListener('click', () => {
+    hapticSelect();
+    const t = c.dataset.term;
+    if (known.has(t)) { known.delete(t); c.classList.remove('chip-on'); }
+    else { known.add(t); c.classList.add('chip-on'); }
+  }));
+  const finish = async (terms) => {
+    try { await api('/api/onboarding', { method: 'POST', body: JSON.stringify({ known: terms }) }); } catch (e) { /* best-effort */ }
+    ov.remove();
+    if (loaders[currentView]) loaders[currentView]();
+  };
+  ov.querySelector('#onboard-skip').addEventListener('click', () => { haptic('light'); finish([]); });
+  ov.querySelector('#onboard-done').addEventListener('click', () => { haptic('light'); finish([...known]); });
+}
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 const loaders = {
@@ -2004,4 +2238,5 @@ const loaders = {
   let tab = await cloudGet('lastTab');
   if (!tab || !loaders[tab]) tab = 'profile';
   showView(tab);
+  maybeOnboard();
 })();

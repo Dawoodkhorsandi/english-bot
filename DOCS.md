@@ -50,7 +50,10 @@ internal/app/           — the coupled core (package app)
   schedule.go           — quiet hours, broadcast scheduler, daily review scheduler, daily tip scheduler, weekly digest scheduler
   prefs.go              — user_prefs Store methods, level/interval/pause/tip/feature-toggle helpers, SetFirstName, streak helpers
   tts.go                — pronunciation TTS generation (Gemini + espeak-ng fallback) and sendVoice helper
-  srs.go                — spaced-repetition SM-2-lite logic, review_schedule Store methods, review scheduler
+  srs.go                — spaced-repetition FSRS-5 scheduler (stability/difficulty) + desired-retention dial, review_schedule Store methods, ExportReviewData, review scheduler
+  streak.go             — streak savers: earn on milestones, midnight auto-rescue of a missed day, Telegram Stars purchase (sendInvoice/pre-checkout/successful-payment)
+  userdeck.go           — forward-to-deck: mine pasted/forwarded text (mineDeckTerms) into a personal deck (user_decks + deck_cards) with offline-dictionary definitions; deckMeta/allDeckMetas resolve curated + user decks
+  pronounce.go          — pronunciation check: /pronounce target + voice-note transcription (ai.ProviderChain.Transcribe → Gemini audio) and Levenshtein scoring; handleAPIPronounce backs /api/pronounce
   quiz.go               — quiz building (4 types + native poll), quiz_results, poll registry, quiz scheduler
   stats.go              — /stats computation (streaks, activity days, progressBar, formatStats), admin metrics
   admin.go              — admin panel: paginated /users list, user detail view, direct messaging to users
@@ -639,6 +642,9 @@ All messages use `parse_mode: HTML`.
 | `/tip [on\|off]` | Fires `sendChatAction(typing)`. No arg: on-demand grammar tip. `on`/`off`: toggles `user_prefs.tips_enabled`. (v1.15.0; v1.18.0: typing indicator) |
 | `/level [lvl]` | With an argument, sets difficulty directly; without, shows the current level + an inline keyboard (`handleLevel`). Button taps arrive as `callback_query`. (v1.4.0) |
 | `/stats` | Sends a progress summary with Unicode progress bars for streak and quiz accuracy; personalised greeting from `user_prefs.first_name`. When `WEB_APP_URL` is configured, includes a `📊 Full Dashboard` inline button that opens the Telegram Mini App. (`UserStats` / `formatStats(st, firstName)`) (v1.5.0; v1.18.0: bars, greeting, mini-app button) |
+| `/pronounce [word]` | Sets a pronunciation target; the user's next voice note is downloaded (`telegram.DownloadFile`), transcribed (`ProviderChain.Transcribe` → Gemini audio) and scored against the target (`scorePronunciation`, Levenshtein). Also backs `POST /api/pronounce`. (`handlePronounce`, v1.47.0) |
+| `/streak` | Shows the user's streak-saver balance with inline "Buy" buttons (the `streakbuy:` callback prefix sends a Stars invoice). A saver auto-rescues one missed day. (`handleStreak`, v1.43.0) |
+| `/buystreak` | Sends a Telegram Stars (`XTR`) invoice for N streak savers (`/buystreak [count]`, default 1). On `successful_payment` the savers are credited via `Store.AddStreakFreezes`. (`handleBuyStreak`, v1.43.0) |
 | `/app` | Sends a button that opens the Telegram Mini App hub (dashboard, vocabulary, decks, review, leaderboard). No-op message when `WEB_APP_URL` is unset. (v1.24.0) |
 | `/login` | Mints a one-time short login code for the mobile app and sends it in chat (`Store.CreateLoginCode`, rate-limited per chat). The user enters it in the app, which exchanges it via `POST /api/auth/telegram/verify` for a JWT. Delivering the code over the already-authenticated chat removes the Mini App round-trip and clipboard step. Valid 5 minutes. (v1.37.0) |
 | `/quiz` | Sends a native Telegram quiz poll (`sendPoll type:quiz`); Telegram highlights the correct answer after the user taps. The `poll_answer` update is routed to `handleQuizPollAnswer` which grades the result and feeds SRS. Falls back to inline keyboard if `sendPoll` fails. (v1.9.0; v1.18.0: native polls) |
@@ -838,8 +844,11 @@ and the `/api/decks/study` payload surface these fields; `/api/decks/detail`
 returns the per-deck Leitner box distribution for the deck detail page. Bundled:
 **504 Absolutely Essential Words** (def + example + Persian), **Barron's GRE
 333** (def + mnemonic; Persian/pronunciation AI-filled), and curated **Common
-Phrasal Verbs**, **Business & Workplace English**, **Academic Word List** and
-**IELTS/TOEFL High-Frequency** decks.
+Phrasal Verbs**, **Business & Workplace English**, **Academic Word List**,
+**IELTS** and **TOEFL High-Frequency** (exam-track, tagged), plus **Common
+English Idioms**, **Travel & Survival English**, **Commonly Confused Words**,
+**Irregular Verbs**, **Everyday Spoken English** and **Job Interview English**
+decks.
 
 > Deck word lists are community reproductions of copyrighted study books — fine
 > for personal/educational use; review licensing before public distribution.

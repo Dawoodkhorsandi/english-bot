@@ -72,6 +72,14 @@ func startWebServer(store *Store, notifier telegram.Notifier, chain *ai.Provider
 	mux.HandleFunc("/api/decks/swipe", withUser(store, handleAPIDeckSwipe))
 	mux.HandleFunc("/api/decks/detail", withUser(store, handleAPIDeckDetail))
 	mux.HandleFunc("/api/settings", withUser(store, handleAPISettings))
+	mux.HandleFunc("/api/export", withUser(store, handleAPIExport))
+	mux.HandleFunc("/api/onboarding", withUser(store, handleAPIOnboarding))
+	mux.HandleFunc("/api/exam", withUser(store, handleAPIExam))
+	// Pronunciation scoring: upload a recorded clip, get a match score. Needs the
+	// AI chain (Gemini audio), captured here to keep the apiHandler signature uniform.
+	mux.HandleFunc("/api/pronounce", withUser(store, func(w http.ResponseWriter, r *http.Request, chatID int64, st *Store) {
+		handleAPIPronounce(w, r, chatID, st, chain)
+	}))
 	mux.HandleFunc("/api/content", withUser(store, handleAPIContent))
 	mux.HandleFunc("/api/quizzes", withUser(store, handleAPIQuizzes))
 	mux.HandleFunc("/api/vocab/card", withUser(store, handleAPIVocabCard))
@@ -815,12 +823,15 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request, chatID int64, sto
 		levelLabels[l] = levelLabel(l)
 	}
 	writeJSON(w, map[string]interface{}{
-		"level":       p.Level,
-		"levels":      config.AllLevels,
-		"levelLabels": levelLabels,
-		"name":        store.GetDisplayName(chatID),
-		"paused":      p.Paused,
-		"interval":    p.Interval,
+		"level":             p.Level,
+		"levels":            config.AllLevels,
+		"levelLabels":       levelLabels,
+		"name":              store.GetDisplayName(chatID),
+		"paused":            p.Paused,
+		"interval":          p.Interval,
+		"desired_retention": p.DesiredRetention,
+		"streak_freezes":    store.GetStreakFreezes(chatID),
+		"exam_target":       p.ExamTarget,
 		"toggles": map[string]bool{
 			"tts":          p.TTSEnabled,
 			"tips":         p.TipsEnabled,
@@ -833,6 +844,76 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request, chatID int64, sto
 			"digest":       p.DigestEnabled,
 		},
 	})
+}
+
+// handleAPIExport returns the user's learning data (vocabulary + FSRS schedule)
+// as a downloadable JSON document, so progress is never locked in.
+func handleAPIExport(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	words, err := store.ExportReviewData(chatID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	p, _ := store.GetPrefs(chatID)
+	w.Header().Set("Content-Disposition", `attachment; filename="engram-export.json"`)
+	writeJSON(w, map[string]interface{}{
+		"app":               "Engram — English Muscle Memory",
+		"level":             p.Level,
+		"desired_retention": p.DesiredRetention,
+		"word_count":        len(words),
+		"words":             words,
+	})
+}
+
+// handleAPIOnboarding drives known-word onboarding: GET returns whether the user
+// has finished plus a batch of the most common words to triage; POST files the
+// words they already know into the mastered box (so study skips them) and marks
+// onboarding complete.
+func handleAPIOnboarding(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	if r.Method == http.MethodPost {
+		var body struct {
+			Known []string `json:"known"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if err := store.MarkDeckKnown(chatID, body.Known, time.Now()); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if err := store.SetOnboarded(chatID); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]interface{}{"ok": true, "marked": len(body.Known)})
+		return
+	}
+
+	limit := 30
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 100 {
+		limit = n
+	}
+	words, err := store.OnboardingWords(chatID, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"onboarded": store.IsOnboarded(chatID),
+		"words":     words,
+	})
+}
+
+// handleAPIExam returns the user's exam-track summary (target deck + estimated
+// band/score) for the IELTS/TOEFL panel in Study.
+func handleAPIExam(w http.ResponseWriter, r *http.Request, chatID int64, store *Store) {
+	status, err := store.ExamStatus(chatID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, status)
 }
 
 // updateAPISetting applies one {key, value} change.
@@ -879,6 +960,20 @@ func updateAPISetting(w http.ResponseWriter, r *http.Request, chatID int64, stor
 			n = 1440
 		}
 		err = store.SetInterval(chatID, n)
+	case "desired_retention":
+		var f float64
+		if json.Unmarshal(body.Value, &f) != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		err = store.SetDesiredRetention(chatID, f)
+	case "exam_target":
+		var t string
+		if json.Unmarshal(body.Value, &t) != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		err = store.SetExamTarget(chatID, t)
 	default:
 		setter, ok := settingSetters(store)[body.Key]
 		if !ok {

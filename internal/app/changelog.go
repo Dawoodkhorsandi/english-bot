@@ -486,4 +486,86 @@ var Changelogs = []ChangelogEntry{
 			"rate limiter; /api/feed/next stays for the older client. " +
 			"Silent: backend-only; the Telegram bot is unchanged.",
 	},
+	{
+		Version: "1.42.0",
+		Silent:  true,
+		Text: "FSRS scheduler + retention dial + data export. review_schedule gains " +
+			"stability/difficulty/last_review and the SM-2 math in srs.go is replaced by " +
+			"FSRS-5 (fsrsW weights, power forgetting curve); ApplyReviewKnown/Forgot now fold " +
+			"a grade into FSRS state and reschedule at the user's desired_retention " +
+			"(new user_prefs column, 0.70–0.97, default 0.9; GET/SetDesiredRetention). Legacy " +
+			"SM-2 rows are bootstrapped from their interval on the next grade. New GET /api/export " +
+			"(Store.ExportReviewData) returns the user's vocab + FSRS schedule as a downloadable " +
+			"JSON. /api/settings GET/POST carries desired_retention. " +
+			"Silent: backend + Mini App/app UI; the bot's chat behaviour is unchanged.",
+	},
+	{
+		Version: "1.43.0",
+		Silent:  true,
+		Text: "Streak savers (streak.go). New user_prefs.streak_freezes; users earn a saver on " +
+			"each streak milestone (checkStreakCelebration) and the daily-review scheduler now runs " +
+			"protectStreaks at local midnight, spending one saver to fill a missed day so a live " +
+			"streak survives one slip (idempotent). /streak shows the balance with Stars buy " +
+			"buttons (streakbuy: callback); /buystreak sends a Telegram Stars (XTR) invoice via " +
+			"telegram.SendInvoice; pre_checkout_query is now an allowed update and answered by " +
+			"handlePreCheckout; successful_payment credits savers (handleSuccessfulPayment). " +
+			"/api/settings exposes streak_freezes. " +
+			"Silent: surfaced quietly until Stars pricing is finalised.",
+	},
+	{
+		Version: "1.44.0",
+		Silent:  true,
+		Text: "Frequency-ranked study + known-word onboarding. deck_cards gains frequency_rank " +
+			"and DeckStudy now orders new cards by it (common words first, falling back to " +
+			"ordering). New user_prefs.onboarded plus GET/POST /api/onboarding: the GET returns a " +
+			"frequency-ordered batch of unseen 504 essential words (Store.OnboardingWords) and the " +
+			"POST files the words a user already knows straight into the mastered Leitner box " +
+			"(Store.MarkDeckKnown) and flags onboarding done. " +
+			"Silent: Mini App shows a one-time triage overlay and the app a one-time screen; the " +
+			"bot's chat behaviour is unchanged.",
+	},
+	{
+		Version: "1.45.0",
+		Silent:  true,
+		Text: "IELTS/TOEFL exam track. New user_prefs.exam_target plus a Exam tag on curated decks " +
+			"(the IELTS deck, a new bundled TOEFL deck) and examDeckFor(). GET /api/exam " +
+			"(Store.ExamStatus) returns the target deck and a motivational band/score estimate " +
+			"mapped from quiz accuracy (examEstimate: IELTS 4.0–8.5 band, TOEFL 40–120 score), " +
+			"gated behind a minimum sample. /api/settings GET/POST carries exam_target. " +
+			"Silent: Mini App Study + app Study show an exam panel and settings an exam-goal " +
+			"selector; the bot's chat behaviour is unchanged.",
+	},
+	{
+		Version: "1.46.0",
+		Silent:  true,
+		Text: "Forward-to-deck (userdeck.go). Sending the bot a long passage (≥12 words) now mines " +
+			"its less-common words (mineDeckTerms), looks each up in the offline English–Persian " +
+			"dictionary, and builds a personal Leitner deck (new user_decks table; cards reuse " +
+			"deck_cards under a per-user u<chatID>_<n> id). Decks()/DeckDetail() resolve curated + " +
+			"user decks via allDeckMetas/deckMeta, so personal decks appear in the Mini App and app " +
+			"Study tab with the same study/progress flow. " +
+			"Silent: chat reply is a new deck confirmation; existing single-word lookup still handles " +
+			"short messages.",
+	},
+	{
+		Version: "1.47.0",
+		Silent:  true,
+		Text: "Pronunciation check (pronounce.go). /pronounce <word> sets a target; the user's next " +
+			"voice note is downloaded (telegram.DownloadFile), transcribed by Gemini audio " +
+			"(GeminiProvider.Transcribe / ProviderChain.Transcribe) and scored against the target " +
+			"with a Levenshtein similarity (scorePronunciation). New POST /api/pronounce " +
+			"(multipart target+audio) gives the apps the same scoring. Telegram Message now carries " +
+			"voice; pre_checkout_query already added earlier. " +
+			"Silent: needs a Gemini key for audio; surfaced quietly while we tune scoring thresholds.",
+	},
+	{
+		Version: "1.48.0",
+		Silent:  true,
+		Text: "Six new curated decks (255 cards, English + Persian): Common English Idioms, " +
+			"Travel & Survival English, Commonly Confused Words, Irregular Verbs, Everyday Spoken " +
+			"English, and Job Interview English. Added as embedded webapp/decks/*.json with " +
+			"deckRegistry entries; SeedDecks ingests them and they appear in the Mini App and app " +
+			"Study tab. " +
+			"Silent: content-only; no behaviour change.",
+	},
 }
