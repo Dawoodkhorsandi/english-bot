@@ -128,7 +128,7 @@ func mineDeckTerms(text string) []string {
 	seen := map[string]bool{}
 	var terms []string
 	for _, raw := range strings.FieldsFunc(text, func(r rune) bool {
-		return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '\'')
+		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && r != '\''
 	}) {
 		w := strings.ToLower(strings.Trim(raw, "'"))
 		if len(w) < 4 || seen[w] || commonWords[w] {

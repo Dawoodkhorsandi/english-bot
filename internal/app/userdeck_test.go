@@ -35,7 +35,7 @@ func TestCreateUserDeck(t *testing.T) {
 
 	const chatID = int64(3)
 	cards := []deckCard{
-		{Term: "ubiquitous", Definition: "present everywhere", Persian: "همه‌جا حاضر"},
+		{Term: "ubiquitous", Definition: "present everywhere", Persian: "فراگیر"},
 		{Term: "ephemeral", Definition: "short-lived", Persian: "زودگذر"},
 	}
 	deckID, n, err := store.CreateUserDeck(chatID, "My deck #1", cards, time.Now())
